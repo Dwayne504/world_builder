@@ -10,7 +10,7 @@ use crate::domain::{ProjectId, WorkingName};
 use crate::package::{self, layout, manifest::Manifest, PackagePaths};
 use crate::persistence::lock::{self, LockGuard};
 use crate::persistence::worker::InitialProjectMeta;
-use crate::persistence::ProjectDbWorker;
+use crate::persistence::{PersistenceError, ProjectDbWorker};
 
 use super::error::AppError;
 use super::state::{AppState, OpenProject, ProjectSummary};
@@ -80,15 +80,7 @@ impl ProjectService {
     ) -> Result<ProjectSummary, AppError> {
         let paths = package::layout::validate_structure(package_root)?;
         let manifest = Manifest::read(&paths.manifest_path())?;
-
-        if manifest.format_version > package::FORMAT_VERSION {
-            return Err(AppError::Package(
-                package::PackageError::UnsupportedFormatVersion {
-                    found: manifest.format_version,
-                    supported: package::FORMAT_VERSION,
-                },
-            ));
-        }
+        ensure_manifest_is_writable(&manifest)?;
 
         let lock_guard = lock::acquire(
             &paths.lock_path(),
@@ -246,6 +238,8 @@ impl ProjectService {
         destination_dir: &Path,
         new_working_name: Option<&str>,
     ) -> Result<ProjectSummary, AppError> {
+        let backup_manifest = crate::backup_recovery::validate_backup(backup_path)?;
+        ensure_manifest_is_writable(&backup_manifest)?;
         let new_root = crate::backup_recovery::restore_as_copy(
             backup_path,
             destination_dir,
@@ -284,6 +278,35 @@ fn summary_from_worker(
         created_at: meta.created_at,
         updated_at: meta.updated_at,
     })
+}
+
+fn ensure_manifest_is_writable(manifest: &Manifest) -> Result<(), AppError> {
+    if manifest.format_version > package::FORMAT_VERSION {
+        return Err(AppError::Package(
+            package::PackageError::UnsupportedFormatVersion {
+                found: manifest.format_version,
+                supported: package::FORMAT_VERSION,
+            },
+        ));
+    }
+
+    if manifest.schema_version > crate::persistence::migrations::CURRENT_SCHEMA_VERSION {
+        return Err(AppError::Persistence(
+            PersistenceError::UnsupportedSchemaVersion {
+                found: manifest.schema_version,
+                supported: crate::persistence::migrations::CURRENT_SCHEMA_VERSION,
+            },
+        ));
+    }
+
+    if manifest.schema_version < crate::persistence::migrations::CURRENT_SCHEMA_VERSION {
+        return Err(AppError::Persistence(PersistenceError::MigrationRequired {
+            found: manifest.schema_version,
+            supported: crate::persistence::migrations::CURRENT_SCHEMA_VERSION,
+        }));
+    }
+
+    Ok(())
 }
 
 fn register_open_project(
@@ -427,5 +450,47 @@ mod tests {
 
         ProjectService::close_project(&state, created.project_id).unwrap();
         ProjectService::close_project(&state, restored.project_id).unwrap();
+    }
+
+    #[test]
+    fn older_schema_package_is_refused_before_lock_or_migration() {
+        let state = AppState::default();
+        let dir = tempdir().unwrap();
+        let created = ProjectService::create_project(&state, dir.path(), "Tortuga").unwrap();
+        let package_path = PathBuf::from(&created.package_path);
+        ProjectService::close_project(&state, created.project_id).unwrap();
+
+        let paths = PackagePaths::new(&package_path);
+        let mut manifest = Manifest::read(&paths.manifest_path()).unwrap();
+        manifest.schema_version = 0;
+        manifest.write(&paths.manifest_path()).unwrap();
+
+        let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
+        conn.pragma_update(None, "user_version", 0).unwrap();
+        conn.execute(
+            "UPDATE project_meta SET schema_version = 0 WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let err = ProjectService::open_project(&state, &package_path, false).unwrap_err();
+        assert_eq!(err.kind(), "migration_required");
+        assert!(!paths.lock_path().exists());
+
+        let manifest_after = Manifest::read(&paths.manifest_path()).unwrap();
+        assert_eq!(manifest_after.schema_version, 0);
+
+        let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
+        let user_version = crate::persistence::migrations::user_version(&conn).unwrap();
+        let schema_version: i64 = conn
+            .query_row(
+                "SELECT schema_version FROM project_meta WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_version, 0);
+        assert_eq!(schema_version, 0);
     }
 }

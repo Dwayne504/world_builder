@@ -46,7 +46,10 @@ impl AppError {
                 "identity_mismatch"
             }
             AppError::Persistence(PersistenceError::UnsupportedSchemaVersion { .. }) => {
-                "unsupported_format_version"
+                "unsupported_schema_version"
+            }
+            AppError::Persistence(PersistenceError::MigrationRequired { .. }) => {
+                "migration_required"
             }
             AppError::Persistence(_) => "persistence_error",
             AppError::Backup(_) => "backup_error",

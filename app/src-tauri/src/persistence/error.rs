@@ -17,6 +17,12 @@ pub enum PersistenceError {
     UnsupportedSchemaVersion { found: i64, supported: i64 },
 
     #[error(
+        "database schema version {found} is older than the writable schema version {supported}; \
+         refusing to auto-migrate until coordinated manifest publication exists"
+    )]
+    MigrationRequired { found: i64, supported: i64 },
+
+    #[error(
         "manifest Project ID {manifest} does not match the database Project ID {database}; \
          refusing to open"
     )]

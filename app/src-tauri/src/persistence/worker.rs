@@ -133,7 +133,11 @@ impl ProjectDbWorker {
     ) -> Result<Connection, PersistenceError> {
         let conn = Connection::open(db_path)?;
         pragmas::apply(&conn)?;
-        migrations::migrate(&conn)?;
+        if initial.is_some() {
+            migrations::migrate(&conn)?;
+        } else {
+            migrations::require_current_schema(&conn)?;
+        }
 
         let existing: Option<(String, i64, i64, i64)> = conn
             .query_row(
@@ -509,5 +513,46 @@ mod tests {
         let err =
             ProjectDbWorker::spawn(dir.path().join("project.sqlite"), wrong_id, None).unwrap_err();
         assert!(matches!(err, PersistenceError::ProjectIdMismatch { .. }));
+    }
+
+    #[test]
+    fn older_existing_schema_is_refused_without_mutating_version_markers() {
+        let dir = tempdir().unwrap();
+        let project_id = ProjectId::new();
+        {
+            let worker = spawn_fresh(dir.path(), project_id);
+            worker.shutdown().unwrap();
+        }
+
+        let db_path = dir.path().join("project.sqlite");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.pragma_update(None, "user_version", 0).unwrap();
+        conn.execute(
+            "UPDATE project_meta SET schema_version = 0 WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let err = ProjectDbWorker::spawn(db_path.clone(), project_id, None).unwrap_err();
+        assert!(matches!(
+            err,
+            PersistenceError::MigrationRequired {
+                found: 0,
+                supported: migrations::CURRENT_SCHEMA_VERSION,
+            }
+        ));
+
+        let conn = Connection::open(&db_path).unwrap();
+        let user_version = migrations::user_version(&conn).unwrap();
+        let schema_version: i64 = conn
+            .query_row(
+                "SELECT schema_version FROM project_meta WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_version, 0);
+        assert_eq!(schema_version, 0);
     }
 }

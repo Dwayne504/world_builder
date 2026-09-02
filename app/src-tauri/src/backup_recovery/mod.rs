@@ -246,17 +246,47 @@ fn rewrite_identity(
 }
 
 fn canonical_or_lexical(path: &Path) -> Result<PathBuf, std::io::Error> {
-    if path.exists() {
-        return path.canonicalize();
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                normalized.push(component)
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+        }
     }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    Ok(canonical_or_lexical(parent)?.join(path.file_name().unwrap_or_default()))
+    let mut existing = normalized.as_path();
+    let mut tail = Vec::new();
+    while !existing.exists() {
+        tail.push(existing.file_name().unwrap().to_os_string());
+        existing = existing.parent().unwrap_or_else(|| Path::new("/"));
+    }
+    let mut resolved = existing.canonicalize()?;
+    for component in tail.iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
 }
 
 fn ensure_outside_live_package(candidate: &Path, live: &PackagePaths) -> Result<(), BackupError> {
     let candidate = canonical_or_lexical(candidate)?;
     let root = canonical_or_lexical(&live.root)?;
-    if candidate == root || candidate.starts_with(&root) {
+    let final_path = candidate.join("backup-output.wcbackup");
+    let staging_path = candidate.join(".backup-output.wcbackup.creating");
+    if candidate == root
+        || candidate.starts_with(&root)
+        || final_path.starts_with(&root)
+        || staging_path.starts_with(&root)
+    {
         return Err(BackupError::UnsafePath(candidate.display().to_string()));
     }
     Ok(())
@@ -265,7 +295,12 @@ fn ensure_outside_live_package(candidate: &Path, live: &PackagePaths) -> Result<
 fn ensure_restore_destination_safe(backup: &Path, destination: &Path) -> Result<(), BackupError> {
     let backup = canonical_or_lexical(backup)?;
     let destination = canonical_or_lexical(destination)?;
-    if destination == backup || destination.starts_with(&backup) || backup.starts_with(&destination)
+    let final_path = destination.join("restored.wcproj");
+    let staging_path = destination.join(".restore.creating");
+    if destination == backup
+        || destination.starts_with(&backup)
+        || final_path.starts_with(&backup)
+        || staging_path.starts_with(&backup)
     {
         return Err(BackupError::UnsafePath(destination.display().to_string()));
     }
@@ -389,6 +424,30 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Arak Committed");
 
+        worker.shutdown().unwrap();
+    }
+
+    #[test]
+    fn prospective_normalization_collapses_nonexistent_parent_traversal() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("safe/../sibling/new-output");
+        assert_eq!(
+            canonical_or_lexical(&path).unwrap(),
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("sibling/new-output")
+        );
+    }
+
+    #[test]
+    fn containment_allows_a_safe_sibling_and_rejects_a_nested_destination() {
+        let dir = tempdir().unwrap();
+        let (_, paths, worker) = make_project(dir.path(), "Tortuga");
+        assert!(ensure_outside_live_package(&dir.path().join("backups"), &paths).is_ok());
+        assert!(
+            ensure_outside_live_package(&paths.assets_dir().join("../nested"), &paths).is_err()
+        );
         worker.shutdown().unwrap();
     }
 }
