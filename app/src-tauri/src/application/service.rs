@@ -50,7 +50,7 @@ impl ProjectService {
             );
             manifest.write(&paths.manifest_path())?;
 
-            let lock_guard = lock::acquire(&paths.lock_path(), project_id)?;
+            let lock_guard = lock::acquire(&paths.lock_path(), project_id, false)?;
 
             let summary = summary_from_worker(&worker, &paths)?;
 
@@ -90,10 +90,11 @@ impl ProjectService {
             ));
         }
 
-        if force_stale_lock_recovery {
-            lock::recover_stale_lock(&paths.lock_path())?;
-        }
-        let lock_guard = lock::acquire(&paths.lock_path(), manifest.project_id)?;
+        let lock_guard = lock::acquire(
+            &paths.lock_path(),
+            manifest.project_id,
+            force_stale_lock_recovery,
+        )?;
 
         let result = (|| -> Result<(ProjectDbWorker, ProjectSummary), AppError> {
             let worker = ProjectDbWorker::spawn(paths.db_path(), manifest.project_id, None)?;

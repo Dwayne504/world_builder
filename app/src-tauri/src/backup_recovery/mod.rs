@@ -103,11 +103,11 @@ pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
             backup_root.display().to_string(),
         ));
     }
-    let db_project_id: String = conn
+    let (db_project_id, db_format, db_schema): (String, i64, i64) = conn
         .query_row(
-            "SELECT project_id FROM project_meta WHERE id = 1",
+            "SELECT project_id, format_version, schema_version FROM project_meta WHERE id = 1",
             [],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(|_| BackupError::CorruptSnapshot(backup_root.display().to_string()))?;
     let db_project_id = ProjectId::parse(&db_project_id)
@@ -117,6 +117,15 @@ pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
             manifest: manifest.project_id,
             database: db_project_id,
         });
+    }
+    let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if db_format != manifest.format_version
+        || db_schema != manifest.schema_version
+        || user_version != db_schema
+    {
+        return Err(BackupError::CorruptSnapshot(
+            backup_root.display().to_string(),
+        ));
     }
 
     Ok(manifest)
@@ -149,19 +158,21 @@ pub fn restore_as_copy(
         copy_dir_contents(&backup_paths.assets_dir(), &new_paths.assets_dir())?;
 
         let new_project_id = ProjectId::new();
+        let restored_at = chrono::Utc::now();
         rewrite_identity(
             &new_paths.db_path(),
             new_project_id,
             &working_name,
             backup_manifest.project_id,
             backup_root,
+            restored_at,
         )?;
 
         let new_manifest = Manifest {
             project_id: new_project_id,
             format_version: backup_manifest.format_version,
             schema_version: backup_manifest.schema_version,
-            created_at: chrono::Utc::now(),
+            created_at: restored_at,
             working_name_cache: working_name.clone(),
             restored_from_project_id: Some(backup_manifest.project_id),
             restored_from_backup_id: Some(
@@ -199,6 +210,7 @@ fn rewrite_identity(
     working_name: &str,
     restored_from_project_id: ProjectId,
     backup_root: &Path,
+    restored_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), BackupError> {
     let mut conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")?;
@@ -207,13 +219,14 @@ fn rewrite_identity(
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown-backup");
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = restored_at.to_rfc3339();
     let changed = tx.execute(
         "UPDATE project_meta SET
             project_id = ?1,
             working_name = ?2,
             restored_from_project_id = ?3,
             restored_from_backup_id = ?4,
+            created_at = ?5,
             updated_at = ?5
          WHERE id = 1",
         rusqlite::params![

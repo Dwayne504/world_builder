@@ -179,6 +179,9 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const [closeError, setCloseError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const approvedNativeClose = useRef(false);
+  const saveStateRef = useRef(rename.saveState);
+  const closeInFlight = useRef<Promise<void> | null>(null);
+  saveStateRef.current = rename.saveState;
 
   async function handleCreateBackup() {
     setBusy(true);
@@ -193,34 +196,46 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
     }
   }
 
-  const closeAfterBackend = useCallback(async () => {
-    setBusy(true);
-    setCloseError(null);
-    try {
-      await closeProject(project.projectId);
-      onClosed();
-      if (isTauriWindow()) {
-        approvedNativeClose.current = true;
-        await getCurrentWindow().close();
+  const closeAfterBackend = useCallback(
+    (exitWindow: boolean): Promise<void> => {
+      if (closeInFlight.current) {
+        return closeInFlight.current;
       }
-    } catch (err) {
-      setCloseError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [onClosed, project.projectId]);
+      const close = (async () => {
+        setBusy(true);
+        setCloseError(null);
+        try {
+          await closeProject(project.projectId);
+          onClosed();
+          if (exitWindow && isTauriWindow()) {
+            approvedNativeClose.current = true;
+            await getCurrentWindow().close();
+          }
+        } catch (err) {
+          setCloseError(errorMessage(err));
+        } finally {
+          setBusy(false);
+        }
+      })().finally(() => {
+        closeInFlight.current = null;
+      });
+      closeInFlight.current = close;
+      return close;
+    },
+    [onClosed, project.projectId],
+  );
 
   async function handleClose() {
     if (decideClose(rename.saveState) === "confirm-unsaved") {
       setCloseWarning("This Project has unsaved changes. Retry saving or discard before closing.");
       return;
     }
-    await closeAfterBackend();
+    await closeAfterBackend(false);
   }
 
   function handleForceCloseDiscarding() {
     setCloseWarning(null);
-    void closeAfterBackend();
+    void closeAfterBackend(false);
   }
 
   useEffect(() => {
@@ -235,19 +250,19 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           return;
         }
         event.preventDefault();
-        if (decideClose(rename.saveState) === "confirm-unsaved") {
+        if (decideClose(saveStateRef.current) === "confirm-unsaved") {
           setCloseWarning(
             "This Project has unsaved changes. Retry saving or discard before closing.",
           );
         } else {
-          void closeAfterBackend();
+          void closeAfterBackend(true);
         }
       })
       .then((listener) => {
         unlisten = listener;
       });
     return () => unlisten?.();
-  }, [closeAfterBackend, rename.saveState]);
+  }, [closeAfterBackend]);
 
   return (
     <main className="container">

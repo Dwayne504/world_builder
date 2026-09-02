@@ -75,6 +75,14 @@ Types, Entries, Fields, Relationships, Spatial, Chapters/Story Units, TipTap
 prose editing, search/FTS, Tags/Roles/Statuses, Archive/Trash UI, final
 Recent/Pinned navigation, and any final visual design system.
 
+### Manual native-close verification
+
+In a packaged Tauri build, verify title-bar and OS close shortcuts: clean Projects
+close their backend session before the window exits; dirty, saving, and failed
+renames keep the window open until an explicit discard; backend-close failures
+remain visible and do not exit; and the in-app **Close Project** button returns
+to Home without exiting the application.
+
 ### Engineering spike notes affecting later slices
 
 * **Project locking is age-based, not PID-liveness-based.** Cross-platform
@@ -97,4 +105,3 @@ Recent/Pinned navigation, and any final visual design system.
 * **No file-picker dialogs are used yet.** The minimal UI takes filesystem
   paths as plain text input to avoid adding a dialog plugin dependency before
   it is genuinely needed.
-
