@@ -152,6 +152,7 @@ pub fn acquire(
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(guard_path(lock_path))?;
     if let Err(error) = guard.try_lock() {
         let info = read_metadata(lock_path)?;
