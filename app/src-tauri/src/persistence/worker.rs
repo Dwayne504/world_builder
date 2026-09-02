@@ -144,15 +144,16 @@ impl ProjectDbWorker {
         expected_project_id: ProjectId,
         initial: Option<InitialProjectMeta>,
     ) -> Result<Connection, PersistenceError> {
+        let is_initializing = initial.is_some();
         let conn = Connection::open_with_flags(
             db_path,
-            if initial.is_some() {
+            if is_initializing {
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
             } else {
                 OpenFlags::SQLITE_OPEN_READ_WRITE
             },
         )?;
-        if initial.is_some() {
+        if is_initializing {
             pragmas::apply(&conn)?;
             migrations::migrate(&conn)?;
         } else {
@@ -164,7 +165,7 @@ impl ProjectDbWorker {
         match (existing, initial) {
             (Some(_), _) => {
                 validate_existing_project_meta(&conn, expected_project_id)?;
-                if initial.is_none() {
+                if !is_initializing {
                     pragmas::apply(&conn)?;
                 }
                 Ok(conn)
