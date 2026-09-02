@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
-use crate::domain::ProjectId;
+use crate::domain::{ProjectId, WorkingName};
 use crate::package::{layout, manifest::Manifest, PackagePaths};
 use crate::persistence::ProjectDbWorker;
 
@@ -28,34 +28,49 @@ pub fn create_backup(
     live_paths: &PackagePaths,
     backup_root: &Path,
 ) -> Result<PathBuf, BackupError> {
-    let manifest = Manifest::read(&live_paths.manifest_path())?;
-    let project_dir = backup_root.join(manifest.project_id.to_string());
+    ensure_outside_live_package(backup_root, live_paths)?;
+    let project_dir = backup_root.join(
+        Manifest::read(&live_paths.manifest_path())?
+            .project_id
+            .to_string(),
+    );
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ").to_string();
     let backup_root_path = project_dir.join(format!("{stamp}.wcbackup"));
-
-    let backup_paths = layout::create_skeleton(&backup_root_path)?;
+    let staging_path = project_dir.join(format!(
+        ".{stamp}.wcbackup.creating-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let backup_paths = layout::create_skeleton(&staging_path)?;
 
     let result = (|| -> Result<(), BackupError> {
         // Consistent snapshot via the Online Backup API, run against the
         // live connection on its own worker thread.
-        worker.backup_to(backup_paths.db_path())?;
+        let snapshot = worker.backup_to(backup_paths.db_path())?;
 
         // Copy the manifest describing the *source* Project; restore
         // rewrites identity on the destination copy, never here.
-        fs::copy(live_paths.manifest_path(), backup_paths.manifest_path())?;
+        let mut manifest = Manifest::read(&live_paths.manifest_path())?;
+        manifest.project_id = snapshot.project_id;
+        manifest.working_name_cache = snapshot.working_name;
+        manifest.format_version = snapshot.format_version;
+        manifest.schema_version = snapshot.schema_version;
+        manifest.write(&backup_paths.manifest_path())?;
 
         copy_dir_contents(&live_paths.assets_dir(), &backup_paths.assets_dir())?;
         // `staging/` is intentionally left empty: staged imports are
         // recoverable-but-incomplete and are not portable authored content.
 
-        validate_backup(&backup_root_path)?;
+        validate_backup(&staging_path)?;
         Ok(())
     })();
 
     match result {
-        Ok(()) => Ok(backup_root_path),
+        Ok(()) => {
+            fs::rename(&staging_path, &backup_root_path)?;
+            Ok(backup_root_path)
+        }
         Err(e) => {
-            let _ = fs::remove_dir_all(&backup_root_path);
+            let _ = fs::remove_dir_all(&staging_path);
             Err(e)
         }
     }
@@ -68,6 +83,11 @@ pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
     let paths = layout::validate_structure(backup_root)
         .map_err(|_| BackupError::NotABackup(backup_root.display().to_string()))?;
     let manifest = Manifest::read(&paths.manifest_path())?;
+    if manifest.format_version > crate::package::FORMAT_VERSION
+        || manifest.schema_version > crate::persistence::migrations::CURRENT_SCHEMA_VERSION
+    {
+        return Err(BackupError::NotABackup(backup_root.display().to_string()));
+    }
 
     if !paths.db_path().is_file() {
         return Err(BackupError::CorruptSnapshot(
@@ -83,11 +103,11 @@ pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
             backup_root.display().to_string(),
         ));
     }
-    let db_project_id: String = conn
+    let (db_project_id, db_format, db_schema): (String, i64, i64) = conn
         .query_row(
-            "SELECT project_id FROM project_meta WHERE id = 1",
+            "SELECT project_id, format_version, schema_version FROM project_meta WHERE id = 1",
             [],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(|_| BackupError::CorruptSnapshot(backup_root.display().to_string()))?;
     let db_project_id = ProjectId::parse(&db_project_id)
@@ -97,6 +117,15 @@ pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
             manifest: manifest.project_id,
             database: db_project_id,
         });
+    }
+    let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if db_format != manifest.format_version
+        || db_schema != manifest.schema_version
+        || user_version != db_schema
+    {
+        return Err(BackupError::CorruptSnapshot(
+            backup_root.display().to_string(),
+        ));
     }
 
     Ok(manifest)
@@ -114,32 +143,36 @@ pub fn restore_as_copy(
     let backup_manifest = validate_backup(backup_root)?;
     let backup_paths = layout::PackagePaths::new(backup_root);
 
-    let working_name = new_working_name
-        .filter(|n| !n.trim().is_empty())
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| backup_manifest.working_name_cache.clone());
+    ensure_restore_destination_safe(backup_root, destination_dir)?;
+    let working_name = match new_working_name {
+        Some(name) => WorkingName::new(name)?.into_string(),
+        None => WorkingName::new(&backup_manifest.working_name_cache)?.into_string(),
+    };
 
     let new_root = layout::available_package_path(destination_dir, &working_name);
-    let new_paths = layout::create_skeleton(&new_root)?;
+    let staging_root = destination_dir.join(format!(".restore-{}.creating", uuid::Uuid::new_v4()));
+    let new_paths = layout::create_skeleton(&staging_root)?;
 
     let result = (|| -> Result<(), BackupError> {
         fs::copy(backup_paths.db_path(), new_paths.db_path())?;
         copy_dir_contents(&backup_paths.assets_dir(), &new_paths.assets_dir())?;
 
         let new_project_id = ProjectId::new();
+        let restored_at = chrono::Utc::now();
         rewrite_identity(
             &new_paths.db_path(),
             new_project_id,
             &working_name,
             backup_manifest.project_id,
             backup_root,
+            restored_at,
         )?;
 
         let new_manifest = Manifest {
             project_id: new_project_id,
             format_version: backup_manifest.format_version,
             schema_version: backup_manifest.schema_version,
-            created_at: chrono::Utc::now(),
+            created_at: restored_at,
             working_name_cache: working_name.clone(),
             restored_from_project_id: Some(backup_manifest.project_id),
             restored_from_backup_id: Some(
@@ -151,13 +184,17 @@ pub fn restore_as_copy(
             ),
         };
         new_manifest.write(&new_paths.manifest_path())?;
+        validate_backup(&staging_root)?;
         Ok(())
     })();
 
     match result {
-        Ok(()) => Ok(new_root),
+        Ok(()) => {
+            fs::rename(&staging_root, &new_root)?;
+            Ok(new_root)
+        }
         Err(e) => {
-            let _ = fs::remove_dir_all(&new_root);
+            let _ = fs::remove_dir_all(&staging_root);
             Err(e)
         }
     }
@@ -173,20 +210,23 @@ fn rewrite_identity(
     working_name: &str,
     restored_from_project_id: ProjectId,
     backup_root: &Path,
+    restored_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), BackupError> {
     let mut conn = Connection::open(db_path)?;
-    let tx = conn.transaction()?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let backup_id = backup_root
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown-backup");
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = restored_at.to_rfc3339();
     let changed = tx.execute(
         "UPDATE project_meta SET
             project_id = ?1,
             working_name = ?2,
             restored_from_project_id = ?3,
             restored_from_backup_id = ?4,
+            created_at = ?5,
             updated_at = ?5
          WHERE id = 1",
         rusqlite::params![
@@ -200,7 +240,93 @@ fn rewrite_identity(
     if changed != 1 {
         return Err(BackupError::CorruptSnapshot(db_path.display().to_string()));
     }
+
     tx.commit()?;
+    Ok(())
+}
+
+fn canonical_or_lexical(path: &Path) -> Result<PathBuf, std::io::Error> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    resolve_prospective_path(&absolute, 0)
+}
+
+fn resolve_prospective_path(path: &Path, symlink_depth: usize) -> Result<PathBuf, std::io::Error> {
+    if symlink_depth > 40 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "too many symlink levels",
+        ));
+    }
+
+    let mut resolved = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                resolved.push(component)
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            std::path::Component::Normal(part) => {
+                resolved.push(part);
+                match fs::symlink_metadata(&resolved) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        let target = fs::read_link(&resolved)?;
+                        let target = if target.is_absolute() {
+                            target
+                        } else {
+                            resolved
+                                .parent()
+                                .unwrap_or_else(|| Path::new(""))
+                                .join(target)
+                        };
+                        resolved = resolve_prospective_path(&target, symlink_depth + 1)?;
+                    }
+                    Ok(_) => {
+                        resolved = resolved.canonicalize()?;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err),
+                }
+            }
+        }
+    }
+
+    Ok(resolved)
+}
+
+fn ensure_outside_live_package(candidate: &Path, live: &PackagePaths) -> Result<(), BackupError> {
+    let candidate = canonical_or_lexical(candidate)?;
+    let root = canonical_or_lexical(&live.root)?;
+    let final_path = candidate.join("backup-output.wcbackup");
+    let staging_path = candidate.join(".backup-output.wcbackup.creating");
+    if candidate == root
+        || candidate.starts_with(&root)
+        || final_path.starts_with(&root)
+        || staging_path.starts_with(&root)
+    {
+        return Err(BackupError::UnsafePath(candidate.display().to_string()));
+    }
+    Ok(())
+}
+
+fn ensure_restore_destination_safe(backup: &Path, destination: &Path) -> Result<(), BackupError> {
+    let backup = canonical_or_lexical(backup)?;
+    let destination = canonical_or_lexical(destination)?;
+    let final_path = destination.join("restored.wcproj");
+    let staging_path = destination.join(".restore.creating");
+    if destination == backup
+        || destination.starts_with(&backup)
+        || final_path.starts_with(&backup)
+        || staging_path.starts_with(&backup)
+    {
+        return Err(BackupError::UnsafePath(destination.display().to_string()));
+    }
     Ok(())
 }
 
@@ -226,6 +352,8 @@ mod tests {
     use super::*;
     use crate::package;
     use crate::persistence::worker::InitialProjectMeta;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     use tempfile::tempdir;
 
     fn make_project(dir: &Path, name: &str) -> (ProjectId, PackagePaths, ProjectDbWorker) {
@@ -321,6 +449,47 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Arak Committed");
 
+        worker.shutdown().unwrap();
+    }
+
+    #[test]
+    fn prospective_normalization_collapses_nonexistent_parent_traversal() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("safe/../sibling/new-output");
+        assert_eq!(
+            canonical_or_lexical(&path).unwrap(),
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("sibling/new-output")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prospective_normalization_resolves_symlink_parents_component_by_component() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("real/nested")).unwrap();
+        symlink("real/nested", dir.path().join("alias")).unwrap();
+
+        let path = dir.path().join("alias/../future/output");
+        assert_eq!(
+            canonical_or_lexical(&path).unwrap(),
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("real/future/output")
+        );
+    }
+
+    #[test]
+    fn containment_allows_a_safe_sibling_and_rejects_a_nested_destination() {
+        let dir = tempdir().unwrap();
+        let (_, paths, worker) = make_project(dir.path(), "Tortuga");
+        assert!(ensure_outside_live_package(&dir.path().join("backups"), &paths).is_ok());
+        assert!(
+            ensure_outside_live_package(&paths.assets_dir().join("../nested"), &paths).is_err()
+        );
         worker.shutdown().unwrap();
     }
 }

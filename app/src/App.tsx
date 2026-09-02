@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 import {
   AppCommandError,
@@ -10,12 +11,30 @@ import {
 } from "./api";
 import type { ProjectSummary } from "./types";
 import { useProjectRename } from "./useProjectRename";
+import { decideClose, type CloseIntent } from "./closeDecision";
 
 function errorMessage(err: unknown): string {
   if (err instanceof AppCommandError) {
     return `${err.message} (${err.kind})`;
   }
+
   return err instanceof Error ? err.message : String(err);
+}
+
+function isTauriWindow(): boolean {
+  return "__TAURI_INTERNALS__" in window;
+}
+
+function closeWarningMessage(intent: CloseIntent): string {
+  return intent === "native-window"
+    ? "This Project has unsaved changes. Retry saving or discard before closing the app."
+    : "This Project has unsaved changes. Retry saving or discard before closing the Project.";
+}
+
+function closeWarningActionLabel(intent: CloseIntent): string {
+  return intent === "native-window"
+    ? "Close app anyway (discard changes)"
+    : "Close Project anyway (discard changes)";
 }
 
 function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void }) {
@@ -168,8 +187,14 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const rename = useProjectRename(project);
   const [backupDir, setBackupDir] = useState("");
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
-  const [closeWarning, setCloseWarning] = useState<string | null>(null);
+  const [pendingCloseIntent, setPendingCloseIntent] = useState<CloseIntent | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const approvedNativeClose = useRef(false);
+  const saveStateRef = useRef(rename.saveState);
+  const closeInFlight = useRef<Promise<void> | null>(null);
+  const nativeWindowCloseRequested = useRef(false);
+  saveStateRef.current = rename.saveState;
 
   async function handleCreateBackup() {
     setBusy(true);
@@ -184,28 +209,111 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
     }
   }
 
-  async function handleClose() {
-    if (rename.hasUnsavedWork) {
-      setCloseWarning("This Project has unsaved changes. Retry saving or discard before closing.");
-      return;
+  const closeAfterBackend = useCallback(
+    (intent: CloseIntent): Promise<void> => {
+      if (intent === "native-window") {
+        nativeWindowCloseRequested.current = true;
+      }
+      if (closeInFlight.current) {
+        return closeInFlight.current;
+      }
+      const close = (async () => {
+        let closed = false;
+        setBusy(true);
+        setCloseError(null);
+        try {
+          await closeProject(project.projectId);
+          const shouldExitWindow = nativeWindowCloseRequested.current;
+          closed = true;
+          onClosed();
+          if (shouldExitWindow && isTauriWindow()) {
+            approvedNativeClose.current = true;
+            await getCurrentWindow().close();
+          }
+        } catch (err) {
+          setCloseError(errorMessage(err));
+        } finally {
+          if (!closed) {
+            nativeWindowCloseRequested.current = false;
+          }
+          setBusy(false);
+        }
+      })().finally(() => {
+        nativeWindowCloseRequested.current = false;
+        closeInFlight.current = null;
+      });
+      closeInFlight.current = close;
+      return close;
+    },
+    [onClosed, project.projectId],
+  );
+
+  const requestClose = useCallback(
+    (intent: CloseIntent): void => {
+      setCloseError(null);
+      const decision = decideClose(saveStateRef.current, intent);
+      switch (decision) {
+        case "close-project":
+        case "close-native-window":
+          setPendingCloseIntent(null);
+          void closeAfterBackend(intent);
+          return;
+        case "confirm-unsaved-project":
+        case "confirm-unsaved-native-window":
+          setPendingCloseIntent((current) =>
+            current === "native-window" || intent === "native-window" ? "native-window" : "project",
+          );
+      }
+    },
+    [closeAfterBackend],
+  );
+
+  useEffect(() => {
+    if (rename.saveState === "saved") {
+      setPendingCloseIntent(null);
     }
-    setBusy(true);
-    try {
-      await closeProject(project.projectId);
-      onClosed();
-    } catch (err) {
-      setCloseWarning(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
+  }, [rename.saveState]);
+
+  function handleClose() {
+    requestClose("project");
   }
 
   function handleForceCloseDiscarding() {
-    setCloseWarning(null);
-    closeProject(project.projectId)
-      .then(onClosed)
-      .catch((err) => setCloseWarning(errorMessage(err)));
+    if (!pendingCloseIntent) {
+      return;
+    }
+    const intent = pendingCloseIntent;
+    setPendingCloseIntent(null);
+    void closeAfterBackend(intent);
   }
+
+  useEffect(() => {
+    if (!isTauriWindow()) {
+      return;
+    }
+    const window = getCurrentWindow();
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void window
+      .onCloseRequested((event) => {
+        if (approvedNativeClose.current) {
+          return;
+        }
+        event.preventDefault();
+        requestClose("native-window");
+      })
+      .then((listener) => {
+        if (disposed) {
+          listener();
+          return;
+        }
+        unlisten = listener;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [requestClose]);
 
   return (
     <main className="container">
@@ -265,11 +373,18 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
 
       <section>
         <h2>Close Project</h2>
-        {closeWarning && (
+        {pendingCloseIntent && (
           <div role="alert" className="error-banner">
-            <p>{closeWarning}</p>
-            <button onClick={handleForceCloseDiscarding}>Close anyway (discard changes)</button>
+            <p>{closeWarningMessage(pendingCloseIntent)}</p>
+            <button onClick={handleForceCloseDiscarding}>
+              {closeWarningActionLabel(pendingCloseIntent)}
+            </button>
           </div>
+        )}
+        {closeError && (
+          <p role="alert" className="error-banner">
+            {closeError}
+          </p>
         )}
         <button disabled={busy} onClick={handleClose}>
           Close Project

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectSummary } from "./types";
 
@@ -16,6 +16,16 @@ const project: ProjectSummary = {
 const closeProjectMock = vi.fn();
 const renameProjectMock = vi.fn();
 const openProjectMock = vi.fn();
+const nativeWindowCloseMock = vi.fn();
+const onCloseRequestedMock = vi.fn();
+let closeRequestedHandler: ((event: { preventDefault: () => void }) => void) | undefined;
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    close: (...args: unknown[]) => nativeWindowCloseMock(...args),
+    onCloseRequested: (...args: unknown[]) => onCloseRequestedMock(...args),
+  }),
+}));
 
 vi.mock("./api", () => ({
   AppCommandError: class AppCommandError extends Error {
@@ -37,12 +47,20 @@ import App from "./App";
 
 async function openTheProjectScreen() {
   openProjectMock.mockResolvedValueOnce(project);
-  render(<App />);
+  const view = render(<App />);
   fireEvent.change(screen.getByLabelText("open-project-path"), {
     target: { value: "/tmp/Tortuga.wcproj" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
   await waitFor(() => screen.getByTestId("project-id"));
+  return view;
+}
+
+function enableTauriWindow() {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    value: {},
+    configurable: true,
+  });
 }
 
 describe("Project screen Saved contract", () => {
@@ -50,6 +68,16 @@ describe("Project screen Saved contract", () => {
     closeProjectMock.mockReset();
     renameProjectMock.mockReset();
     openProjectMock.mockReset();
+    nativeWindowCloseMock.mockReset();
+    closeRequestedHandler = undefined;
+    onCloseRequestedMock.mockReset();
+    onCloseRequestedMock.mockImplementation(
+      (handler: (event: { preventDefault: () => void }) => void) => {
+        closeRequestedHandler = handler;
+        return Promise.resolve(vi.fn());
+      },
+    );
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
   it("shows the Project ID unchanged after a successful rename", async () => {
@@ -88,6 +116,75 @@ describe("Project screen Saved contract", () => {
 
     // Close must be blocked/warned, not silently succeed.
     expect(closeProjectMock).not.toHaveBeenCalled();
-    expect(screen.getByText(/unsaved changes/i)).toBeInTheDocument();
+    expect(screen.getByText(/before closing the Project/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Close Project anyway (discard changes)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps native close intent when the app close request is confirmed", async () => {
+    enableTauriWindow();
+    closeProjectMock.mockResolvedValueOnce(undefined);
+
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Unsaved Rename" },
+    });
+
+    const preventDefault = vi.fn();
+    await act(async () => {
+      closeRequestedHandler?.({ preventDefault });
+    });
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/before closing the app/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close app anyway (discard changes)" }));
+
+    await waitFor(() =>
+      expect(closeProjectMock).toHaveBeenCalledWith("0198c000-0000-7000-8000-000000000000"),
+    );
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not downgrade a pending native close when the in-app button is clicked", async () => {
+    enableTauriWindow();
+    closeProjectMock.mockResolvedValueOnce(undefined);
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Unsaved Rename" },
+    });
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close app anyway (discard changes)" }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("cleans up a native close listener even when registration resolves after unmount", async () => {
+    enableTauriWindow();
+    let resolveListener!: (listener: () => void) => void;
+    onCloseRequestedMock.mockImplementationOnce(
+      (handler: (event: { preventDefault: () => void }) => void) => {
+        closeRequestedHandler = handler;
+        return new Promise<() => void>((resolve) => {
+          resolveListener = resolve;
+        });
+      },
+    );
+
+    const view = await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    view.unmount();
+
+    const lateUnlisten = vi.fn();
+    resolveListener(lateUnlisten);
+
+    await waitFor(() => expect(lateUnlisten).toHaveBeenCalledTimes(1));
   });
 });

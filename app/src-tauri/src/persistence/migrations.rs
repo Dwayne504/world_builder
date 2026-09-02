@@ -4,6 +4,11 @@
 //! database whose `user_version` is newer than [`CURRENT_SCHEMA_VERSION`]
 //! must never be opened for writing by this build -- it may belong to a
 //! newer Worldcrafter version.
+//!
+//! Existing packages are currently fail-closed on *older* schema versions too:
+//! until manifest publication has a coordinated, crash-recoverable migration
+//! protocol, opening an older package must not mutate only the database and
+//! strand the manifest on an older version marker.
 
 use rusqlite::Connection;
 
@@ -32,9 +37,30 @@ pub fn migrate(conn: &Connection) -> Result<(), PersistenceError> {
 
     for (version, sql) in MIGRATIONS {
         if *version > current_version {
-            conn.execute_batch(sql)?;
-            conn.pragma_update(None, "user_version", version)?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", version)?;
+            tx.commit()?;
         }
+    }
+    Ok(())
+}
+
+/// Refuses to open an existing database for writing unless its schema already
+/// matches this build exactly.
+pub fn require_current_schema(conn: &Connection) -> Result<(), PersistenceError> {
+    let current_version = user_version(conn)?;
+    if current_version > CURRENT_SCHEMA_VERSION {
+        return Err(PersistenceError::UnsupportedSchemaVersion {
+            found: current_version,
+            supported: CURRENT_SCHEMA_VERSION,
+        });
+    }
+    if current_version < CURRENT_SCHEMA_VERSION {
+        return Err(PersistenceError::MigrationRequired {
+            found: current_version,
+            supported: CURRENT_SCHEMA_VERSION,
+        });
     }
     Ok(())
 }
@@ -77,5 +103,19 @@ mod tests {
             err,
             PersistenceError::UnsupportedSchemaVersion { .. }
         ));
+    }
+
+    #[test]
+    fn require_current_schema_refuses_to_auto_migrate_an_older_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        let err = require_current_schema(&conn).unwrap_err();
+        assert!(matches!(
+            err,
+            PersistenceError::MigrationRequired {
+                found: 0,
+                supported: CURRENT_SCHEMA_VERSION,
+            }
+        ));
+        assert_eq!(user_version(&conn).unwrap(), 0);
     }
 }

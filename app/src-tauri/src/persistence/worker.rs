@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 
 use crate::domain::ProjectId;
 
@@ -59,7 +59,7 @@ enum Job {
     /// connection every other write goes through.
     BackupTo {
         dest_path: PathBuf,
-        reply: Reply<()>,
+        reply: Reply<ProjectMetaSnapshot>,
     },
     Shutdown {
         reply: Reply<()>,
@@ -80,6 +80,19 @@ impl std::fmt::Debug for ProjectDbWorker {
 }
 
 impl ProjectDbWorker {
+    /// Non-destructively checks whether an existing Project database can be
+    /// opened by this build. This never creates a database, acquires locks, or
+    /// flips durability pragmas.
+    pub fn preflight_existing(
+        db_path: PathBuf,
+        expected_project_id: ProjectId,
+    ) -> Result<(), PersistenceError> {
+        let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        migrations::require_current_schema(&conn)?;
+        validate_existing_project_meta(&conn, expected_project_id)?;
+        Ok(())
+    }
+
     /// Spawns the worker thread, opens `db_path`, applies durability
     /// pragmas, migrates the schema, and validates/initializes
     /// `project_meta`. Blocks the caller until startup succeeds or fails so
@@ -131,27 +144,29 @@ impl ProjectDbWorker {
         expected_project_id: ProjectId,
         initial: Option<InitialProjectMeta>,
     ) -> Result<Connection, PersistenceError> {
-        let conn = Connection::open(db_path)?;
-        pragmas::apply(&conn)?;
-        migrations::migrate(&conn)?;
+        let is_initializing = initial.is_some();
+        let conn = Connection::open_with_flags(
+            db_path,
+            if is_initializing {
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
+            } else {
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+            },
+        )?;
+        if is_initializing {
+            pragmas::apply(&conn)?;
+            migrations::migrate(&conn)?;
+        } else {
+            migrations::require_current_schema(&conn)?;
+        }
 
-        let existing: Option<(String, i64)> = conn
-            .query_row(
-                "SELECT project_id, last_committed_revision FROM project_meta WHERE id = 1",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .ok();
+        let existing = read_existing_project_meta(&conn)?;
 
         match (existing, initial) {
-            (Some((db_project_id, _)), _) => {
-                let db_project_id = ProjectId::parse(&db_project_id)
-                    .map_err(|e| PersistenceError::Other(e.to_string()))?;
-                if db_project_id != expected_project_id {
-                    return Err(PersistenceError::ProjectIdMismatch {
-                        manifest: expected_project_id,
-                        database: db_project_id,
-                    });
+            (Some(_), _) => {
+                validate_existing_project_meta(&conn, expected_project_id)?;
+                if !is_initializing {
+                    pragmas::apply(&conn)?;
                 }
                 Ok(conn)
             }
@@ -195,7 +210,8 @@ impl ProjectDbWorker {
                     ));
                 }
                 Job::BackupTo { dest_path, reply } => {
-                    let _ = reply.send(backup_to(&conn, &dest_path));
+                    let _ =
+                        reply.send(backup_to(&conn, &dest_path).and_then(|()| read_meta(&conn)));
                 }
                 Job::Shutdown { reply } => {
                     let _ = reply.send(Ok(()));
@@ -232,7 +248,7 @@ impl ProjectDbWorker {
     }
 
     /// Runs a consistent SQLite Online Backup snapshot to `dest_path`.
-    pub fn backup_to(&self, dest_path: PathBuf) -> Result<(), PersistenceError> {
+    pub fn backup_to(&self, dest_path: PathBuf) -> Result<ProjectMetaSnapshot, PersistenceError> {
         self.call(|reply| Job::BackupTo { dest_path, reply })
     }
 
@@ -259,6 +275,47 @@ impl Drop for ProjectDbWorker {
             let _ = handle.join();
         }
     }
+}
+
+fn read_existing_project_meta(
+    conn: &Connection,
+) -> Result<Option<(String, i64, i64, i64)>, PersistenceError> {
+    conn.query_row(
+        "SELECT project_id, last_committed_revision, format_version, schema_version FROM project_meta WHERE id = 1",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )
+    .optional()
+    .map_err(PersistenceError::from)
+}
+
+fn validate_existing_project_meta(
+    conn: &Connection,
+    expected_project_id: ProjectId,
+) -> Result<(), PersistenceError> {
+    let Some((db_project_id, _revision, format_version, schema_version)) =
+        read_existing_project_meta(conn)?
+    else {
+        return Err(PersistenceError::MissingProjectMeta);
+    };
+
+    let db_project_id =
+        ProjectId::parse(&db_project_id).map_err(|e| PersistenceError::Other(e.to_string()))?;
+    if db_project_id != expected_project_id {
+        return Err(PersistenceError::ProjectIdMismatch {
+            manifest: expected_project_id,
+            database: db_project_id,
+        });
+    }
+    if format_version != crate::package::FORMAT_VERSION
+        || schema_version != migrations::user_version(conn)?
+        || schema_version != migrations::CURRENT_SCHEMA_VERSION
+    {
+        return Err(PersistenceError::Other(
+            "project metadata version does not match supported database schema".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn read_meta(conn: &Connection) -> Result<ProjectMetaSnapshot, PersistenceError> {
@@ -499,5 +556,57 @@ mod tests {
         let err =
             ProjectDbWorker::spawn(dir.path().join("project.sqlite"), wrong_id, None).unwrap_err();
         assert!(matches!(err, PersistenceError::ProjectIdMismatch { .. }));
+    }
+
+    #[test]
+    fn preflight_existing_refuses_to_create_a_missing_database() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("missing.sqlite");
+
+        let err =
+            ProjectDbWorker::preflight_existing(db_path.clone(), ProjectId::new()).unwrap_err();
+        assert!(matches!(err, PersistenceError::Sqlite(_)));
+        assert!(!db_path.exists());
+    }
+
+    #[test]
+    fn older_existing_schema_is_refused_without_mutating_version_markers() {
+        let dir = tempdir().unwrap();
+        let project_id = ProjectId::new();
+        {
+            let worker = spawn_fresh(dir.path(), project_id);
+            worker.shutdown().unwrap();
+        }
+
+        let db_path = dir.path().join("project.sqlite");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.pragma_update(None, "user_version", 0).unwrap();
+        conn.execute(
+            "UPDATE project_meta SET schema_version = 0 WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let err = ProjectDbWorker::spawn(db_path.clone(), project_id, None).unwrap_err();
+        assert!(matches!(
+            err,
+            PersistenceError::MigrationRequired {
+                found: 0,
+                supported: migrations::CURRENT_SCHEMA_VERSION,
+            }
+        ));
+
+        let conn = Connection::open(&db_path).unwrap();
+        let user_version = migrations::user_version(&conn).unwrap();
+        let schema_version: i64 = conn
+            .query_row(
+                "SELECT schema_version FROM project_meta WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_version, 0);
+        assert_eq!(schema_version, 0);
     }
 }

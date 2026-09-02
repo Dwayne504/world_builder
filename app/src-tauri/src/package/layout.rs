@@ -129,11 +129,13 @@ pub fn create_skeleton(root: &Path) -> Result<PackagePaths, PackageError> {
     Ok(PackagePaths::new(root))
 }
 
-/// Validates that `root` looks like a Worldcrafter package (has a manifest)
-/// without yet parsing or trusting its contents.
+/// Validates that `root` looks like a Worldcrafter package by ensuring a
+/// recoverable manifest and an existing database file are present, without yet
+/// trusting the manifest's parsed contents.
 pub fn validate_structure(root: &Path) -> Result<PackagePaths, PackageError> {
     let paths = PackagePaths::new(root);
-    if !paths.manifest_path().is_file() {
+    super::manifest::Manifest::recover_if_needed(&paths.manifest_path())?;
+    if !paths.manifest_path().is_file() || !paths.db_path().is_file() {
         return Err(PackageError::NotAPackage(root.display().to_string()));
     }
     Ok(paths)
@@ -185,5 +187,41 @@ mod tests {
         let second = available_package_path(dir.path(), "Tortuga");
         assert_ne!(first, second);
         assert!(second.to_string_lossy().contains("(2)"));
+    }
+
+    #[test]
+    fn validate_structure_recovers_a_missing_manifest_from_recovery_file() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("Tortuga.wcproj");
+        let paths = create_skeleton(&root).unwrap();
+        fs::write(paths.db_path(), b"sqlite placeholder").unwrap();
+        let manifest = crate::package::manifest::Manifest::new(
+            crate::domain::ProjectId::new(),
+            1,
+            1,
+            "Tortuga",
+        );
+        fs::write(
+            paths.manifest_path().with_extension("json.previous"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let validated = validate_structure(&root).unwrap();
+        assert_eq!(validated.manifest_path(), paths.manifest_path());
+        assert!(paths.manifest_path().is_file());
+    }
+
+    #[test]
+    fn validate_structure_rejects_a_package_missing_its_database_file() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("Tortuga.wcproj");
+        let paths = create_skeleton(&root).unwrap();
+        fs::write(paths.manifest_path(), b"{}").unwrap();
+
+        assert!(matches!(
+            validate_structure(&root),
+            Err(PackageError::NotAPackage(_))
+        ));
     }
 }

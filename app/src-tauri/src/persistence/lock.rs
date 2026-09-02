@@ -1,19 +1,10 @@
-//! Exclusive Project lock.
-//!
-//! `lock.json` lives at the package root (not inside `data/`) so it is
-//! trivially excluded from portable backups: it is operational state about
-//! *this machine/process*, never authored content.
-//!
-//! Cross-platform notes (engineering spike): this slice detects staleness
-//! purely by lock age plus an explicit recovery step, rather than by
-//! probing whether the owning process is still alive. Checking liveness of
-//! a PID cross-platform (especially across restarts, containers, and
-//! networked/cloud-synced filesystems) is unreliable, so age-based staleness
-//! plus an explicit user-confirmed recovery action is the safer default.
+//! An OS-held advisory lock is authoritative; `lock.json` is recoverable metadata.
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Sender};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -23,9 +14,8 @@ use uuid::Uuid;
 
 use crate::domain::ProjectId;
 
-/// A lock older than this without being refreshed is eligible for explicit
-/// stale-lock recovery. Ordinary session lifetimes are far shorter.
 pub const STALE_LOCK_THRESHOLD: Duration = Duration::from_secs(30 * 60);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockInfo {
@@ -36,32 +26,29 @@ pub struct LockInfo {
     pub acquired_at: DateTime<Utc>,
     pub heartbeat_at: DateTime<Utc>,
 }
-
 impl LockInfo {
-    fn new_for(project_id: ProjectId) -> Self {
+    fn new(project_id: ProjectId) -> Self {
         let now = Utc::now();
-        LockInfo {
+        Self {
             project_id,
             pid: std::process::id(),
             host: hostname::get()
                 .ok()
-                .and_then(|s| s.into_string().ok())
-                .unwrap_or_else(|| "unknown-host".to_string()),
+                .and_then(|v| v.into_string().ok())
+                .unwrap_or_else(|| "unknown-host".into()),
             session_token: Uuid::new_v4(),
             acquired_at: now,
             heartbeat_at: now,
         }
     }
-
-    pub fn age(&self) -> chrono::Duration {
-        Utc::now().signed_duration_since(self.heartbeat_at)
-    }
-
     pub fn is_stale(&self) -> bool {
-        self.age().to_std().unwrap_or(Duration::ZERO) > STALE_LOCK_THRESHOLD
+        Utc::now()
+            .signed_duration_since(self.heartbeat_at)
+            .to_std()
+            .unwrap_or_default()
+            > STALE_LOCK_THRESHOLD
     }
 }
-
 #[derive(Debug, Error)]
 pub enum LockError {
     #[error("Project is already open (pid {pid} on {host}, held since {acquired_at})")]
@@ -70,151 +57,192 @@ pub enum LockError {
         host: String,
         acquired_at: DateTime<Utc>,
     },
-
-    #[error("lock is not stale enough to recover automatically")]
+    #[error("a stale lock requires explicit recovery")]
+    RecoveryRequired,
+    #[error("lock is not stale enough to recover")]
     NotStale,
-
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-
     #[error("lock file is present but unreadable/corrupt: {0}")]
     Corrupt(String),
 }
 
-/// An acquired lock. Dropping/`release`-ing it removes `lock.json`.
-#[derive(Debug)]
 pub struct LockGuard {
-    path: PathBuf,
-    released: bool,
+    metadata_path: PathBuf,
+    guard_file: File,
+    token: Uuid,
+    stop: Option<Sender<()>>,
+    heartbeat: Option<JoinHandle<()>>,
 }
-
+impl std::fmt::Debug for LockGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LockGuard").finish()
+    }
+}
 impl LockGuard {
     pub fn release(mut self) {
-        self.do_release();
+        self.stop();
+        self.remove_owned_metadata();
+        let _ = self.guard_file.unlock();
     }
-
-    fn do_release(&mut self) {
-        if !self.released {
-            let _ = fs::remove_file(&self.path);
-            self.released = true;
+    fn stop(&mut self) {
+        if let Some(tx) = self.stop.take() {
+            let _ = tx.send(());
+        }
+        if let Some(handle) = self.heartbeat.take() {
+            let _ = handle.join();
+        }
+    }
+    fn remove_owned_metadata(&self) {
+        if matches!(read_metadata(&self.metadata_path), Ok(info) if info.session_token == self.token)
+        {
+            let _ = fs::remove_file(&self.metadata_path);
         }
     }
 }
-
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        self.do_release();
+        self.stop();
+        self.remove_owned_metadata();
+        let _ = self.guard_file.unlock();
     }
 }
 
-fn read_lock(path: &Path) -> Result<LockInfo, LockError> {
-    let raw = fs::read_to_string(path)?;
-    serde_json::from_str(&raw).map_err(|e| LockError::Corrupt(e.to_string()))
+fn guard_path(metadata_path: &Path) -> PathBuf {
+    metadata_path.with_extension("guard")
 }
-
-fn write_lock(path: &Path, info: &LockInfo) -> Result<(), LockError> {
-    let json = serde_json::to_string_pretty(info)
-        .map_err(|e| LockError::Corrupt(format!("failed to serialize lock: {e}")))?;
-    // Atomic create: fails if another process created it first.
-    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(json.as_bytes())?;
+fn read_metadata(path: &Path) -> Result<LockInfo, LockError> {
+    serde_json::from_str(&fs::read_to_string(path)?).map_err(|e| LockError::Corrupt(e.to_string()))
+}
+fn write_metadata(path: &Path, info: &LockInfo) -> Result<(), LockError> {
+    let temp = path.with_extension(format!("json.{}.tmp", Uuid::new_v4()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)?;
+    file.write_all(
+        serde_json::to_string_pretty(info)
+            .map_err(|e| LockError::Corrupt(e.to_string()))?
+            .as_bytes(),
+    )?;
     file.sync_all()?;
+    // Metadata is never authoritative; preserving an old valid copy is safer
+    // than truncating it. Windows replacement is handled by manifest protocol.
+    if path.exists() {
+        let _ = fs::remove_file(path);
+    }
+    fs::rename(temp, path)?;
     Ok(())
 }
-
-/// Attempts to acquire the exclusive Project lock. Fails with
-/// [`LockError::Held`] if another live-looking lock is present; callers who
-/// need stale-lock recovery must call [`recover_stale_lock`] first.
-pub fn acquire(lock_path: &Path, project_id: ProjectId) -> Result<LockGuard, LockError> {
-    let info = LockInfo::new_for(project_id);
-    match write_lock(lock_path, &info) {
-        Ok(()) => Ok(LockGuard {
-            path: lock_path.to_path_buf(),
-            released: false,
-        }),
-        Err(LockError::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            let existing = read_lock(lock_path)?;
-            Err(LockError::Held {
-                pid: existing.pid,
-                host: existing.host,
-                acquired_at: existing.acquired_at,
-            })
+fn heartbeat(path: &Path, token: Uuid) {
+    if let Ok(mut info) = read_metadata(path) {
+        if info.session_token == token {
+            info.heartbeat_at = Utc::now();
+            let _ = write_metadata(path, &info);
         }
-        Err(other) => Err(other),
     }
 }
 
-/// Reads the current lock, if any, without acquiring it.
+pub fn acquire(
+    lock_path: &Path,
+    project_id: ProjectId,
+    recover_stale: bool,
+) -> Result<LockGuard, LockError> {
+    let guard = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(guard_path(lock_path))?;
+    if let Err(error) = guard.try_lock() {
+        let info = read_metadata(lock_path)?;
+        return Err(if matches!(error, std::fs::TryLockError::WouldBlock) {
+            LockError::Held {
+                pid: info.pid,
+                host: info.host,
+                acquired_at: info.acquired_at,
+            }
+        } else {
+            LockError::Io(error.into())
+        });
+    }
+    if lock_path.exists() {
+        let previous = read_metadata(lock_path)?;
+        if !recover_stale {
+            let _ = guard.unlock();
+            return Err(LockError::RecoveryRequired);
+        }
+        if !previous.is_stale() {
+            let _ = guard.unlock();
+            return Err(LockError::NotStale);
+        }
+    }
+    let info = LockInfo::new(project_id);
+    write_metadata(lock_path, &info)?;
+    let (tx, rx) = mpsc::channel();
+    let path = lock_path.to_owned();
+    let token = info.session_token;
+    let thread = thread::spawn(move || {
+        while rx.recv_timeout(HEARTBEAT_INTERVAL).is_err() {
+            heartbeat(&path, token);
+        }
+    });
+    Ok(LockGuard {
+        metadata_path: lock_path.to_owned(),
+        guard_file: guard,
+        token,
+        stop: Some(tx),
+        heartbeat: Some(thread),
+    })
+}
+
 pub fn inspect(lock_path: &Path) -> Result<Option<LockInfo>, LockError> {
-    if !lock_path.exists() {
-        return Ok(None);
+    if lock_path.exists() {
+        read_metadata(lock_path).map(Some)
+    } else {
+        Ok(None)
     }
-    read_lock(lock_path).map(Some)
-}
-
-/// Explicitly removes a confirmed-stale lock so the Project can be opened.
-/// This is never invoked automatically: recovery is a deliberate operation.
-pub fn recover_stale_lock(lock_path: &Path) -> Result<(), LockError> {
-    let existing = read_lock(lock_path)?;
-    if !existing.is_stale() {
-        return Err(LockError::NotStale);
-    }
-    fs::remove_file(lock_path)?;
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
     use tempfile::tempdir;
 
     #[test]
-    fn second_acquire_is_refused_while_first_is_held() {
+    fn competing_acquisition_has_one_owner_for_the_guard_lifetime() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("lock.json");
-        let project_id = ProjectId::new();
-        let guard = acquire(&path, project_id).unwrap();
-        let err = acquire(&path, project_id).unwrap_err();
-        assert!(matches!(err, LockError::Held { .. }));
-        guard.release();
-        // Now that it is released, acquiring again must succeed.
-        acquire(&path, project_id).unwrap();
+        let path = Arc::new(dir.path().join("lock.json"));
+        let barrier = Arc::new(Barrier::new(2));
+        let contender_path = path.clone();
+        let contender_barrier = barrier.clone();
+        let contender = thread::spawn(move || {
+            contender_barrier.wait();
+            acquire(&contender_path, ProjectId::new(), false)
+        });
+        let owner = acquire(&path, ProjectId::new(), false).unwrap();
+        barrier.wait();
+        assert!(matches!(
+            contender.join().unwrap(),
+            Err(LockError::Held { .. })
+        ));
+        owner.release();
+        assert!(acquire(&path, ProjectId::new(), false).is_ok());
     }
 
     #[test]
-    fn release_removes_lock_file() {
+    fn stale_metadata_cannot_recover_while_an_os_owner_is_active() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("lock.json");
-        let guard = acquire(&path, ProjectId::new()).unwrap();
-        assert!(path.exists());
-        guard.release();
-        assert!(!path.exists());
-    }
-
-    #[test]
-    fn stale_lock_requires_explicit_recovery() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("lock.json");
-        let mut info = LockInfo::new_for(ProjectId::new());
-        info.heartbeat_at = Utc::now() - chrono::Duration::hours(2);
-        write_lock(&path, &info).unwrap();
-
-        // A fresh (non-stale) view would refuse recovery.
-        let err = recover_stale_lock(&path);
-        assert!(err.is_ok(), "an aged lock past the threshold recovers");
-
-        // Once recovered, the lock file is gone and can be reacquired.
-        assert!(!path.exists());
-        acquire(&path, ProjectId::new()).unwrap();
-    }
-
-    #[test]
-    fn fresh_lock_refuses_stale_recovery() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("lock.json");
-        let guard = acquire(&path, ProjectId::new()).unwrap();
-        let err = recover_stale_lock(&path).unwrap_err();
-        assert!(matches!(err, LockError::NotStale));
-        guard.release();
+        let owner = acquire(&path, ProjectId::new(), false).unwrap();
+        let mut metadata = read_metadata(&path).unwrap();
+        metadata.heartbeat_at = Utc::now() - chrono::Duration::hours(1);
+        write_metadata(&path, &metadata).unwrap();
+        assert!(matches!(
+            acquire(&path, ProjectId::new(), true),
+            Err(LockError::Held { .. })
+        ));
+        owner.release();
     }
 }
