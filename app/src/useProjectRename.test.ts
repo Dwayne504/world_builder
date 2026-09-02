@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const renameProjectMock = vi.fn();
 vi.mock("./api", () => ({
@@ -24,6 +24,8 @@ function makeProject(overrides: Partial<ProjectSummary> = {}): ProjectSummary {
 }
 
 describe("useProjectRename", () => {
+  beforeEach(() => renameProjectMock.mockReset());
+
   it("transitions dirty -> saving -> saved on a successful rename", async () => {
     const project = makeProject();
     let resolveRename: (value: ProjectSummary) => void = () => {};
@@ -109,5 +111,76 @@ describe("useProjectRename", () => {
       await result.current.submit();
     });
     expect(result.current.hasUnsavedWork).toBe(true);
+  });
+
+  it("retains a newer draft after an older save succeeds and advances its revision", async () => {
+    const project = makeProject();
+    let resolveRename!: (value: ProjectSummary) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise<ProjectSummary>((resolve) => {
+        resolveRename = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useProjectRename(project));
+    act(() => result.current.onChangeDraft("A"));
+    let saving!: Promise<void>;
+    act(() => {
+      saving = result.current.submit();
+    });
+    act(() => result.current.onChangeDraft("B"));
+    act(() => resolveRename({ ...project, workingName: "A", revision: 1 }));
+    await act(async () => {
+      await saving;
+    });
+    expect(result.current.committedName).toBe("A");
+    expect(result.current.revision).toBe(1);
+    expect(result.current.draftName).toBe("B");
+    expect(result.current.saveState).toBe("dirty");
+  });
+
+  it("deduplicates repeated submit calls while saving", async () => {
+    const project = makeProject();
+    let resolveRename!: (value: ProjectSummary) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise<ProjectSummary>((resolve) => {
+        resolveRename = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useProjectRename(project));
+    act(() => result.current.onChangeDraft("A"));
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = result.current.submit();
+      second = result.current.submit();
+    });
+    expect(second).toBe(first);
+    expect(renameProjectMock).toHaveBeenCalledTimes(1);
+    act(() => resolveRename({ ...project, workingName: "A", revision: 1 }));
+    await act(async () => {
+      await first;
+    });
+  });
+
+  it("retains a newer draft when the older save fails", async () => {
+    let rejectRename!: (reason: Error) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectRename = reject;
+      }),
+    );
+    const { result } = renderHook(() => useProjectRename(makeProject()));
+    act(() => result.current.onChangeDraft("A"));
+    let saving!: Promise<void>;
+    act(() => {
+      saving = result.current.submit();
+      result.current.onChangeDraft("B");
+    });
+    act(() => rejectRename(new Error("disk full")));
+    await act(async () => {
+      await saving;
+    });
+    expect(result.current.draftName).toBe("B");
+    expect(result.current.saveState).toBe("failed");
   });
 });

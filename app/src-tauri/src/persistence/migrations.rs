@@ -32,8 +32,10 @@ pub fn migrate(conn: &Connection) -> Result<(), PersistenceError> {
 
     for (version, sql) in MIGRATIONS {
         if *version > current_version {
-            conn.execute_batch(sql)?;
-            conn.pragma_update(None, "user_version", version)?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", version)?;
+            tx.commit()?;
         }
     }
     Ok(())

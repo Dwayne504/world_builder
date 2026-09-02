@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 import {
   AppCommandError,
@@ -10,12 +11,18 @@ import {
 } from "./api";
 import type { ProjectSummary } from "./types";
 import { useProjectRename } from "./useProjectRename";
+import { decideClose } from "./closeDecision";
 
 function errorMessage(err: unknown): string {
   if (err instanceof AppCommandError) {
     return `${err.message} (${err.kind})`;
   }
+
   return err instanceof Error ? err.message : String(err);
+}
+
+function isTauriWindow(): boolean {
+  return "__TAURI_INTERNALS__" in window;
 }
 
 function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void }) {
@@ -169,7 +176,9 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const [backupDir, setBackupDir] = useState("");
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [closeWarning, setCloseWarning] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const approvedNativeClose = useRef(false);
 
   async function handleCreateBackup() {
     setBusy(true);
@@ -184,28 +193,61 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
     }
   }
 
-  async function handleClose() {
-    if (rename.hasUnsavedWork) {
-      setCloseWarning("This Project has unsaved changes. Retry saving or discard before closing.");
-      return;
-    }
+  const closeAfterBackend = useCallback(async () => {
     setBusy(true);
+    setCloseError(null);
     try {
       await closeProject(project.projectId);
       onClosed();
+      if (isTauriWindow()) {
+        approvedNativeClose.current = true;
+        await getCurrentWindow().close();
+      }
     } catch (err) {
-      setCloseWarning(errorMessage(err));
+      setCloseError(errorMessage(err));
     } finally {
       setBusy(false);
     }
+  }, [onClosed, project.projectId]);
+
+  async function handleClose() {
+    if (decideClose(rename.saveState) === "confirm-unsaved") {
+      setCloseWarning("This Project has unsaved changes. Retry saving or discard before closing.");
+      return;
+    }
+    await closeAfterBackend();
   }
 
   function handleForceCloseDiscarding() {
     setCloseWarning(null);
-    closeProject(project.projectId)
-      .then(onClosed)
-      .catch((err) => setCloseWarning(errorMessage(err)));
+    void closeAfterBackend();
   }
+
+  useEffect(() => {
+    if (!isTauriWindow()) {
+      return;
+    }
+    const window = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    void window
+      .onCloseRequested((event) => {
+        if (approvedNativeClose.current) {
+          return;
+        }
+        event.preventDefault();
+        if (decideClose(rename.saveState) === "confirm-unsaved") {
+          setCloseWarning(
+            "This Project has unsaved changes. Retry saving or discard before closing.",
+          );
+        } else {
+          void closeAfterBackend();
+        }
+      })
+      .then((listener) => {
+        unlisten = listener;
+      });
+    return () => unlisten?.();
+  }, [closeAfterBackend, rename.saveState]);
 
   return (
     <main className="container">
@@ -270,6 +312,11 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
             <p>{closeWarning}</p>
             <button onClick={handleForceCloseDiscarding}>Close anyway (discard changes)</button>
           </div>
+        )}
+        {closeError && (
+          <p role="alert" className="error-banner">
+            {closeError}
+          </p>
         )}
         <button disabled={busy} onClick={handleClose}>
           Close Project

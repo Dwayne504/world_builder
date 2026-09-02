@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
-use crate::domain::ProjectId;
+use crate::domain::{ProjectId, WorkingName};
 use crate::package::{layout, manifest::Manifest, PackagePaths};
 use crate::persistence::ProjectDbWorker;
 
@@ -28,34 +28,49 @@ pub fn create_backup(
     live_paths: &PackagePaths,
     backup_root: &Path,
 ) -> Result<PathBuf, BackupError> {
-    let manifest = Manifest::read(&live_paths.manifest_path())?;
-    let project_dir = backup_root.join(manifest.project_id.to_string());
+    ensure_outside_live_package(backup_root, live_paths)?;
+    let project_dir = backup_root.join(
+        Manifest::read(&live_paths.manifest_path())?
+            .project_id
+            .to_string(),
+    );
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ").to_string();
     let backup_root_path = project_dir.join(format!("{stamp}.wcbackup"));
-
-    let backup_paths = layout::create_skeleton(&backup_root_path)?;
+    let staging_path = project_dir.join(format!(
+        ".{stamp}.wcbackup.creating-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let backup_paths = layout::create_skeleton(&staging_path)?;
 
     let result = (|| -> Result<(), BackupError> {
         // Consistent snapshot via the Online Backup API, run against the
         // live connection on its own worker thread.
-        worker.backup_to(backup_paths.db_path())?;
+        let snapshot = worker.backup_to(backup_paths.db_path())?;
 
         // Copy the manifest describing the *source* Project; restore
         // rewrites identity on the destination copy, never here.
-        fs::copy(live_paths.manifest_path(), backup_paths.manifest_path())?;
+        let mut manifest = Manifest::read(&live_paths.manifest_path())?;
+        manifest.project_id = snapshot.project_id;
+        manifest.working_name_cache = snapshot.working_name;
+        manifest.format_version = snapshot.format_version;
+        manifest.schema_version = snapshot.schema_version;
+        manifest.write(&backup_paths.manifest_path())?;
 
         copy_dir_contents(&live_paths.assets_dir(), &backup_paths.assets_dir())?;
         // `staging/` is intentionally left empty: staged imports are
         // recoverable-but-incomplete and are not portable authored content.
 
-        validate_backup(&backup_root_path)?;
+        validate_backup(&staging_path)?;
         Ok(())
     })();
 
     match result {
-        Ok(()) => Ok(backup_root_path),
+        Ok(()) => {
+            fs::rename(&staging_path, &backup_root_path)?;
+            Ok(backup_root_path)
+        }
         Err(e) => {
-            let _ = fs::remove_dir_all(&backup_root_path);
+            let _ = fs::remove_dir_all(&staging_path);
             Err(e)
         }
     }
@@ -68,6 +83,11 @@ pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
     let paths = layout::validate_structure(backup_root)
         .map_err(|_| BackupError::NotABackup(backup_root.display().to_string()))?;
     let manifest = Manifest::read(&paths.manifest_path())?;
+    if manifest.format_version > crate::package::FORMAT_VERSION
+        || manifest.schema_version > crate::persistence::migrations::CURRENT_SCHEMA_VERSION
+    {
+        return Err(BackupError::NotABackup(backup_root.display().to_string()));
+    }
 
     if !paths.db_path().is_file() {
         return Err(BackupError::CorruptSnapshot(
@@ -114,13 +134,15 @@ pub fn restore_as_copy(
     let backup_manifest = validate_backup(backup_root)?;
     let backup_paths = layout::PackagePaths::new(backup_root);
 
-    let working_name = new_working_name
-        .filter(|n| !n.trim().is_empty())
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| backup_manifest.working_name_cache.clone());
+    ensure_restore_destination_safe(backup_root, destination_dir)?;
+    let working_name = match new_working_name {
+        Some(name) => WorkingName::new(name)?.into_string(),
+        None => WorkingName::new(&backup_manifest.working_name_cache)?.into_string(),
+    };
 
     let new_root = layout::available_package_path(destination_dir, &working_name);
-    let new_paths = layout::create_skeleton(&new_root)?;
+    let staging_root = destination_dir.join(format!(".restore-{}.creating", uuid::Uuid::new_v4()));
+    let new_paths = layout::create_skeleton(&staging_root)?;
 
     let result = (|| -> Result<(), BackupError> {
         fs::copy(backup_paths.db_path(), new_paths.db_path())?;
@@ -151,13 +173,17 @@ pub fn restore_as_copy(
             ),
         };
         new_manifest.write(&new_paths.manifest_path())?;
+        validate_backup(&staging_root)?;
         Ok(())
     })();
 
     match result {
-        Ok(()) => Ok(new_root),
+        Ok(()) => {
+            fs::rename(&staging_root, &new_root)?;
+            Ok(new_root)
+        }
         Err(e) => {
-            let _ = fs::remove_dir_all(&new_root);
+            let _ = fs::remove_dir_all(&staging_root);
             Err(e)
         }
     }
@@ -175,7 +201,8 @@ fn rewrite_identity(
     backup_root: &Path,
 ) -> Result<(), BackupError> {
     let mut conn = Connection::open(db_path)?;
-    let tx = conn.transaction()?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let backup_id = backup_root
         .file_name()
         .and_then(|n| n.to_str())
@@ -200,7 +227,35 @@ fn rewrite_identity(
     if changed != 1 {
         return Err(BackupError::CorruptSnapshot(db_path.display().to_string()));
     }
+
     tx.commit()?;
+    Ok(())
+}
+
+fn canonical_or_lexical(path: &Path) -> Result<PathBuf, std::io::Error> {
+    if path.exists() {
+        return path.canonicalize();
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    Ok(canonical_or_lexical(parent)?.join(path.file_name().unwrap_or_default()))
+}
+
+fn ensure_outside_live_package(candidate: &Path, live: &PackagePaths) -> Result<(), BackupError> {
+    let candidate = canonical_or_lexical(candidate)?;
+    let root = canonical_or_lexical(&live.root)?;
+    if candidate == root || candidate.starts_with(&root) {
+        return Err(BackupError::UnsafePath(candidate.display().to_string()));
+    }
+    Ok(())
+}
+
+fn ensure_restore_destination_safe(backup: &Path, destination: &Path) -> Result<(), BackupError> {
+    let backup = canonical_or_lexical(backup)?;
+    let destination = canonical_or_lexical(destination)?;
+    if destination == backup || destination.starts_with(&backup) || backup.starts_with(&destination)
+    {
+        return Err(BackupError::UnsafePath(destination.display().to_string()));
+    }
     Ok(())
 }
 

@@ -16,6 +16,9 @@ pub enum BackupError {
     #[error(transparent)]
     Persistence(#[from] crate::persistence::PersistenceError),
 
+    #[error(transparent)]
+    Domain(#[from] crate::domain::DomainError),
+
     #[error("backup snapshot at '{0}' failed SQLite integrity_check")]
     CorruptSnapshot(String),
 
@@ -29,4 +32,7 @@ pub enum BackupError {
 
     #[error("'{0}' is not a valid Worldcrafter backup")]
     NotABackup(String),
+
+    #[error("unsafe backup or restore path: '{0}'")]
+    UnsafePath(String),
 }

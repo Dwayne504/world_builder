@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 
 use crate::domain::ProjectId;
 
@@ -59,7 +59,7 @@ enum Job {
     /// connection every other write goes through.
     BackupTo {
         dest_path: PathBuf,
-        reply: Reply<()>,
+        reply: Reply<ProjectMetaSnapshot>,
     },
     Shutdown {
         reply: Reply<()>,
@@ -135,16 +135,16 @@ impl ProjectDbWorker {
         pragmas::apply(&conn)?;
         migrations::migrate(&conn)?;
 
-        let existing: Option<(String, i64)> = conn
+        let existing: Option<(String, i64, i64, i64)> = conn
             .query_row(
-                "SELECT project_id, last_committed_revision FROM project_meta WHERE id = 1",
+                "SELECT project_id, last_committed_revision, format_version, schema_version FROM project_meta WHERE id = 1",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
-            .ok();
+            .optional()?;
 
         match (existing, initial) {
-            (Some((db_project_id, _)), _) => {
+            (Some((db_project_id, _, format_version, schema_version)), _) => {
                 let db_project_id = ProjectId::parse(&db_project_id)
                     .map_err(|e| PersistenceError::Other(e.to_string()))?;
                 if db_project_id != expected_project_id {
@@ -152,6 +152,15 @@ impl ProjectDbWorker {
                         manifest: expected_project_id,
                         database: db_project_id,
                     });
+                }
+                if format_version != crate::package::FORMAT_VERSION
+                    || schema_version != migrations::user_version(&conn)?
+                    || schema_version != migrations::CURRENT_SCHEMA_VERSION
+                {
+                    return Err(PersistenceError::Other(
+                        "project metadata version does not match supported database schema"
+                            .to_string(),
+                    ));
                 }
                 Ok(conn)
             }
@@ -195,7 +204,8 @@ impl ProjectDbWorker {
                     ));
                 }
                 Job::BackupTo { dest_path, reply } => {
-                    let _ = reply.send(backup_to(&conn, &dest_path));
+                    let _ =
+                        reply.send(backup_to(&conn, &dest_path).and_then(|()| read_meta(&conn)));
                 }
                 Job::Shutdown { reply } => {
                     let _ = reply.send(Ok(()));
@@ -232,7 +242,7 @@ impl ProjectDbWorker {
     }
 
     /// Runs a consistent SQLite Online Backup snapshot to `dest_path`.
-    pub fn backup_to(&self, dest_path: PathBuf) -> Result<(), PersistenceError> {
+    pub fn backup_to(&self, dest_path: PathBuf) -> Result<ProjectMetaSnapshot, PersistenceError> {
         self.call(|reply| Job::BackupTo { dest_path, reply })
     }
 

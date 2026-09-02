@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { renameProject } from "./api";
 import type { ProjectSummary, SaveState } from "./types";
 
@@ -30,35 +30,53 @@ export function useProjectRename(project: ProjectSummary): UseProjectRenameResul
   const [revision, setRevision] = useState(project.revision);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const draftRef = useRef(draftName);
+  const committedNameRef = useRef(committedName);
+  const revisionRef = useRef(revision);
+  const inFlightRef = useRef<Promise<void> | null>(null);
 
-  const onChangeDraft = useCallback(
-    (value: string) => {
-      setDraftName(value);
-      setSaveState(value === committedName ? "saved" : "dirty");
-      setErrorMessage(null);
-    },
-    [committedName],
-  );
+  const onChangeDraft = useCallback((value: string) => {
+    draftRef.current = value;
+    setDraftName(value);
+    setSaveState(value === committedNameRef.current ? "saved" : "dirty");
+    setErrorMessage(null);
+  }, []);
 
-  const submit = useCallback(async () => {
-    if (draftName === committedName) {
-      return;
+  const submit = useCallback((): Promise<void> => {
+    if (inFlightRef.current) {
+      return inFlightRef.current;
+    }
+    const submittedName = draftRef.current;
+    const submittedRevision = revisionRef.current;
+    if (submittedName === committedNameRef.current) {
+      return Promise.resolve();
     }
     setSaveState("saving");
     setErrorMessage(null);
-    try {
-      const updated = await renameProject(project.projectId, draftName, revision);
-      setCommittedName(updated.workingName);
-      setRevision(updated.revision);
-      setDraftName(updated.workingName);
-      setSaveState("saved");
-    } catch (err) {
-      // The dirty draft value is intentionally retained: a failed save
-      // must never silently claim "Saved" or discard what the user typed.
-      setSaveState("failed");
-      setErrorMessage(err instanceof Error ? err.message : "Failed to save.");
-    }
-  }, [draftName, committedName, project.projectId, revision]);
+    const request = renameProject(project.projectId, submittedName, submittedRevision)
+      .then((updated) => {
+        committedNameRef.current = updated.workingName;
+        revisionRef.current = updated.revision;
+        setCommittedName(updated.workingName);
+        setRevision(updated.revision);
+        if (draftRef.current === submittedName) {
+          setDraftName(updated.workingName);
+          setSaveState("saved");
+        } else {
+          setSaveState("dirty");
+        }
+      })
+      .catch((err: unknown) => {
+        // A newer draft must remain pending even when the older save failed.
+        setSaveState("failed");
+        setErrorMessage(err instanceof Error ? err.message : "Failed to save.");
+      })
+      .finally(() => {
+        inFlightRef.current = null;
+      });
+    inFlightRef.current = request;
+    return request;
+  }, [project.projectId]);
 
   const retry = submit;
 

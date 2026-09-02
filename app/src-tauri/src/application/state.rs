@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -13,9 +13,9 @@ use crate::persistence::ProjectDbWorker;
 /// Project. Owned exclusively by [`AppState`]; nothing outside
 /// `application` touches `worker` or `lock` directly.
 pub struct OpenProject {
-    pub worker: ProjectDbWorker,
+    pub worker: Mutex<Option<ProjectDbWorker>>,
     pub paths: PackagePaths,
-    pub lock: LockGuard,
+    pub lock: Mutex<Option<LockGuard>>,
 }
 
 /// Process-wide registry of open Projects. Held behind a `Mutex` inside
@@ -23,7 +23,7 @@ pub struct OpenProject {
 /// operations (insert/remove/lookup), never a blocking SQLite call.
 #[derive(Default)]
 pub struct AppState {
-    pub open_projects: Mutex<HashMap<ProjectId, OpenProject>>,
+    pub open_projects: Mutex<HashMap<ProjectId, Arc<OpenProject>>>,
 }
 
 /// A read-only, serializable snapshot of a Project's state, suitable for

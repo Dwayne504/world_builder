@@ -59,13 +59,33 @@ impl Manifest {
     pub fn write(&self, path: &Path) -> Result<(), PackageError> {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| PackageError::InvalidManifest(e.to_string()))?;
-        let tmp_path = path.with_extension("json.tmp");
+        let tmp_path = path.with_extension(format!("json.tmp-{}", uuid::Uuid::new_v4()));
         {
             let mut f = fs::File::create(&tmp_path)?;
             f.write_all(json.as_bytes())?;
             f.sync_all()?;
         }
-        fs::rename(&tmp_path, path)?;
+        if let Err(error) = fs::rename(&tmp_path, path) {
+            // Windows does not replace an existing destination with rename.
+            // The fully synced temporary file remains authoritative until the
+            // old cache is removed; a crash can leave a recoverable temp but
+            // never a truncated manifest.
+            if path.exists() {
+                fs::remove_file(path)?;
+                if let Err(rename_error) = fs::rename(&tmp_path, path) {
+                    let _ = fs::remove_file(&tmp_path);
+                    return Err(PackageError::Io(rename_error));
+                }
+            } else {
+                let _ = fs::remove_file(&tmp_path);
+                return Err(PackageError::Io(error));
+            }
+        }
+        if let Some(parent) = path.parent() {
+            if let Ok(dir) = fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
         Ok(())
     }
 }
@@ -91,5 +111,16 @@ mod tests {
         let path = dir.path().join("manifest.json");
         fs::write(&path, "{ not json").unwrap();
         assert!(Manifest::read(&path).is_err());
+    }
+
+    #[test]
+    fn repeatedly_replaces_an_existing_manifest() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("manifest.json");
+        let first = Manifest::new(ProjectId::new(), 1, 1, "Tortuga");
+        first.write(&path).unwrap();
+        let second = Manifest::new(ProjectId::new(), 1, 1, "Arak");
+        second.write(&path).unwrap();
+        assert_eq!(Manifest::read(&path).unwrap(), second);
     }
 }
