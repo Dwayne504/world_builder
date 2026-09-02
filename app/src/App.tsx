@@ -260,7 +260,9 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           return;
         case "confirm-unsaved-project":
         case "confirm-unsaved-native-window":
-          setPendingCloseIntent(intent);
+          setPendingCloseIntent((current) =>
+            current === "native-window" || intent === "native-window" ? "native-window" : "project",
+          );
       }
     },
     [closeAfterBackend],

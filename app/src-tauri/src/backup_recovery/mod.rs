@@ -251,29 +251,52 @@ fn canonical_or_lexical(path: &Path) -> Result<PathBuf, std::io::Error> {
     } else {
         std::env::current_dir()?.join(path)
     };
-    let mut normalized = PathBuf::new();
-    for component in absolute.components() {
+    resolve_prospective_path(&absolute, 0)
+}
+
+fn resolve_prospective_path(path: &Path, symlink_depth: usize) -> Result<PathBuf, std::io::Error> {
+    if symlink_depth > 40 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "too many symlink levels",
+        ));
+    }
+
+    let mut resolved = PathBuf::new();
+    for component in path.components() {
         match component {
             std::path::Component::Prefix(_) | std::path::Component::RootDir => {
-                normalized.push(component)
+                resolved.push(component)
             }
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                normalized.pop();
+                resolved.pop();
             }
-            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::Normal(part) => {
+                resolved.push(part);
+                match fs::symlink_metadata(&resolved) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        let target = fs::read_link(&resolved)?;
+                        let target = if target.is_absolute() {
+                            target
+                        } else {
+                            resolved
+                                .parent()
+                                .unwrap_or_else(|| Path::new(""))
+                                .join(target)
+                        };
+                        resolved = resolve_prospective_path(&target, symlink_depth + 1)?;
+                    }
+                    Ok(_) => {
+                        resolved = resolved.canonicalize()?;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err),
+                }
+            }
         }
     }
-    let mut existing = normalized.as_path();
-    let mut tail = Vec::new();
-    while !existing.exists() {
-        tail.push(existing.file_name().unwrap().to_os_string());
-        existing = existing.parent().unwrap_or_else(|| Path::new("/"));
-    }
-    let mut resolved = existing.canonicalize()?;
-    for component in tail.iter().rev() {
-        resolved.push(component);
-    }
+
     Ok(resolved)
 }
 
@@ -329,6 +352,8 @@ mod tests {
     use super::*;
     use crate::package;
     use crate::persistence::worker::InitialProjectMeta;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     use tempfile::tempdir;
 
     fn make_project(dir: &Path, name: &str) -> (ProjectId, PackagePaths, ProjectDbWorker) {
@@ -437,6 +462,23 @@ mod tests {
                 .canonicalize()
                 .unwrap()
                 .join("sibling/new-output")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prospective_normalization_resolves_symlink_parents_component_by_component() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("real/nested")).unwrap();
+        symlink("real/nested", dir.path().join("alias")).unwrap();
+
+        let path = dir.path().join("alias/../future/output");
+        assert_eq!(
+            canonical_or_lexical(&path).unwrap(),
+            dir.path()
+                .canonicalize()
+                .unwrap()
+                .join("real/future/output")
         );
     }
 

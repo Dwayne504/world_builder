@@ -49,9 +49,17 @@ impl Manifest {
     }
 
     pub fn read(path: &Path) -> Result<Self, PackageError> {
-        recover(path)?;
+        Self::recover_if_needed(path)?;
         let raw = fs::read_to_string(path)?;
         serde_json::from_str(&raw).map_err(|e| PackageError::InvalidManifest(e.to_string()))
+    }
+
+    /// Repairs an interrupted atomic manifest replacement if a valid synced
+    /// sibling recovery file exists. This is safe to call before package
+    /// structure checks so an open/validate path can recover a missing
+    /// `manifest.json` instead of rejecting the package outright.
+    pub fn recover_if_needed(path: &Path) -> Result<(), PackageError> {
+        recover(path)
     }
 
     /// Writes the manifest atomically: write to a sibling temp file, then
@@ -163,6 +171,18 @@ mod tests {
             serde_json::to_vec(&manifest).unwrap(),
         )
         .unwrap();
+        assert_eq!(Manifest::read(&path).unwrap(), manifest);
+    }
+
+    #[test]
+    fn explicit_recovery_is_safe_when_manifest_already_exists() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("manifest.json");
+        let manifest = Manifest::new(ProjectId::new(), 1, 1, "Tortuga");
+        manifest.write(&path).unwrap();
+
+        Manifest::recover_if_needed(&path).unwrap();
+
         assert_eq!(Manifest::read(&path).unwrap(), manifest);
     }
 }

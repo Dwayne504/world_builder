@@ -150,6 +150,21 @@ describe("Project screen Saved contract", () => {
     await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
   });
 
+  it("does not downgrade a pending native close when the in-app button is clicked", async () => {
+    enableTauriWindow();
+    closeProjectMock.mockResolvedValueOnce(undefined);
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Unsaved Rename" },
+    });
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close app anyway (discard changes)" }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
+  });
+
   it("cleans up a native close listener even when registration resolves after unmount", async () => {
     enableTauriWindow();
     let resolveListener!: (listener: () => void) => void;

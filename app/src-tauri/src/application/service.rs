@@ -81,6 +81,7 @@ impl ProjectService {
         let paths = package::layout::validate_structure(package_root)?;
         let manifest = Manifest::read(&paths.manifest_path())?;
         ensure_manifest_is_writable(&manifest)?;
+        ProjectDbWorker::preflight_existing(paths.db_path(), manifest.project_id)?;
 
         let lock_guard = lock::acquire(
             &paths.lock_path(),
