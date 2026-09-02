@@ -1,6 +1,8 @@
-# Tauri + React + Typescript
+# Worldcrafter (app)
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Tauri 2 + React 19 + TypeScript frontend with a Rust backend (`src-tauri/`).
+
+See the repository root [`README.md`](../README.md) for prerequisites, install/dev/test/build commands, the currently implemented slice, and non-goals.
 
 ## Recommended IDE Setup
 

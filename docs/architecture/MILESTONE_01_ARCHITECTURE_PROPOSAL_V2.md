@@ -1,6 +1,6 @@
 # The Worldcrafter — Milestone 01 Architecture Proposal V2
 
-**Status:** Architecture revision for approval. **Scope:** architecture only; no application implementation is authorized by this document.
+**Status:** Approved for Milestone 01 implementation. **Scope:** this document defines the technical architecture; implementation proceeds strictly vertical-slice by vertical-slice as scoped in `MILESTONE_01_IMPLEMENTATION.md`, starting with the Project Trust Foundation slice.
 
 ## 1. Executive verdict and revision summary
 
