@@ -1,6 +1,3 @@
-# world_builder
-A small world creating helper
-
 ## The Worldcrafter application
 
 The Worldcrafter is a local-first desktop application for worldbuilding and story
