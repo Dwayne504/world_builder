@@ -717,6 +717,9 @@ describe("Project screen Saved contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
     await waitFor(() => expect(updateEntryNameMock).toHaveBeenCalledTimes(1));
     expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("entry-category")).toBeDisabled();
+    expect(screen.getByLabelText("entry-type")).toBeDisabled();
+    expect(screen.getByLabelText("entry-name")).toBeDisabled();
     nameSave.resolve({
       ...entry,
       authoredName: "Thron II",

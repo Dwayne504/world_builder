@@ -381,16 +381,23 @@ function EntryEditor({
   }, [categoryId, projectId]);
 
   async function saveStructure() {
-    const nameOutcome = await submit();
-    if (nameOutcome.kind === "failed" || nameOutcome.kind === "committed-stale") return;
+    const submittedCategoryId = categoryId;
+    const submittedTypeId = typeId;
     const outcome = await mutations.run(
       async () => {
+        const nameOutcome = await submit();
+        if (nameOutcome.kind === "failed") {
+          throw new Error("Entry name must save before applying Category / Type.");
+        }
+        if (nameOutcome.kind === "committed-stale") {
+          throw new Error("Entry name changed while applying Category / Type.");
+        }
         const current = editor.currentEntry();
         return changeEntryStructure(
           projectId,
           current.id,
-          categoryId,
-          typeId || undefined,
+          submittedCategoryId,
+          submittedTypeId || undefined,
           current.revision,
         );
       },
@@ -417,6 +424,7 @@ function EntryEditor({
         Name (optional)
         <input
           aria-label="entry-name"
+          disabled={mutations.state === "saving"}
           value={editor.draftName}
           onChange={(event) => editor.onChangeDraft(event.currentTarget.value)}
         />
