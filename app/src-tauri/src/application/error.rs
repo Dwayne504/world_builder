@@ -55,7 +55,6 @@ impl AppError {
             AppError::Backup(_) => "backup_error",
             AppError::Lock(LockError::Held { .. }) => "lock_held",
             AppError::Lock(LockError::RecoveryRequired) => "lock_recovery_required",
-            AppError::Lock(LockError::NotStale) => "lock_not_stale",
             AppError::Lock(LockError::Corrupt(_)) => "lock_metadata_corrupt",
             AppError::Lock(LockError::Io(_)) => "io_error",
             AppError::ProjectNotOpen(_) => "project_not_open",

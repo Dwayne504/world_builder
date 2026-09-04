@@ -5,12 +5,14 @@
 
 use std::path::PathBuf;
 
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::application::{AppState, ProjectService};
 use crate::domain::{CategoryId, EntryId, ProjectId, TypeId};
+use crate::preferences::{self, PreferencesError};
 
-use super::dto::{AppErrorDto, CategoryDto, EntryDto, ProjectSummaryDto, TypeDto};
+use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
 fn parse_project_id(raw: &str) -> Result<ProjectId, AppErrorDto> {
     ProjectId::parse(raw).map_err(|e| AppErrorDto {
@@ -24,6 +26,31 @@ fn invalid_input(message: impl ToString) -> AppErrorDto {
         kind: "invalid_input".to_string(),
         message: message.to_string(),
     }
+}
+
+impl From<PreferencesError> for AppErrorDto {
+    fn from(error: PreferencesError) -> Self {
+        let kind = match &error {
+            PreferencesError::Io(_) => "io_error",
+            PreferencesError::Corrupt(_) => "preferences_corrupt",
+            PreferencesError::NoConfigDir(_) => "preferences_unavailable",
+        };
+        AppErrorDto {
+            kind: kind.to_string(),
+            message: error.to_string(),
+        }
+    }
+}
+
+/// The single on-disk location for application-level preferences: the OS
+/// application-config directory, entirely outside every `.wcproj`
+/// package and never treated as Project data.
+fn preferences_path(app: &AppHandle) -> Result<PathBuf, AppErrorDto> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| PreferencesError::NoConfigDir(e.to_string()))?;
+    Ok(dir.join(preferences::PREFERENCES_FILE))
 }
 
 #[tauri::command]
@@ -262,4 +289,49 @@ pub fn change_entry_structure(
     )
     .map(Into::into)
     .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn get_preferences(app: AppHandle) -> Result<PreferencesDto, AppErrorDto> {
+    let path = preferences_path(&app)?;
+    Ok(preferences::load(&path)?.into())
+}
+
+#[tauri::command]
+pub fn set_default_projects_dir(
+    app: AppHandle,
+    directory: Option<String>,
+) -> Result<PreferencesDto, AppErrorDto> {
+    let path = preferences_path(&app)?;
+    let mut prefs = preferences::load(&path)?;
+    prefs.default_projects_dir = directory.filter(|d| !d.is_empty()).map(PathBuf::from);
+    preferences::save(&path, &prefs)?;
+    Ok(prefs.into())
+}
+
+#[tauri::command]
+pub fn set_default_backups_dir(
+    app: AppHandle,
+    directory: Option<String>,
+) -> Result<PreferencesDto, AppErrorDto> {
+    let path = preferences_path(&app)?;
+    let mut prefs = preferences::load(&path)?;
+    prefs.default_backups_dir = directory.filter(|d| !d.is_empty()).map(PathBuf::from);
+    preferences::save(&path, &prefs)?;
+    Ok(prefs.into())
+}
+
+/// Shows a native folder picker, optionally starting in `default_path`.
+/// Returns `None` when the user cancels the dialog; this is never treated
+/// as an error.
+#[tauri::command]
+pub fn pick_directory(app: AppHandle, default_path: Option<String>) -> Option<String> {
+    let mut builder = app.dialog().file();
+    if let Some(path) = default_path.filter(|p| !p.is_empty()) {
+        builder = builder.set_directory(path);
+    }
+    builder
+        .blocking_pick_folder()
+        .and_then(|picked| picked.into_path().ok())
+        .map(|p| p.display().to_string())
 }

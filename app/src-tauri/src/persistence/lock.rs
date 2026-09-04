@@ -14,7 +14,6 @@ use uuid::Uuid;
 
 use crate::domain::ProjectId;
 
-pub const STALE_LOCK_THRESHOLD: Duration = Duration::from_secs(30 * 60);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,13 +43,6 @@ impl LockInfo {
             heartbeat_at: now,
         }
     }
-    pub fn is_stale(&self) -> bool {
-        Utc::now()
-            .signed_duration_since(self.heartbeat_at)
-            .to_std()
-            .unwrap_or_default()
-            > STALE_LOCK_THRESHOLD
-    }
 }
 #[derive(Debug, Error)]
 pub enum LockError {
@@ -60,12 +52,8 @@ pub enum LockError {
         host: String,
         acquired_at: DateTime<Utc>,
     },
-    #[error("a previous session ended without releasing the Project; the leftover lock metadata is old enough to discard, so you can explicitly recover the Project")]
+    #[error("a previous session ended without releasing the Project (for example after a crash or power loss); the OS lock is free, so you can explicitly recover the Project")]
     RecoveryRequired,
-    #[error(
-        "a previous session ended recently; the leftover lock metadata is not old enough to discard safely, so explicit recovery is not available yet"
-    )]
-    NotStale,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("the leftover lock metadata is unreadable or corrupt ({0}); it was left untouched")]
@@ -156,14 +144,16 @@ pub fn acquire(
     // Decision order matters:
     // 1. The OS advisory guard is authoritative -- first prove it is not
     //    actively held by another instance. An active lock is never stolen
-    //    or bypassed, not even with `recover_stale`.
+    //    or bypassed, not even with `recover_stale`, and never offered for
+    //    recovery.
     // 2. Only once the guard is ours, read and validate the heartbeat
     //    metadata (never authoritative, only evidence about a previous
     //    session).
-    // 3. Determine whether the metadata satisfies the stale threshold.
-    //    Only genuinely stale metadata may report that explicit recovery is
-    //    available; fresh metadata must not be labelled "stale", and the
-    //    stale file is never removed without an explicit `recover_stale`.
+    // 3. Any readable leftover metadata, regardless of its age, means a
+    //    previous session ended without releasing the Project: explicit
+    //    recovery is immediately available. There is no waiting period --
+    //    recovery is never automatic, and a normal (non-recovering) open
+    //    attempt never alters or refreshes the leftover metadata.
     let guard = OpenOptions::new()
         .read(true)
         .write(true)
@@ -193,24 +183,17 @@ pub fn acquire(
         });
     }
     if lock_path.exists() {
-        let previous = match read_metadata(lock_path) {
-            Ok(info) => info,
-            Err(error) => {
-                // Corrupt/unreadable metadata is never deleted: failing
-                // safely preserves the evidence for manual inspection.
-                let _ = guard.unlock();
-                return Err(error);
-            }
-        };
-        if !previous.is_stale() {
-            // Leftover metadata that is too fresh to declare stale must not
-            // be reported as recoverable: a live (or just-crashed) owner
-            // may still be around.
+        // Validate the metadata is at least readable evidence of a
+        // previous session; its content (including age) never gates
+        // whether recovery is offered.
+        if let Err(error) = read_metadata(lock_path) {
+            // Corrupt/unreadable metadata is never deleted: failing
+            // safely preserves the evidence for manual inspection.
             let _ = guard.unlock();
-            return Err(LockError::NotStale);
+            return Err(error);
         }
         if !recover_stale {
-            // The stale file stays exactly where it is until the caller
+            // The leftover file stays exactly where it is until the caller
             // explicitly re-runs with recovery enabled.
             let _ = guard.unlock();
             return Err(LockError::RecoveryRequired);
@@ -271,13 +254,10 @@ mod tests {
     }
 
     #[test]
-    fn stale_metadata_cannot_recover_while_an_os_owner_is_active() {
+    fn leftover_metadata_cannot_recover_while_an_os_owner_is_active() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("lock.json");
         let owner = acquire(&path, ProjectId::new(), false).unwrap();
-        let mut metadata = read_metadata(&path).unwrap();
-        metadata.heartbeat_at = Utc::now() - chrono::Duration::hours(1);
-        write_metadata(&path, &metadata).unwrap();
         assert!(matches!(
             acquire(&path, ProjectId::new(), true),
             Err(LockError::Held { .. })
@@ -286,32 +266,34 @@ mod tests {
     }
 
     #[test]
-    fn fresh_metadata_without_an_os_owner_reports_not_stale_not_recovery() {
+    fn fresh_leftover_metadata_without_an_os_owner_offers_immediate_recovery() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("lock.json");
-        // Orphaned metadata from a crashed session with a recent heartbeat.
-        write_metadata(&path, &LockInfo::new(ProjectId::new())).unwrap();
+        // Orphaned metadata from a crashed session with a heartbeat only
+        // moments old. Recovery must not require any waiting period.
+        let fresh = LockInfo::new(ProjectId::new());
+        write_metadata(&path, &fresh).unwrap();
 
-        // Normal open must not call fresh leftover metadata "stale".
         assert!(matches!(
             acquire(&path, ProjectId::new(), false),
-            Err(LockError::NotStale)
+            Err(LockError::RecoveryRequired)
         ));
-        // Even an explicit recovery request must refuse: it is not old
-        // enough to discard safely.
-        assert!(matches!(
-            acquire(&path, ProjectId::new(), true),
-            Err(LockError::NotStale)
-        ));
-        // The fresh metadata was left untouched, and the guard was
-        // released again so a future acquisition is not blocked by us.
-        assert!(read_metadata(&path).is_ok());
-        let owner = acquire(&path, ProjectId::new(), true);
-        assert!(matches!(owner, Err(LockError::NotStale)));
+        // A normal (non-recovering) open attempt must not alter or refresh
+        // the leftover metadata.
+        let after = read_metadata(&path).unwrap();
+        assert_eq!(after.session_token, fresh.session_token);
+
+        let project_id = ProjectId::new();
+        let guard = acquire(&path, project_id, true).unwrap();
+        let recovered = read_metadata(&path).unwrap();
+        assert_eq!(recovered.project_id, project_id);
+        assert_ne!(recovered.session_token, fresh.session_token);
+        guard.release();
+        assert!(!path.exists());
     }
 
     #[test]
-    fn stale_metadata_without_an_os_owner_requires_explicit_recovery() {
+    fn old_leftover_metadata_without_an_os_owner_requires_explicit_recovery() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("lock.json");
         let mut orphan = LockInfo::new(ProjectId::new());

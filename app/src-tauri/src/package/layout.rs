@@ -76,6 +76,10 @@ pub fn sanitize_directory_stem(working_name: &str) -> String {
 
 /// Builds an available (non-colliding) package path under `base_dir` for
 /// the given working name, trying `Name.wcproj`, `Name (2).wcproj`, etc.
+/// Used only where silently choosing a nearby free name is appropriate
+/// (e.g. Restore as Copy); Project creation uses
+/// [`single_candidate_package_path`] instead so a collision is always
+/// visibly reported rather than silently side-stepped.
 pub fn available_package_path(base_dir: &Path, working_name: &str) -> PathBuf {
     let stem = sanitize_directory_stem(working_name);
     let mut candidate = base_dir.join(format!("{stem}.{PACKAGE_EXTENSION}"));
@@ -85,6 +89,15 @@ pub fn available_package_path(base_dir: &Path, working_name: &str) -> PathBuf {
         suffix += 1;
     }
     candidate
+}
+
+/// Builds the single, filesystem-safe candidate package path under
+/// `base_dir` for the given working name (`<working name>.wcproj`), never
+/// silently choosing an alternative. Callers must report a collision at
+/// this exact path to the user instead of renaming around it.
+pub fn single_candidate_package_path(base_dir: &Path, working_name: &str) -> PathBuf {
+    let stem = sanitize_directory_stem(working_name);
+    base_dir.join(format!("{stem}.{PACKAGE_EXTENSION}"))
 }
 
 /// Creates the package's directory skeleton (`data/`, `assets/`,
@@ -187,6 +200,17 @@ mod tests {
         let second = available_package_path(dir.path(), "Tortuga");
         assert_ne!(first, second);
         assert!(second.to_string_lossy().contains("(2)"));
+    }
+
+    #[test]
+    fn single_candidate_package_path_never_avoids_collisions() {
+        let dir = tempdir().unwrap();
+        let first = single_candidate_package_path(dir.path(), "Tortuga");
+        fs::create_dir_all(&first).unwrap();
+        // Unlike `available_package_path`, this always returns the same
+        // candidate so the caller can visibly report the collision.
+        let second = single_candidate_package_path(dir.path(), "Tortuga");
+        assert_eq!(first, second);
     }
 
     #[test]
