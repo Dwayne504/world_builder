@@ -5,12 +5,12 @@
 //! must never be opened for writing by this build -- it may belong to a
 //! newer Worldcrafter version.
 //!
-//! Existing packages are currently fail-closed on *older* schema versions too:
-//! until manifest publication has a coordinated, crash-recoverable migration
-//! protocol, opening an older package must not mutate only the database and
-//! strand the manifest on an older version marker.
+//! Older supported schemas are upgraded as one atomic chain after the caller
+//! acquires the Project lock and creates a validated external recovery point.
+//! The database may therefore be ahead of the manifest only when manifest
+//! publication was interrupted; the open path republishes that cache safely.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 
 use super::error::PersistenceError;
 
@@ -20,9 +20,25 @@ pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 /// Ordered (version, sql) pairs. Each migration is applied at most once and
 /// migrations must be applied in order starting just above the database's
 /// current `user_version`.
-const MIGRATIONS: &[(i64, &str)] = &[
-    (1, include_str!("migrations/0001_init.sql")),
-    (2, include_str!("migrations/0002_project_structure.sql")),
+type MigrationHook = for<'connection> fn(&Transaction<'connection>) -> Result<(), PersistenceError>;
+
+struct Migration {
+    version: i64,
+    sql: &'static str,
+    after_sql: Option<MigrationHook>,
+}
+
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: include_str!("migrations/0001_init.sql"),
+        after_sql: None,
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("migrations/0002_project_structure.sql"),
+        after_sql: Some(add_uncategorized),
+    },
 ];
 
 /// Applies any migrations newer than the database's current version.
@@ -38,27 +54,54 @@ pub fn migrate(conn: &Connection) -> Result<(), PersistenceError> {
         });
     }
 
-    for (version, sql) in MIGRATIONS {
-        if *version > current_version {
-            let tx = conn.unchecked_transaction()?;
-            tx.execute_batch(sql)?;
-            if *version == 2 {
-                let now = chrono::Utc::now().to_rfc3339();
-                tx.execute(
-                    "INSERT INTO category (
-                        id, name, is_uncategorized, created_at, updated_at, revision
-                     ) VALUES (?1, 'Uncategorized', 1, ?2, ?2, 0)",
-                    rusqlite::params![crate::domain::CategoryId::new().to_string(), now],
-                )?;
-                tx.execute(
-                    "UPDATE project_meta SET schema_version = ?1 WHERE id = 1",
-                    [version],
-                )?;
-            }
-            tx.pragma_update(None, "user_version", version)?;
-            tx.commit()?;
-        }
+    let pending: Vec<&Migration> = MIGRATIONS
+        .iter()
+        .filter(|migration| migration.version > current_version)
+        .collect();
+    if pending.is_empty() {
+        return Ok(());
     }
+
+    apply_pending_chain(conn, current_version, &pending)?;
+    Ok(())
+}
+
+fn apply_pending_chain(
+    conn: &Connection,
+    current_version: i64,
+    pending: &[&Migration],
+) -> Result<(), PersistenceError> {
+    let tx = conn.unchecked_transaction()?;
+    let mut applied_version = current_version;
+    for migration in pending {
+        if migration.version != applied_version + 1 {
+            return Err(PersistenceError::Other(format!(
+                "migration chain is not contiguous after schema version {applied_version}"
+            )));
+        }
+        tx.execute_batch(migration.sql)?;
+        if let Some(after_sql) = migration.after_sql {
+            after_sql(&tx)?;
+        }
+        applied_version = migration.version;
+    }
+    tx.execute(
+        "UPDATE project_meta SET schema_version = ?1 WHERE id = 1",
+        [applied_version],
+    )?;
+    tx.pragma_update(None, "user_version", applied_version)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn add_uncategorized(tx: &Transaction<'_>) -> Result<(), PersistenceError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute(
+        "INSERT INTO category (
+            id, name, is_uncategorized, created_at, updated_at, revision
+         ) VALUES (?1, 'Uncategorized', 1, ?2, ?2, 0)",
+        rusqlite::params![crate::domain::CategoryId::new().to_string(), now],
+    )?;
     Ok(())
 }
 
@@ -107,6 +150,63 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         assert_eq!(user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn a_failing_multi_step_chain_rolls_back_every_pending_migration_and_can_retry() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE project_meta (
+                id INTEGER PRIMARY KEY,
+                schema_version INTEGER NOT NULL
+             );
+             INSERT INTO project_meta VALUES (1, 0);",
+        )
+        .unwrap();
+        let first = Migration {
+            version: 1,
+            sql: "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY);",
+            after_sql: None,
+        };
+        let failing = Migration {
+            version: 2,
+            sql: "INSERT INTO table_that_does_not_exist VALUES (1);",
+            after_sql: None,
+        };
+        let error = apply_pending_chain(&conn, 0, &[&first, &failing]).unwrap_err();
+        assert!(matches!(error, PersistenceError::Sqlite(_)));
+        assert_eq!(user_version(&conn).unwrap(), 0);
+        assert_eq!(
+            conn.query_row(
+                "SELECT schema_version FROM project_meta WHERE id = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
+        );
+        assert!(!table_exists(&conn, "migration_probe"));
+
+        let second = Migration {
+            version: 2,
+            sql: "CREATE TABLE migration_probe_two (id INTEGER PRIMARY KEY);",
+            after_sql: None,
+        };
+        apply_pending_chain(&conn, 0, &[&first, &second]).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), 2);
+        assert!(table_exists(&conn, "migration_probe"));
+        assert!(table_exists(&conn, "migration_probe_two"));
+    }
+
+    fn table_exists(conn: &Connection, name: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1
+             )",
+            [name],
+            |row| row.get(0),
+        )
+        .unwrap()
     }
 
     #[test]

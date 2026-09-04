@@ -100,7 +100,11 @@ impl ProjectService {
 
         let result = (|| -> Result<(ProjectDbWorker, ProjectSummary), AppError> {
             if preflight.schema_version < crate::persistence::migrations::CURRENT_SCHEMA_VERSION {
-                crate::backup_recovery::create_pre_migration_snapshot(&paths, &manifest)?;
+                crate::backup_recovery::create_pre_migration_snapshot(
+                    &paths,
+                    manifest.project_id,
+                    preflight.schema_version,
+                )?;
             }
             let worker = ProjectDbWorker::spawn(paths.db_path(), manifest.project_id, None)?;
             let summary = summary_from_worker(&worker, &paths)?;
@@ -549,8 +553,19 @@ mod tests {
         let state = AppState::default();
         let dir = tempdir().unwrap();
         let created = ProjectService::create_project(&state, dir.path(), "Tortuga").unwrap();
-        ProjectService::rename_project(&state, created.project_id, "Renamed", created.revision)
-            .unwrap();
+        let category =
+            ProjectService::create_category(&state, created.project_id, "Characters").unwrap();
+        let type_def =
+            ProjectService::create_type(&state, created.project_id, category.id, None, "Human")
+                .unwrap();
+        let entry = ProjectService::create_entry(
+            &state,
+            created.project_id,
+            Some(category.id),
+            Some(type_def.id),
+            Some("Thron".to_string()),
+        )
+        .unwrap();
 
         let backup_root = dir.path().join("backups");
         let backup_path =
@@ -566,9 +581,40 @@ mod tests {
         .unwrap();
         assert_ne!(restored.project_id, created.project_id);
         assert_eq!(restored.working_name, "Tortuga Copy");
+        let restored_categories =
+            ProjectService::list_categories(&state, restored.project_id).unwrap();
+        let restored_category = restored_categories
+            .iter()
+            .find(|candidate| candidate.name == "Characters")
+            .unwrap();
+        assert_eq!(restored_category.id, category.id);
+        let restored_types =
+            ProjectService::list_types(&state, restored.project_id, restored_category.id).unwrap();
+        assert_eq!(restored_types[0].id, type_def.id);
+        assert_eq!(restored_types[0].category_id, category.id);
+        let restored_entries = ProjectService::list_entries(&state, restored.project_id).unwrap();
+        assert_eq!(restored_entries[0].id, entry.id);
+        assert_eq!(restored_entries[0].category_id, category.id);
+        assert_eq!(restored_entries[0].type_id, Some(type_def.id));
+
+        ProjectService::update_entry_name(
+            &state,
+            restored.project_id,
+            entry.id,
+            restored_entries[0].revision,
+            Some("Restored Thron".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            ProjectService::get_entry(&state, created.project_id, entry.id)
+                .unwrap()
+                .authored_name
+                .as_deref(),
+            Some("Thron")
+        );
 
         let original = ProjectService::get_summary(&state, created.project_id).unwrap();
-        assert_eq!(original.working_name, "Renamed");
+        assert_eq!(original.working_name, "Tortuga");
 
         ProjectService::close_project(&state, created.project_id).unwrap();
         ProjectService::close_project(&state, restored.project_id).unwrap();
@@ -623,6 +669,24 @@ mod tests {
             .join(created.project_id.to_string())
             .join("schema-v1.sqlite");
         assert!(recovery.is_file());
+        let recovery_db = rusqlite::Connection::open_with_flags(
+            recovery,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::persistence::migrations::user_version(&recovery_db).unwrap(),
+            1
+        );
+        let (snapshot_project_id, snapshot_schema_version): (String, u32) = recovery_db
+            .query_row(
+                "SELECT project_id, schema_version FROM project_meta WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(snapshot_project_id, created.project_id.to_string());
+        assert_eq!(snapshot_schema_version, 1);
         ProjectService::close_project(&state, reopened.project_id).unwrap();
     }
 

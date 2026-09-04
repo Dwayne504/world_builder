@@ -20,6 +20,7 @@ import type { Category, Entry, ProjectSummary, SaveState, TypeDef } from "./type
 import { useProjectRename } from "./useProjectRename";
 import type { SubmitOutcome } from "./useProjectRename";
 import { useEntryName } from "./useEntryName";
+import { useMutationCoordinator } from "./useMutationCoordinator";
 import { decideClose, type CloseIntent } from "./closeDecision";
 
 function errorMessage(err: unknown): string {
@@ -316,6 +317,8 @@ interface EntrySaveController {
   submit: () => Promise<SubmitOutcome>;
 }
 
+type MutationCoordinator = ReturnType<typeof useMutationCoordinator>;
+
 function EntryEditor({
   projectId,
   initialEntry,
@@ -323,6 +326,7 @@ function EntryEditor({
   onChanged,
   onClose,
   onController,
+  mutations,
 }: {
   projectId: string;
   initialEntry: Entry;
@@ -330,6 +334,7 @@ function EntryEditor({
   onChanged: (entry: Entry) => void;
   onClose: () => void;
   onController: (controller: EntrySaveController) => void;
+  mutations: MutationCoordinator;
 }) {
   const editor = useEntryName(projectId, initialEntry);
   const { submit } = editor;
@@ -350,28 +355,42 @@ function EntryEditor({
   }, [editor.entry]);
 
   useEffect(() => {
+    let current = true;
+    setTypes([]);
     void listTypes(projectId, categoryId)
-      .then(setTypes)
-      .catch((error) => setStructureError(errorMessage(error)));
+      .then((nextTypes) => {
+        if (current) setTypes(nextTypes);
+      })
+      .catch((error) => {
+        if (current) setStructureError(errorMessage(error));
+      });
+    return () => {
+      current = false;
+    };
   }, [categoryId, projectId]);
 
   async function saveStructure() {
     const nameOutcome = await submit();
     if (nameOutcome.kind === "failed" || nameOutcome.kind === "committed-stale") return;
-    try {
-      const current = editor.currentEntry();
-      const updated = await changeEntryStructure(
-        projectId,
-        current.id,
-        categoryId,
-        typeId || undefined,
-        current.revision,
-      );
-      editor.replaceEntry(updated);
-      onChanged(updated);
-      setStructureError(null);
-    } catch (error) {
-      setStructureError(errorMessage(error));
+    const outcome = await mutations.run(
+      async () => {
+        const current = editor.currentEntry();
+        return changeEntryStructure(
+          projectId,
+          current.id,
+          categoryId,
+          typeId || undefined,
+          current.revision,
+        );
+      },
+      (updated) => {
+        editor.replaceEntry(updated);
+        onChangedRef.current(updated);
+        setStructureError(null);
+      },
+    );
+    if (outcome.kind === "failed") {
+      setStructureError(outcome.errorMessage);
     }
   }
 
@@ -395,6 +414,7 @@ function EntryEditor({
           aria-label="entry-category"
           value={categoryId}
           onChange={(event) => {
+            setTypes([]);
             setCategoryId(event.currentTarget.value);
             setStructureTypeChosen(
               event.currentTarget.value === editor.entry.categoryId || !typeId,
@@ -433,7 +453,10 @@ function EntryEditor({
       </label>
       <div className="row">
         <button
-          disabled={categoryId !== editor.entry.categoryId && !structureTypeChosen}
+          disabled={
+            mutations.state === "saving" ||
+            (categoryId !== editor.entry.categoryId && !structureTypeChosen)
+          }
           onClick={() => void saveStructure()}
         >
           Apply Category / Type
@@ -449,10 +472,12 @@ function EntryWorkflow({
   projectId,
   onController,
   onGlobalRevision,
+  mutations,
 }: {
   projectId: string;
   onController: (controller: EntrySaveController | null) => void;
   onGlobalRevision: (revision: number) => void;
+  mutations: MutationCoordinator;
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -488,13 +513,23 @@ function EntryWorkflow({
   }, [refresh]);
 
   useEffect(() => {
+    let current = true;
+    setTypes([]);
     if (!categoryId) {
-      setTypes([]);
-      return;
+      return () => {
+        current = false;
+      };
     }
     void listTypes(projectId, categoryId)
-      .then(setTypes)
-      .catch((reason) => setError(errorMessage(reason)));
+      .then((nextTypes) => {
+        if (current) setTypes(nextTypes);
+      })
+      .catch((reason) => {
+        if (current) setError(errorMessage(reason));
+      });
+    return () => {
+      current = false;
+    };
   }, [categoryId, projectId]);
 
   const receiveController = useCallback(
@@ -507,6 +542,20 @@ function EntryWorkflow({
   );
 
   function closeEditor() {
+    if (mutations.isPending()) {
+      setPendingEntry(null);
+      setPendingBack(true);
+      void mutations.waitForPending().then((successful) => {
+        if (successful) {
+          controllerRef.current = null;
+          onController(null);
+          setSelected(null);
+        } else {
+          setError(mutations.currentError() ?? "Structural save failed.");
+        }
+      });
+      return;
+    }
     if (controllerRef.current?.state !== "saved") {
       setPendingEntry(null);
       setPendingBack(true);
@@ -519,6 +568,19 @@ function EntryWorkflow({
   }
 
   function openEntry(entry: Entry) {
+    if (mutations.isPending()) {
+      setPendingEntry(entry);
+      setPendingBack(false);
+      void mutations.waitForPending().then((successful) => {
+        if (successful) {
+          setPendingEntry(null);
+          setSelected(entry);
+        } else {
+          setError(mutations.currentError() ?? "Structural save failed.");
+        }
+      });
+      return;
+    }
     if (selected && controllerRef.current?.state !== "saved") {
       setPendingEntry(entry);
       setPendingBack(false);
@@ -557,46 +619,56 @@ function EntryWorkflow({
   }
 
   async function addCategory() {
-    try {
-      const category = await createCategory(projectId, newCategoryName);
-      onGlobalRevision(category.globalRevision);
-      setCategories((items) => [...items, category]);
-      setCategoryId(category.id);
-      setTypeId("");
-      setNewCategoryName("");
-      setShowCategoryCreator(false);
-    } catch (reason) {
-      setError(errorMessage(reason));
+    const outcome = await mutations.run(
+      () => createCategory(projectId, newCategoryName),
+      (category) => {
+        onGlobalRevision(category.globalRevision);
+        setCategories((items) => [...items, category]);
+        setCategoryId(category.id);
+        setTypeId("");
+        setNewCategoryName("");
+        setShowCategoryCreator(false);
+      },
+    );
+    if (outcome.kind === "failed") {
+      setError(outcome.errorMessage);
     }
   }
 
   async function addType() {
-    try {
-      const type = await createType(projectId, categoryId, newTypeName);
-      onGlobalRevision(type.globalRevision);
-      setTypes((items) => [...items, type]);
-      setTypeId(type.id);
-      setNewTypeName("");
-      setShowTypeCreator(false);
-    } catch (reason) {
-      setError(errorMessage(reason));
+    const outcome = await mutations.run(
+      () => createType(projectId, categoryId, newTypeName),
+      (type) => {
+        onGlobalRevision(type.globalRevision);
+        setTypes((items) => [...items, type]);
+        setTypeId(type.id);
+        setNewTypeName("");
+        setShowTypeCreator(false);
+      },
+    );
+    if (outcome.kind === "failed") {
+      setError(outcome.errorMessage);
     }
   }
 
   async function addEntry() {
-    try {
-      const entry = await createEntry(
-        projectId,
-        draftName || undefined,
-        categoryId || undefined,
-        typeId || undefined,
-      );
-      setEntries((items) => [...items, entry]);
-      onGlobalRevision(entry.globalRevision);
-      setDraftName("");
-      setSelected(entry);
-    } catch (reason) {
-      setError(errorMessage(reason));
+    const outcome = await mutations.run(
+      () =>
+        createEntry(
+          projectId,
+          draftName || undefined,
+          categoryId || undefined,
+          typeId || undefined,
+        ),
+      (entry) => {
+        setEntries((items) => [...items, entry]);
+        onGlobalRevision(entry.globalRevision);
+        setDraftName("");
+        setSelected(entry);
+      },
+    );
+    if (outcome.kind === "failed") {
+      setError(outcome.errorMessage);
     }
   }
 
@@ -621,6 +693,7 @@ function EntryWorkflow({
           projectId={projectId}
           initialEntry={selected}
           categories={categories}
+          mutations={mutations}
           onController={receiveController}
           onClose={closeEditor}
           onChanged={(updated) => {
@@ -640,7 +713,9 @@ function EntryWorkflow({
       <ul>
         {entries.map((entry) => (
           <li key={entry.id}>
-            <button onClick={() => openEntry(entry)}>{entry.displayName}</button>
+            <button disabled={mutations.state === "saving"} onClick={() => openEntry(entry)}>
+              {entry.displayName}
+            </button>
           </li>
         ))}
       </ul>
@@ -657,8 +732,10 @@ function EntryWorkflow({
         Category
         <select
           aria-label="new-entry-category"
+          disabled={mutations.state === "saving"}
           value={categoryId}
           onChange={(event) => {
+            setTypes([]);
             setCategoryId(event.currentTarget.value);
             setTypeId("");
           }}
@@ -670,7 +747,9 @@ function EntryWorkflow({
           ))}
         </select>
       </label>
-      <button onClick={() => setShowCategoryCreator(true)}>Create Category inline</button>
+      <button disabled={mutations.state === "saving"} onClick={() => setShowCategoryCreator(true)}>
+        Create Category inline
+      </button>
       {showCategoryCreator && (
         <div>
           <input
@@ -678,7 +757,10 @@ function EntryWorkflow({
             value={newCategoryName}
             onChange={(event) => setNewCategoryName(event.currentTarget.value)}
           />
-          <button disabled={!newCategoryName.trim()} onClick={() => void addCategory()}>
+          <button
+            disabled={!newCategoryName.trim() || mutations.state === "saving"}
+            onClick={() => void addCategory()}
+          >
             Add Category
           </button>
         </div>
@@ -687,6 +769,7 @@ function EntryWorkflow({
         Type (optional)
         <select
           aria-label="new-entry-type"
+          disabled={mutations.state === "saving"}
           value={typeId}
           onChange={(event) => setTypeId(event.currentTarget.value)}
         >
@@ -698,7 +781,10 @@ function EntryWorkflow({
           ))}
         </select>
       </label>
-      <button disabled={!categoryId} onClick={() => setShowTypeCreator(true)}>
+      <button
+        disabled={!categoryId || mutations.state === "saving"}
+        onClick={() => setShowTypeCreator(true)}
+      >
         Create Type inline
       </button>
       {showTypeCreator && (
@@ -708,18 +794,30 @@ function EntryWorkflow({
             value={newTypeName}
             onChange={(event) => setNewTypeName(event.currentTarget.value)}
           />
-          <button disabled={!newTypeName.trim()} onClick={() => void addType()}>
+          <button
+            disabled={!newTypeName.trim() || mutations.state === "saving"}
+            onClick={() => void addType()}
+          >
             Add Type
           </button>
         </div>
       )}
-      <button onClick={() => void addEntry()}>Create Entry</button>
+      <button disabled={mutations.state === "saving"} onClick={() => void addEntry()}>
+        Create Entry
+      </button>
     </section>
   );
 }
 
 function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClosed: () => void }) {
   const rename = useProjectRename(project);
+  const mutations = useMutationCoordinator();
+  const {
+    state: mutationState,
+    waitForPending: waitForStructuralMutation,
+    currentError: currentMutationError,
+    isPending: isStructuralMutationPending,
+  } = mutations;
   const { submit: renameSubmit } = rename;
   const [backupDir, setBackupDir] = useState("");
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
@@ -731,8 +829,18 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const [entrySaveState, setEntrySaveState] = useState<SaveState>("saved");
   const saveStateRef = useRef<SaveState>(rename.saveState);
   const closeInFlight = useRef<Promise<void> | null>(null);
+  const waitingCloseRef = useRef<Promise<void> | null>(null);
+  const waitingCloseIntentRef = useRef<CloseIntent | null>(null);
   const nativeWindowCloseRequested = useRef(false);
-  const combinedSaveState = entrySaveState === "saved" ? rename.saveState : entrySaveState;
+  const combinedSaveState: SaveState = [rename.saveState, entrySaveState, mutationState].includes(
+    "saving",
+  )
+    ? "saving"
+    : [rename.saveState, entrySaveState, mutationState].includes("failed")
+      ? "failed"
+      : [rename.saveState, entrySaveState].includes("dirty")
+        ? "dirty"
+        : "saved";
   saveStateRef.current = combinedSaveState;
 
   const receiveEntryController = useCallback((controller: EntrySaveController | null) => {
@@ -794,6 +902,13 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
 
   const waitForSaveThenClose = useCallback(
     (intent: CloseIntent): Promise<void> => {
+      waitingCloseIntentRef.current =
+        waitingCloseIntentRef.current === "native-window" || intent === "native-window"
+          ? "native-window"
+          : "project";
+      if (waitingCloseRef.current) {
+        return waitingCloseRef.current;
+      }
       // The save already in flight cannot be cancelled, so we never treat it
       // as discardable: wait for it to settle, then close only if the
       // explicit outcome confirms the currently displayed draft committed.
@@ -801,22 +916,47 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
       // render that applies it, so branch on the promise's own result
       // instead -- this also correctly refuses to close when a newer draft
       // was typed while the older save was still in flight.
-      return Promise.all([
+      const waiting = Promise.all([
         renameSubmit(),
         entryControllerRef.current?.submit() ?? Promise.resolve({ kind: "no-op" } as SubmitOutcome),
-      ]).then((outcomes) => {
-        if (outcomes.every((outcome) => outcome.kind === "committed" || outcome.kind === "no-op")) {
-          return closeAfterBackend(intent);
-        }
-        return undefined;
-      });
+        waitForStructuralMutation(),
+      ])
+        .then(([renameOutcome, entryOutcome, structuralSuccessful]) => {
+          if (
+            structuralSuccessful &&
+            [renameOutcome, entryOutcome].every(
+              (outcome) => outcome.kind === "committed" || outcome.kind === "no-op",
+            )
+          ) {
+            return closeAfterBackend(waitingCloseIntentRef.current ?? intent);
+          }
+          if (!structuralSuccessful) {
+            setCloseError(currentMutationError() ?? "Structural save failed.");
+          }
+          return undefined;
+        })
+        .finally(() => {
+          waitingCloseRef.current = null;
+          waitingCloseIntentRef.current = null;
+        });
+      waitingCloseRef.current = waiting;
+      return waiting;
     },
-    [renameSubmit, closeAfterBackend],
+    [renameSubmit, closeAfterBackend, currentMutationError, waitForStructuralMutation],
   );
 
   const requestClose = useCallback(
     (intent: CloseIntent): void => {
       setCloseError(null);
+      if (isStructuralMutationPending()) {
+        setPendingCloseIntent(null);
+        void waitForSaveThenClose(intent);
+        return;
+      }
+      if (mutationState === "failed") {
+        setCloseError(currentMutationError() ?? "Structural save failed.");
+        return;
+      }
       const decision = decideClose(saveStateRef.current, intent);
       switch (decision) {
         case "close-project":
@@ -836,14 +976,22 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           );
       }
     },
-    [closeAfterBackend, waitForSaveThenClose],
+    [
+      closeAfterBackend,
+      currentMutationError,
+      isStructuralMutationPending,
+      mutationState,
+      waitForSaveThenClose,
+    ],
   );
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
 
   useEffect(() => {
-    if (rename.saveState === "saved" && entrySaveState === "saved") {
+    if (rename.saveState === "saved" && entrySaveState === "saved" && mutationState === "saved") {
       setPendingCloseIntent(null);
     }
-  }, [entrySaveState, rename.saveState]);
+  }, [entrySaveState, mutationState, rename.saveState]);
 
   function handleClose() {
     requestClose("project");
@@ -875,7 +1023,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           return;
         }
         event.preventDefault();
-        requestClose("native-window");
+        requestCloseRef.current("native-window");
       })
       .then((listener) => {
         if (disposed) {
@@ -888,7 +1036,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
       disposed = true;
       unlisten?.();
     };
-  }, [requestClose]);
+  }, []);
 
   return (
     <main className="container">
@@ -933,6 +1081,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         projectId={project.projectId}
         onController={receiveEntryController}
         onGlobalRevision={rename.updateRevision}
+        mutations={mutations}
       />
 
       <section>
