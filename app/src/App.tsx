@@ -21,6 +21,50 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Understandable primary wording for open-Project lock failures. Raw
+ * backend diagnostics stay visible through `errorMessage`; these messages
+ * lead so the user is never greeted with implementation jargon.
+ */
+function openFailureMessage(err: unknown): string {
+  if (err instanceof AppCommandError) {
+    switch (err.kind) {
+      case "lock_recovery_required":
+        return (
+          "This Project was not closed properly last time (for example after a crash or " +
+          "power loss), so a leftover lock is still recorded. Because that record is old, " +
+          "you can recover the Project and open it."
+        );
+      case "lock_held":
+        return (
+          "This Project is currently open in another Worldcrafter instance. Close it there " +
+          "first; an active Project is never taken over."
+        );
+      case "lock_not_stale":
+        return (
+          "This Project may still be in use: it was closed only very recently, or another " +
+          "instance may still be running. If another Worldcrafter is open, close it and try " +
+          "again. Otherwise wait a while before trying again."
+        );
+      case "lock_metadata_corrupt":
+        return (
+          "The Project's lock information is unreadable, so Worldcrafter cannot tell whether " +
+          "the Project is safe to open. Nothing was changed. Close every Worldcrafter " +
+          "instance, then remove the 'lock.json' file inside the Project package manually."
+        );
+      default:
+        break;
+    }
+  }
+  return errorMessage(err);
+}
+
+function openFailureDetails(err: unknown): string | null {
+  const primary = openFailureMessage(err);
+  const diagnostic = errorMessage(err);
+  return diagnostic === primary ? null : diagnostic;
+}
+
 function isTauriWindow(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
@@ -45,11 +89,19 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
   const [restoreDestination, setRestoreDestination] = useState("");
   const [restoreName, setRestoreName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set when (and only when) the backend reports `lock_recovery_required`
+  // for the current open path. The path input itself is never cleared, so
+  // the user keeps what they typed after a failed open.
+  const [recoveryPath, setRecoveryPath] = useState<string | null>(null);
+  const openPathRef = useRef("");
+  const openPathRevisionRef = useRef(0);
 
   async function handleCreate() {
     setBusy(true);
     setError(null);
+    setErrorDetails(null);
     try {
       onOpened(await createProject(baseDir, newName));
     } catch (err) {
@@ -60,12 +112,54 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
   }
 
   async function handleOpen() {
+    const attemptedPath = openPathRef.current;
+    const pathRevision = openPathRevisionRef.current;
     setBusy(true);
     setError(null);
+    setErrorDetails(null);
+    setRecoveryPath(null);
     try {
-      onOpened(await openProject(openPath));
+      onOpened(await openProject(attemptedPath));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(openFailureMessage(err));
+      setErrorDetails(openFailureDetails(err));
+      const pathIsUnchanged =
+        openPathRevisionRef.current === pathRevision && openPathRef.current === attemptedPath;
+      setRecoveryPath(
+        err instanceof AppCommandError && err.kind === "lock_recovery_required" && pathIsUnchanged
+          ? attemptedPath
+          : null,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRecoverLock() {
+    if (!recoveryPath || recoveryPath !== openPathRef.current) {
+      setRecoveryPath(null);
+      return;
+    }
+    const attemptedPath = recoveryPath;
+    const pathRevision = openPathRevisionRef.current;
+    setBusy(true);
+    setError(null);
+    setErrorDetails(null);
+    setRecoveryPath(null);
+    try {
+      onOpened(await openProject(attemptedPath, true));
+    } catch (err) {
+      // A failed recovery must stay visible; the backend leaves the
+      // Project package untouched.
+      setError(openFailureMessage(err));
+      setErrorDetails(openFailureDetails(err));
+      const pathIsUnchanged =
+        openPathRevisionRef.current === pathRevision && openPathRef.current === attemptedPath;
+      setRecoveryPath(
+        err instanceof AppCommandError && err.kind === "lock_recovery_required" && pathIsUnchanged
+          ? attemptedPath
+          : null,
+      );
     } finally {
       setBusy(false);
     }
@@ -74,6 +168,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
   async function handleRestore() {
     setBusy(true);
     setError(null);
+    setErrorDetails(null);
     try {
       onOpened(await restoreBackupAsCopy(backupPath, restoreDestination, restoreName || undefined));
     } catch (err) {
@@ -87,9 +182,15 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
     <main className="container">
       <h1>Worldcrafter</h1>
       {error && (
-        <p role="alert" className="error-banner">
-          {error}
-        </p>
+        <div role="alert" className="error-banner">
+          <p>{error}</p>
+          {errorDetails && (
+            <details>
+              <summary>Technical details</summary>
+              <p>{errorDetails}</p>
+            </details>
+          )}
+        </div>
       )}
 
       <section>
@@ -124,13 +225,31 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
           <input
             aria-label="open-project-path"
             value={openPath}
-            onChange={(e) => setOpenPath(e.currentTarget.value)}
+            onChange={(e) => {
+              const path = e.currentTarget.value;
+              openPathRef.current = path;
+              openPathRevisionRef.current += 1;
+              setOpenPath(path);
+              setRecoveryPath(null);
+            }}
             placeholder="/path/to/Tortuga.wcproj"
           />
         </label>
         <button disabled={busy || !openPath} onClick={handleOpen}>
           Open Project
         </button>
+        {recoveryPath !== null && recoveryPath === openPath && (
+          <div role="alert" className="error-banner">
+            <p>
+              Recovering removes only the leftover lock record; the Project's content is not
+              modified. Use this only when you are sure no other Worldcrafter instance currently has
+              this Project open.
+            </p>
+            <button disabled={busy} onClick={handleRecoverLock}>
+              Recover lock and open Project
+            </button>
+          </div>
+        )}
       </section>
 
       <section>
