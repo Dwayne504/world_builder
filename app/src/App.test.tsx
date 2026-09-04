@@ -629,7 +629,9 @@ describe("Project screen Saved contract", () => {
     fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
     await waitFor(() => expect(screen.getByText("structure write failed")).toBeInTheDocument());
-    expect(screen.getByTestId("save-state")).toHaveTextContent("Failed to save");
+    await waitFor(() =>
+      expect(screen.getByTestId("save-state")).toHaveTextContent("Failed to save"),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
     const discard = screen.getByRole("button", {
