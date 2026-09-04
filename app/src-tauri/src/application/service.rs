@@ -6,7 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::domain::{ProjectId, WorkingName};
+use crate::domain::{
+    authored_name, require_definition_name, Category, CategoryId, Entry, EntryId, ProjectId,
+    TypeDef, TypeId, WorkingName,
+};
 use crate::package::{self, layout, manifest::Manifest, PackagePaths};
 use crate::persistence::lock::{self, LockGuard};
 use crate::persistence::worker::InitialProjectMeta;
@@ -79,9 +82,15 @@ impl ProjectService {
         force_stale_lock_recovery: bool,
     ) -> Result<ProjectSummary, AppError> {
         let paths = package::layout::validate_structure(package_root)?;
-        let manifest = Manifest::read(&paths.manifest_path())?;
+        let mut manifest = Manifest::read(&paths.manifest_path())?;
         ensure_manifest_is_writable(&manifest)?;
-        ProjectDbWorker::preflight_existing(paths.db_path(), manifest.project_id)?;
+        let preflight = ProjectDbWorker::preflight_existing(paths.db_path(), manifest.project_id)?;
+        if manifest.schema_version > preflight.schema_version {
+            return Err(AppError::Persistence(PersistenceError::Other(
+                "manifest schema version is ahead of the database; refusing unsafe recovery"
+                    .to_string(),
+            )));
+        }
 
         let lock_guard = lock::acquire(
             &paths.lock_path(),
@@ -90,16 +99,25 @@ impl ProjectService {
         )?;
 
         let result = (|| -> Result<(ProjectDbWorker, ProjectSummary), AppError> {
+            if preflight.schema_version < crate::persistence::migrations::CURRENT_SCHEMA_VERSION {
+                crate::backup_recovery::create_pre_migration_snapshot(&paths, &manifest)?;
+            }
             let worker = ProjectDbWorker::spawn(paths.db_path(), manifest.project_id, None)?;
             let summary = summary_from_worker(&worker, &paths)?;
-            if summary.format_version != manifest.format_version
-                || summary.schema_version != manifest.schema_version
-            {
+            if summary.format_version != manifest.format_version {
                 return Err(AppError::Persistence(
                     crate::persistence::PersistenceError::Other(
-                        "manifest and database format/schema versions disagree".to_string(),
+                        "manifest and database format versions disagree".to_string(),
                     ),
                 ));
+            }
+            if manifest.schema_version != summary.schema_version {
+                manifest.schema_version = summary.schema_version;
+                manifest.working_name_cache = summary.working_name.clone();
+                if let Err(error) = manifest.write(&paths.manifest_path()) {
+                    let _ = worker.shutdown();
+                    return Err(error.into());
+                }
             }
             Ok((worker, summary))
         })();
@@ -205,6 +223,95 @@ impl ProjectService {
         )
     }
 
+    pub fn list_categories(
+        state: &AppState,
+        project_id: ProjectId,
+    ) -> Result<Vec<Category>, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.list_categories())
+    }
+
+    pub fn create_category(
+        state: &AppState,
+        project_id: ProjectId,
+        name: &str,
+    ) -> Result<Category, AppError> {
+        let name = require_definition_name(name)?;
+        Self::with_worker(state, project_id, |worker| {
+            worker.create_category(CategoryId::new(), name)
+        })
+    }
+
+    pub fn list_types(
+        state: &AppState,
+        project_id: ProjectId,
+        category_id: CategoryId,
+    ) -> Result<Vec<TypeDef>, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.list_types(category_id))
+    }
+
+    pub fn create_type(
+        state: &AppState,
+        project_id: ProjectId,
+        category_id: CategoryId,
+        parent_type_id: Option<TypeId>,
+        name: &str,
+    ) -> Result<TypeDef, AppError> {
+        let name = require_definition_name(name)?;
+        Self::with_worker(state, project_id, |worker| {
+            worker.create_type(TypeId::new(), category_id, parent_type_id, name)
+        })
+    }
+
+    pub fn list_entries(state: &AppState, project_id: ProjectId) -> Result<Vec<Entry>, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.list_entries())
+    }
+
+    pub fn create_entry(
+        state: &AppState,
+        project_id: ProjectId,
+        category_id: Option<CategoryId>,
+        type_id: Option<TypeId>,
+        name: Option<String>,
+    ) -> Result<Entry, AppError> {
+        let name = authored_name(name);
+        Self::with_worker(state, project_id, |worker| {
+            worker.create_entry(EntryId::new(), category_id, type_id, name)
+        })
+    }
+
+    pub fn get_entry(
+        state: &AppState,
+        project_id: ProjectId,
+        entry_id: EntryId,
+    ) -> Result<Entry, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.get_entry(entry_id))
+    }
+
+    pub fn update_entry_name(
+        state: &AppState,
+        project_id: ProjectId,
+        entry_id: EntryId,
+        expected_revision: i64,
+        name: Option<String>,
+    ) -> Result<Entry, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.update_entry_name(entry_id, expected_revision, name)
+        })
+    }
+
+    pub fn change_entry_structure(
+        state: &AppState,
+        project_id: ProjectId,
+        entry_id: EntryId,
+        expected_revision: i64,
+        category_id: CategoryId,
+        type_id: Option<TypeId>,
+    ) -> Result<Entry, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.change_entry_structure(entry_id, expected_revision, category_id, type_id)
+        })
+    }
+
     /// Creates a manual, consistent backup of an open Project outside its
     /// live package.
     pub fn create_backup(
@@ -226,6 +333,27 @@ impl ProjectService {
                 .ok_or(AppError::ProjectNotOpen(project_id))?,
             &open.paths,
             backup_root,
+        )
+        .map_err(AppError::from)
+    }
+
+    fn with_worker<T>(
+        state: &AppState,
+        project_id: ProjectId,
+        action: impl FnOnce(&ProjectDbWorker) -> Result<T, PersistenceError>,
+    ) -> Result<T, AppError> {
+        let open = state
+            .open_projects
+            .lock()
+            .expect("registry mutex poisoned")
+            .get(&project_id)
+            .cloned()
+            .ok_or(AppError::ProjectNotOpen(project_id))?;
+        let worker = open.worker.lock().expect("worker mutex poisoned");
+        action(
+            worker
+                .as_ref()
+                .ok_or(AppError::ProjectNotOpen(project_id))?,
         )
         .map_err(AppError::from)
     }
@@ -298,13 +426,6 @@ fn ensure_manifest_is_writable(manifest: &Manifest) -> Result<(), AppError> {
                 supported: crate::persistence::migrations::CURRENT_SCHEMA_VERSION,
             },
         ));
-    }
-
-    if manifest.schema_version < crate::persistence::migrations::CURRENT_SCHEMA_VERSION {
-        return Err(AppError::Persistence(PersistenceError::MigrationRequired {
-            found: manifest.schema_version,
-            supported: crate::persistence::migrations::CURRENT_SCHEMA_VERSION,
-        }));
     }
 
     Ok(())
@@ -454,7 +575,7 @@ mod tests {
     }
 
     #[test]
-    fn older_schema_package_is_refused_before_lock_or_migration() {
+    fn schema_v1_package_migrates_and_reopens_with_identity_and_name_unchanged() {
         let state = AppState::default();
         let dir = tempdir().unwrap();
         let created = ProjectService::create_project(&state, dir.path(), "Tortuga").unwrap();
@@ -463,35 +584,128 @@ mod tests {
 
         let paths = PackagePaths::new(&package_path);
         let mut manifest = Manifest::read(&paths.manifest_path()).unwrap();
-        manifest.schema_version = 0;
+        manifest.schema_version = 1;
         manifest.write(&paths.manifest_path()).unwrap();
 
         let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
-        conn.pragma_update(None, "user_version", 0).unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER entry_type_category_update;
+             DROP TRIGGER entry_type_category_insert;
+             DROP TABLE entry;
+             DROP TABLE record_identity;
+             DROP TRIGGER type_parent_cycle_update;
+             DROP TRIGGER type_parent_valid_insert;
+             DROP TABLE type_def;
+             DROP TABLE category;",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
         conn.execute(
-            "UPDATE project_meta SET schema_version = 0 WHERE id = 1",
+            "UPDATE project_meta SET schema_version = 1 WHERE id = 1",
             [],
         )
         .unwrap();
         drop(conn);
 
-        let err = ProjectService::open_project(&state, &package_path, false).unwrap_err();
-        assert_eq!(err.kind(), "migration_required");
-        assert!(!paths.lock_path().exists());
-
+        let reopened = ProjectService::open_project(&state, &package_path, false).unwrap();
+        assert_eq!(reopened.project_id, created.project_id);
+        assert_eq!(reopened.working_name, created.working_name);
+        assert_eq!(
+            reopened.schema_version,
+            crate::persistence::migrations::CURRENT_SCHEMA_VERSION
+        );
         let manifest_after = Manifest::read(&paths.manifest_path()).unwrap();
-        assert_eq!(manifest_after.schema_version, 0);
+        assert_eq!(manifest_after.schema_version, reopened.schema_version);
+        let recovery = package_path
+            .parent()
+            .unwrap()
+            .join(".worldcrafter-migration-recovery")
+            .join(created.project_id.to_string())
+            .join("schema-v1.sqlite");
+        assert!(recovery.is_file());
+        ProjectService::close_project(&state, reopened.project_id).unwrap();
+    }
 
+    #[test]
+    fn committed_database_with_old_manifest_is_recovered_on_next_open() {
+        let state = AppState::default();
+        let dir = tempdir().unwrap();
+        let created = ProjectService::create_project(&state, dir.path(), "Tortuga").unwrap();
+        let package_path = PathBuf::from(&created.package_path);
+        ProjectService::close_project(&state, created.project_id).unwrap();
+        let paths = PackagePaths::new(&package_path);
+        let mut manifest = Manifest::read(&paths.manifest_path()).unwrap();
+        manifest.schema_version = 1;
+        manifest.write(&paths.manifest_path()).unwrap();
+
+        let reopened = ProjectService::open_project(&state, &package_path, false).unwrap();
+        assert_eq!(reopened.project_id, created.project_id);
+        assert_eq!(
+            Manifest::read(&paths.manifest_path())
+                .unwrap()
+                .schema_version,
+            crate::persistence::migrations::CURRENT_SCHEMA_VERSION
+        );
+        ProjectService::close_project(&state, reopened.project_id).unwrap();
+    }
+
+    #[test]
+    fn failed_migration_keeps_v1_recoverable_and_never_registers_open() {
+        let state = AppState::default();
+        let dir = tempdir().unwrap();
+        let created = ProjectService::create_project(&state, dir.path(), "Tortuga").unwrap();
+        let package_path = PathBuf::from(&created.package_path);
+        ProjectService::close_project(&state, created.project_id).unwrap();
+        let paths = PackagePaths::new(&package_path);
+        let mut manifest = Manifest::read(&paths.manifest_path()).unwrap();
+        manifest.schema_version = 1;
+        manifest.write(&paths.manifest_path()).unwrap();
         let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
-        let user_version = crate::persistence::migrations::user_version(&conn).unwrap();
-        let schema_version: i64 = conn
-            .query_row(
-                "SELECT schema_version FROM project_meta WHERE id = 1",
-                [],
-                |r| r.get(0),
-            )
+        conn.execute_batch(
+            "DROP TRIGGER entry_type_category_update;
+             DROP TRIGGER entry_type_category_insert;
+             DROP TABLE entry;
+             DROP TABLE record_identity;
+             DROP TRIGGER type_parent_cycle_update;
+             DROP TRIGGER type_parent_valid_insert;
+             DROP TABLE type_def;
+             DROP TABLE category;
+             PRAGMA user_version = 1;
+             UPDATE project_meta SET schema_version = 1;
+             CREATE TRIGGER force_migration_failure
+             BEFORE UPDATE OF schema_version ON project_meta
+             BEGIN SELECT RAISE(ABORT, 'simulated migration interruption'); END;",
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(ProjectService::open_project(&state, &package_path, false).is_err());
+        assert!(!state
+            .open_projects
+            .lock()
+            .unwrap()
+            .contains_key(&created.project_id));
+        assert_eq!(
+            Manifest::read(&paths.manifest_path())
+                .unwrap()
+                .schema_version,
+            1
+        );
+        let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
+        assert_eq!(
+            crate::persistence::migrations::user_version(&conn).unwrap(),
+            1
+        );
+        let integrity: String = conn
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(user_version, 0);
-        assert_eq!(schema_version, 0);
+        assert_eq!(integrity, "ok");
+        conn.execute("DROP TRIGGER force_migration_failure", [])
+            .unwrap();
+        drop(conn);
+
+        let recovered = ProjectService::open_project(&state, &package_path, false).unwrap();
+        assert_eq!(recovered.project_id, created.project_id);
+        ProjectService::close_project(&state, recovered.project_id).unwrap();
     }
 }

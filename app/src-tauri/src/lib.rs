@@ -31,6 +31,15 @@ pub fn run() {
             tauri_boundary::get_project_summary,
             tauri_boundary::create_backup,
             tauri_boundary::restore_backup_as_copy,
+            tauri_boundary::list_categories,
+            tauri_boundary::create_category,
+            tauri_boundary::list_types,
+            tauri_boundary::create_type,
+            tauri_boundary::list_entries,
+            tauri_boundary::create_entry,
+            tauri_boundary::get_entry,
+            tauri_boundary::update_entry_name,
+            tauri_boundary::change_entry_structure,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -15,12 +15,15 @@ use rusqlite::Connection;
 use super::error::PersistenceError;
 
 /// The newest schema version this build knows how to read and write.
-pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 /// Ordered (version, sql) pairs. Each migration is applied at most once and
 /// migrations must be applied in order starting just above the database's
 /// current `user_version`.
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("migrations/0001_init.sql")),
+    (2, include_str!("migrations/0002_project_structure.sql")),
+];
 
 /// Applies any migrations newer than the database's current version.
 ///
@@ -39,6 +42,19 @@ pub fn migrate(conn: &Connection) -> Result<(), PersistenceError> {
         if *version > current_version {
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(sql)?;
+            if *version == 2 {
+                let now = chrono::Utc::now().to_rfc3339();
+                tx.execute(
+                    "INSERT INTO category (
+                        id, name, is_uncategorized, created_at, updated_at, revision
+                     ) VALUES (?1, 'Uncategorized', 1, ?2, ?2, 0)",
+                    rusqlite::params![crate::domain::CategoryId::new().to_string(), now],
+                )?;
+                tx.execute(
+                    "UPDATE project_meta SET schema_version = ?1 WHERE id = 1",
+                    [version],
+                )?;
+            }
             tx.pragma_update(None, "user_version", version)?;
             tx.commit()?;
         }
@@ -117,5 +133,40 @@ mod tests {
             }
         ));
         assert_eq!(user_version(&conn).unwrap(), 0);
+    }
+
+    #[test]
+    fn parent_type_cycles_and_cross_category_parents_are_rejected() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        migrate(&conn).unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let category_a = crate::domain::CategoryId::new().to_string();
+        let category_b = crate::domain::CategoryId::new().to_string();
+        conn.execute(
+            "INSERT INTO category VALUES (?1, 'A', 0, ?3, ?3, 1), (?2, 'B', 0, ?3, ?3, 1)",
+            rusqlite::params![category_a, category_b, now],
+        )
+        .unwrap();
+        let type_a = crate::domain::TypeId::new().to_string();
+        let type_b = crate::domain::TypeId::new().to_string();
+        conn.execute(
+            "INSERT INTO type_def VALUES (?1, ?3, NULL, 'A1', ?5, ?5, 1),
+                                         (?2, ?3, ?1, 'A2', ?5, ?5, 1)",
+            rusqlite::params![type_a, type_b, category_a, category_b, now],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "UPDATE type_def SET parent_type_id = ?1 WHERE id = ?2",
+                rusqlite::params![type_b, type_a],
+            )
+            .is_err());
+        assert!(conn
+            .execute(
+                "UPDATE type_def SET category_id = ?1 WHERE id = ?2",
+                rusqlite::params![category_b, type_b],
+            )
+            .is_err());
     }
 }

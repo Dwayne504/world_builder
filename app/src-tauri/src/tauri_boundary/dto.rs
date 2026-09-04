@@ -5,6 +5,7 @@
 use serde::Serialize;
 
 use crate::application::{AppError, ProjectSummary};
+use crate::domain::{Category, Entry, TypeDef};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +31,75 @@ impl From<ProjectSummary> for ProjectSummaryDto {
             schema_version: s.schema_version,
             created_at: s.created_at.to_rfc3339(),
             updated_at: s.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryDto {
+    pub id: String,
+    pub name: String,
+    pub is_uncategorized: bool,
+    pub revision: i64,
+}
+
+impl From<Category> for CategoryDto {
+    fn from(value: Category) -> Self {
+        Self {
+            id: value.id.to_string(),
+            name: value.name,
+            is_uncategorized: value.is_uncategorized,
+            revision: value.revision,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeDto {
+    pub id: String,
+    pub category_id: String,
+    pub parent_type_id: Option<String>,
+    pub name: String,
+    pub revision: i64,
+}
+
+impl From<TypeDef> for TypeDto {
+    fn from(value: TypeDef) -> Self {
+        Self {
+            id: value.id.to_string(),
+            category_id: value.category_id.to_string(),
+            parent_type_id: value.parent_type_id.map(|id| id.to_string()),
+            name: value.name,
+            revision: value.revision,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryDto {
+    pub id: String,
+    pub category_id: String,
+    pub type_id: Option<String>,
+    pub authored_name: Option<String>,
+    pub display_name: String,
+    pub revision: i64,
+    pub global_revision: i64,
+}
+
+impl From<Entry> for EntryDto {
+    fn from(value: Entry) -> Self {
+        let display_name = value.display_name().to_string();
+        Self {
+            id: value.id.to_string(),
+            category_id: value.category_id.to_string(),
+            type_id: value.type_id.map(|id| id.to_string()),
+            authored_name: value.authored_name,
+            display_name,
+            revision: value.revision,
+            global_revision: value.global_revision,
         }
     }
 }

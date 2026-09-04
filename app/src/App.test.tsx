@@ -18,6 +18,15 @@ const renameProjectMock = vi.fn();
 const openProjectMock = vi.fn();
 const nativeWindowCloseMock = vi.fn();
 const onCloseRequestedMock = vi.fn();
+const listCategoriesMock = vi.fn();
+const listTypesMock = vi.fn();
+const listEntriesMock = vi.fn();
+const createCategoryMock = vi.fn();
+const createTypeMock = vi.fn();
+const createEntryMock = vi.fn();
+const getEntryMock = vi.fn();
+const updateEntryNameMock = vi.fn();
+const changeEntryStructureMock = vi.fn();
 let closeRequestedHandler: ((event: { preventDefault: () => void }) => void) | undefined;
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -41,6 +50,15 @@ vi.mock("./api", () => ({
   createBackup: vi.fn(),
   closeProject: (...args: unknown[]) => closeProjectMock(...args),
   renameProject: (...args: unknown[]) => renameProjectMock(...args),
+  listCategories: (...args: unknown[]) => listCategoriesMock(...args),
+  listTypes: (...args: unknown[]) => listTypesMock(...args),
+  listEntries: (...args: unknown[]) => listEntriesMock(...args),
+  createCategory: (...args: unknown[]) => createCategoryMock(...args),
+  createType: (...args: unknown[]) => createTypeMock(...args),
+  createEntry: (...args: unknown[]) => createEntryMock(...args),
+  getEntry: (...args: unknown[]) => getEntryMock(...args),
+  updateEntryName: (...args: unknown[]) => updateEntryNameMock(...args),
+  changeEntryStructure: (...args: unknown[]) => changeEntryStructureMock(...args),
 }));
 
 import App from "./App";
@@ -83,6 +101,25 @@ describe("Project screen Saved contract", () => {
     closeProjectMock.mockReset();
     renameProjectMock.mockReset();
     openProjectMock.mockReset();
+    listCategoriesMock.mockReset();
+    listTypesMock.mockReset();
+    listEntriesMock.mockReset();
+    createCategoryMock.mockReset();
+    createTypeMock.mockReset();
+    createEntryMock.mockReset();
+    getEntryMock.mockReset();
+    updateEntryNameMock.mockReset();
+    changeEntryStructureMock.mockReset();
+    listCategoriesMock.mockResolvedValue([
+      {
+        id: "uncategorized",
+        name: "Uncategorized",
+        isUncategorized: true,
+        revision: 0,
+      },
+    ]);
+    listTypesMock.mockResolvedValue([]);
+    listEntriesMock.mockResolvedValue([]);
     nativeWindowCloseMock.mockReset();
     closeRequestedHandler = undefined;
     onCloseRequestedMock.mockReset();
@@ -93,6 +130,85 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("creates a missing Category and Type inline without losing the Entry draft", async () => {
+    createCategoryMock.mockResolvedValue({
+      id: "characters",
+      name: "Characters",
+      isUncategorized: false,
+      revision: 1,
+    });
+    createTypeMock.mockResolvedValue({
+      id: "human",
+      categoryId: "characters",
+      parentTypeId: null,
+      name: "Human",
+      revision: 1,
+    });
+    createEntryMock.mockResolvedValue({
+      id: "entry-thron",
+      categoryId: "characters",
+      typeId: "human",
+      authoredName: "Thron",
+      displayName: "Thron",
+      revision: 1,
+      globalRevision: 3,
+    });
+    await openTheProjectScreen();
+    await waitFor(() => expect(screen.getByLabelText("new-entry-name")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("new-entry-name"), { target: { value: "Thron" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Category inline" }));
+    fireEvent.change(screen.getByLabelText("inline-category-name"), {
+      target: { value: "Characters" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Category" }));
+    await waitFor(() => expect(createCategoryMock).toHaveBeenCalled());
+    expect(screen.getByLabelText("new-entry-name")).toHaveValue("Thron");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Type inline" }));
+    fireEvent.change(screen.getByLabelText("inline-type-name"), { target: { value: "Human" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add Type" }));
+    await waitFor(() =>
+      expect(createTypeMock).toHaveBeenCalledWith(project.projectId, "characters", "Human"),
+    );
+    expect(screen.getByLabelText("new-entry-name")).toHaveValue("Thron");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Entry" }));
+    await waitFor(() =>
+      expect(createEntryMock).toHaveBeenCalledWith(
+        project.projectId,
+        "Thron",
+        "characters",
+        "human",
+      ),
+    );
+    expect(await screen.findByText("Entry ID: entry-thron")).toBeInTheDocument();
+  });
+
+  it("creates an incomplete unnamed Entry", async () => {
+    createEntryMock.mockResolvedValue({
+      id: "entry-unnamed",
+      categoryId: "uncategorized",
+      typeId: null,
+      authoredName: null,
+      displayName: "[Unnamed Entry]",
+      revision: 1,
+      globalRevision: 1,
+    });
+    await openTheProjectScreen();
+    await waitFor(() => screen.getByRole("button", { name: "Create Entry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Entry" }));
+    await waitFor(() =>
+      expect(createEntryMock).toHaveBeenCalledWith(
+        project.projectId,
+        undefined,
+        "uncategorized",
+        undefined,
+      ),
+    );
+    expect(await screen.findByText("[Unnamed Entry]")).toBeInTheDocument();
   });
 
   it("shows the Project ID unchanged after a successful rename", async () => {

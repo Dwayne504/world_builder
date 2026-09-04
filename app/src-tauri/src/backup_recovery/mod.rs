@@ -20,6 +20,50 @@ use crate::domain::{ProjectId, WorkingName};
 use crate::package::{layout, manifest::Manifest, PackagePaths};
 use crate::persistence::ProjectDbWorker;
 
+pub fn create_pre_migration_snapshot(
+    live_paths: &PackagePaths,
+    manifest: &Manifest,
+) -> Result<PathBuf, BackupError> {
+    let package_parent = live_paths
+        .root
+        .parent()
+        .ok_or_else(|| BackupError::NotABackup(live_paths.root.display().to_string()))?;
+    let recovery_root = package_parent
+        .join(".worldcrafter-migration-recovery")
+        .join(manifest.project_id.to_string());
+    fs::create_dir_all(&recovery_root)?;
+    let snapshot_path = recovery_root.join(format!("schema-v{}.sqlite", manifest.schema_version));
+    let staging_path = recovery_root.join(format!(
+        ".{}.creating.sqlite",
+        chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ")
+    ));
+    let source = Connection::open_with_flags(
+        live_paths.db_path(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
+    crate::persistence::snapshot::backup_connection(&source, &staging_path)?;
+    let snapshot =
+        Connection::open_with_flags(&staging_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let (project_id, schema_version): (String, i64) = snapshot.query_row(
+        "SELECT project_id, schema_version FROM project_meta WHERE id = 1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if project_id != manifest.project_id.to_string() || schema_version != manifest.schema_version {
+        drop(snapshot);
+        let _ = fs::remove_file(&staging_path);
+        return Err(BackupError::CorruptSnapshot(
+            staging_path.display().to_string(),
+        ));
+    }
+    drop(snapshot);
+    if snapshot_path.exists() {
+        fs::remove_file(&snapshot_path)?;
+    }
+    fs::rename(staging_path, &snapshot_path)?;
+    Ok(snapshot_path)
+}
+
 /// Creates a manual backup of the Project owning `worker`/`live_paths`
 /// under `backup_root` (outside the live package), returning the path to
 /// the created `.wcbackup` directory.

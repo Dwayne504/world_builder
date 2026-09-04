@@ -149,7 +149,7 @@ fn open_project_preflights_existing_db_before_lock_or_pragmas() {
     drop(conn);
 
     let err = ProjectService::open_project(&state, &package_path, false).unwrap_err();
-    assert_eq!(err.kind(), "migration_required");
+    assert_eq!(err.kind(), "persistence_error");
     assert!(!paths.lock_path().exists());
     assert!(!paths.lock_path().with_extension("guard").exists());
 

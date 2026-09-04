@@ -22,3 +22,28 @@ export interface AppErrorDto {
 
 /** Distinct Saved-state values shown to the user (see README "Saved contract"). */
 export type SaveState = "saved" | "dirty" | "saving" | "failed";
+
+export interface Category {
+  id: string;
+  name: string;
+  isUncategorized: boolean;
+  revision: number;
+}
+
+export interface TypeDef {
+  id: string;
+  categoryId: string;
+  parentTypeId: string | null;
+  name: string;
+  revision: number;
+}
+
+export interface Entry {
+  id: string;
+  categoryId: string;
+  typeId: string | null;
+  authoredName: string | null;
+  displayName: string;
+  revision: number;
+  globalRevision: number;
+}

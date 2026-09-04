@@ -5,7 +5,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppErrorDto, ProjectSummary } from "./types";
+import type { AppErrorDto, Category, Entry, ProjectSummary, TypeDef } from "./types";
 
 export class AppCommandError extends Error {
   kind: string;
@@ -71,5 +71,78 @@ export function restoreBackupAsCopy(
     backupPath,
     destinationDir,
     newWorkingName: newWorkingName ?? null,
+  });
+}
+
+export function listCategories(projectId: string): Promise<Category[]> {
+  return call("list_categories", { projectId });
+}
+
+export function createCategory(projectId: string, name: string): Promise<Category> {
+  return call("create_category", { projectId, name });
+}
+
+export function listTypes(projectId: string, categoryId: string): Promise<TypeDef[]> {
+  return call("list_types", { projectId, categoryId });
+}
+
+export function createType(
+  projectId: string,
+  categoryId: string,
+  name: string,
+  parentTypeId?: string,
+): Promise<TypeDef> {
+  return call("create_type", { projectId, categoryId, name, parentTypeId: parentTypeId ?? null });
+}
+
+export function listEntries(projectId: string): Promise<Entry[]> {
+  return call("list_entries", { projectId });
+}
+
+export function createEntry(
+  projectId: string,
+  authoredName?: string,
+  categoryId?: string,
+  typeId?: string,
+): Promise<Entry> {
+  return call("create_entry", {
+    projectId,
+    authoredName: authoredName || null,
+    categoryId: categoryId || null,
+    typeId: typeId || null,
+  });
+}
+
+export function getEntry(projectId: string, entryId: string): Promise<Entry> {
+  return call("get_entry", { projectId, entryId });
+}
+
+export function updateEntryName(
+  projectId: string,
+  entryId: string,
+  authoredName: string,
+  expectedRevision: number,
+): Promise<Entry> {
+  return call("update_entry_name", {
+    projectId,
+    entryId,
+    authoredName: authoredName || null,
+    expectedRevision,
+  });
+}
+
+export function changeEntryStructure(
+  projectId: string,
+  entryId: string,
+  categoryId: string,
+  typeId: string | undefined,
+  expectedRevision: number,
+): Promise<Entry> {
+  return call("change_entry_structure", {
+    projectId,
+    entryId,
+    categoryId,
+    typeId: typeId || null,
+    expectedRevision,
   });
 }
