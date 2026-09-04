@@ -22,8 +22,12 @@ pub struct ProjectService;
 
 impl ProjectService {
     /// Creates a brand-new Project package under `base_dir`, opens it, and
-    /// registers it in `state`. On any failure the partially created
-    /// package is removed so a failed creation never leaves debris behind.
+    /// registers it in `state`. The candidate package path is always
+    /// `<working name>.wcproj`; a collision is never silently side-stepped
+    /// (see [`PackageError::AlreadyExists`]) so the caller can visibly
+    /// report it and let the user choose another name or location. On any
+    /// other failure the partially created package is removed so a failed
+    /// creation never leaves debris behind.
     pub fn create_project(
         state: &AppState,
         base_dir: &Path,
@@ -31,7 +35,7 @@ impl ProjectService {
     ) -> Result<ProjectSummary, AppError> {
         let working_name = WorkingName::new(working_name_raw)?;
         let project_id = ProjectId::new();
-        let root = layout::available_package_path(base_dir, working_name.as_str());
+        let root = layout::single_candidate_package_path(base_dir, working_name.as_str());
 
         let paths = package::layout::create_skeleton(&root)?;
 

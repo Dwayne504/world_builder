@@ -5,7 +5,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppErrorDto, Category, Entry, ProjectSummary, TypeDef } from "./types";
+import type { AppErrorDto, Category, Entry, Preferences, ProjectSummary, TypeDef } from "./types";
 
 export class AppCommandError extends Error {
   kind: string;
@@ -145,4 +145,21 @@ export function changeEntryStructure(
     typeId: typeId || null,
     expectedRevision,
   });
+}
+
+export function getPreferences(): Promise<Preferences> {
+  return call("get_preferences", {});
+}
+
+export function setDefaultProjectsDir(directory: string | null): Promise<Preferences> {
+  return call("set_default_projects_dir", { directory });
+}
+
+export function setDefaultBackupsDir(directory: string | null): Promise<Preferences> {
+  return call("set_default_backups_dir", { directory });
+}
+
+/** Shows a native folder picker. Returns `null` if the user cancels. */
+export function pickDirectory(defaultPath?: string | null): Promise<string | null> {
+  return call("pick_directory", { defaultPath: defaultPath || null });
 }

@@ -43,9 +43,12 @@ h1 {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0;
 }
 
 input,
+select,
 button {
   border-radius: 8px;
   border: 1px solid transparent;
@@ -60,11 +63,17 @@ button {
   display: block;
   width: 100%;
   box-sizing: border-box;
+  margin-bottom: 0.5rem;
+}
+
+select {
+  appearance: auto;
 }
 
 button {
   cursor: pointer;
   width: auto;
+  margin-bottom: 0;
 }
 
 button:hover {
@@ -79,9 +88,24 @@ button:disabled {
   opacity: 0.6;
 }
 
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  background-color: #eeeeee;
+}
+
 input,
+select,
 button {
   outline: none;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid #396cd8;
+  outline-offset: 1px;
 }
 
 .error-banner {
@@ -90,6 +114,62 @@ button {
   border: 1px solid #ffb3b3;
   padding: 0.5rem 1rem;
   border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.inline-creator {
+  border: 1px solid #c8c8d8;
+  border-radius: 8px;
+  padding: 0.75rem 1rem 1rem;
+  margin: 0.5rem 0 1rem;
+  background-color: rgba(57, 108, 216, 0.05);
+}
+
+.inline-creator legend {
+  padding: 0 0.4em;
+  font-weight: 600;
+}
+
+.preference-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.preference-label {
+  font-weight: 600;
+  min-width: 10rem;
+}
+
+.preference-value {
+  flex: 1 1 auto;
+  word-break: break-all;
+}
+
+.preference-warning {
+  color: #a30000;
+  font-weight: 600;
+}
+
+.manual-path-diagnostics {
+  border-top: 1px dashed #d8d8d8;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.diagnostics-label {
+  font-size: 0.85em;
+  font-weight: 600;
+  color: #5a5a5a;
+  margin: 0 0 0.5rem;
+}
+
+.package-preview {
+  font-size: 0.9em;
+  color: #3a3a3a;
+  word-break: break-all;
 }
 
 .save-state {
@@ -125,11 +205,30 @@ button {
   }
 
   input,
+  select,
   button {
     color: #ffffff;
     background-color: #0f0f0f98;
   }
+  input:disabled,
+  select:disabled {
+    background-color: #3a3a3a;
+  }
   button:active {
     background-color: #0f0f0f69;
   }
+  .inline-creator {
+    border-color: #5a5a7a;
+    background-color: rgba(57, 108, 216, 0.12);
+  }
+  .manual-path-diagnostics {
+    border-top-color: #4a4a4a;
+  }
+  .diagnostics-label {
+    color: #c8c8c8;
+  }
+  .package-preview {
+    color: #d8d8d8;
+  }
 }
+

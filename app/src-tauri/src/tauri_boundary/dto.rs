@@ -118,6 +118,37 @@ pub struct AppErrorDto {
     pub message: String,
 }
 
+/// Application-level preference state, plus liveness flags so the frontend
+/// can warn about a configured directory that has since been moved or
+/// become inaccessible without guessing at a silent fallback.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreferencesDto {
+    pub default_projects_dir: Option<String>,
+    pub default_projects_dir_exists: bool,
+    pub default_backups_dir: Option<String>,
+    pub default_backups_dir_exists: bool,
+}
+
+impl From<crate::preferences::AppPreferences> for PreferencesDto {
+    fn from(prefs: crate::preferences::AppPreferences) -> Self {
+        let projects_exists = prefs
+            .default_projects_dir
+            .as_deref()
+            .is_some_and(crate::preferences::directory_is_usable);
+        let backups_exists = prefs
+            .default_backups_dir
+            .as_deref()
+            .is_some_and(crate::preferences::directory_is_usable);
+        PreferencesDto {
+            default_projects_dir: prefs.default_projects_dir.map(|p| p.display().to_string()),
+            default_projects_dir_exists: projects_exists,
+            default_backups_dir: prefs.default_backups_dir.map(|p| p.display().to_string()),
+            default_backups_dir_exists: backups_exists,
+        }
+    }
+}
+
 impl From<AppError> for AppErrorDto {
     fn from(e: AppError) -> Self {
         AppErrorDto {

@@ -198,7 +198,7 @@ fn discarding_an_unsubmitted_rename_preserves_the_saved_working_name_after_reope
 }
 
 #[test]
-fn stale_orphaned_lock_metadata_reports_recovery_required_then_recovers() {
+fn orphaned_lock_metadata_reports_recovery_required_then_recovers_regardless_of_age() {
     let state = AppState::default();
     let dir = tempdir().unwrap();
     let (created, package_path) = make_closed_project(&state, dir.path());
@@ -208,7 +208,7 @@ fn stale_orphaned_lock_metadata_reports_recovery_required_then_recovers() {
     // The specific error kind the Home screen uses to offer recovery.
     let err = ProjectService::open_project(&state, &package_path, false).unwrap_err();
     assert_eq!(err.kind(), "lock_recovery_required");
-    // Refusal must not have discarded or rewritten the stale evidence.
+    // Refusal must not have discarded or rewritten the leftover evidence.
     assert!(paths.lock_path().is_file());
     assert!(paths.db_path().is_file());
 
@@ -258,22 +258,25 @@ fn an_active_os_owner_cannot_be_recovered_or_stolen() {
 }
 
 #[test]
-fn fresh_orphaned_metadata_is_not_stale_and_not_recoverable() {
+fn very_fresh_orphaned_metadata_still_offers_immediate_recovery() {
     let state = AppState::default();
     let dir = tempdir().unwrap();
     let (created, package_path) = make_closed_project(&state, dir.path());
     let paths = project_paths(&created.package_path);
-    plant_orphaned_lock_metadata(&paths, chrono::Duration::minutes(1));
+    // A previous session ended moments ago (e.g. a crash right after
+    // startup). Recovery must not require any waiting period: as soon as
+    // the OS lock is free, explicit recovery is immediately available.
+    plant_orphaned_lock_metadata(&paths, chrono::Duration::seconds(1));
 
-    // Too recent to call stale: normal open refuses without offering
-    // recovery, and even an explicit recovery attempt is refused.
     let err = ProjectService::open_project(&state, &package_path, false).unwrap_err();
-    assert_eq!(err.kind(), "lock_not_stale");
-    let err = ProjectService::open_project(&state, &package_path, true).unwrap_err();
-    assert_eq!(err.kind(), "lock_not_stale");
-    // Fresh evidence is preserved, never auto-deleted.
+    assert_eq!(err.kind(), "lock_recovery_required");
+    // Refusal must not have altered or refreshed the leftover evidence.
     assert!(paths.lock_path().is_file());
     assert!(paths.db_path().is_file());
+
+    let recovered = ProjectService::open_project(&state, &package_path, true).unwrap();
+    assert_eq!(recovered.project_id, created.project_id);
+    ProjectService::close_project(&state, recovered.project_id).unwrap();
 }
 
 #[test]
@@ -316,4 +319,55 @@ fn a_failed_recovery_leaves_the_project_package_intact() {
     let opened = ProjectService::open_project(&state, &package_path, false).unwrap();
     assert_eq!(opened.project_id, created.project_id);
     ProjectService::close_project(&state, opened.project_id).unwrap();
+}
+
+#[test]
+fn create_project_refuses_a_colliding_package_path_and_reports_it() {
+    let state = AppState::default();
+    let dir = tempdir().unwrap();
+    let first = ProjectService::create_project(&state, dir.path(), "Tortuga").unwrap();
+    ProjectService::close_project(&state, first.project_id).unwrap();
+
+    // A second Project with the same working name in the same location
+    // collides on the same candidate path; it must never be silently
+    // renamed around (e.g. "Tortuga (2).wcproj") -- the collision is
+    // visibly reported so the user can choose another name or location.
+    let err = ProjectService::create_project(&state, dir.path(), "Tortuga").unwrap_err();
+    assert_eq!(err.kind(), "already_exists");
+
+    // The existing Project at that path is completely untouched.
+    let paths = project_paths(&first.package_path);
+    assert!(paths.manifest_path().is_file());
+    assert!(paths.db_path().is_file());
+    let reopened =
+        ProjectService::open_project(&state, &PathBuf::from(&first.package_path), false).unwrap();
+    assert_eq!(reopened.project_id, first.project_id);
+    ProjectService::close_project(&state, reopened.project_id).unwrap();
+}
+
+#[test]
+fn renaming_the_working_name_never_renames_the_package_directory() {
+    let state = AppState::default();
+    let dir = tempdir().unwrap();
+    let created = ProjectService::create_project(&state, dir.path(), "Tortuga").unwrap();
+    let original_path = created.package_path.clone();
+
+    let renamed = ProjectService::rename_project(
+        &state,
+        created.project_id,
+        "Renamed Turtle",
+        created.revision,
+    )
+    .unwrap();
+
+    // The visible working name changed, but the package's on-disk location
+    // (and therefore its stable identity as a path) did not.
+    assert_eq!(renamed.working_name, "Renamed Turtle");
+    assert_eq!(renamed.package_path, original_path);
+    assert!(PathBuf::from(&original_path).is_dir());
+    assert!(!PathBuf::from(&original_path)
+        .to_string_lossy()
+        .contains("Renamed"));
+
+    ProjectService::close_project(&state, renamed.project_id).unwrap();
 }

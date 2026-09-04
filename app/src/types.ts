@@ -49,3 +49,10 @@ export interface Entry {
   revision: number;
   globalRevision: number;
 }
+
+export interface Preferences {
+  defaultProjectsDir: string | null;
+  defaultProjectsDirExists: boolean;
+  defaultBackupsDir: string | null;
+  defaultBackupsDirExists: boolean;
+}

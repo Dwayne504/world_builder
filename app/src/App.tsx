@@ -10,13 +10,17 @@ import {
   createProject,
   createType,
   changeEntryStructure,
+  getPreferences,
   listCategories,
   listEntries,
   listTypes,
   openProject,
+  pickDirectory,
   restoreBackupAsCopy,
+  setDefaultBackupsDir,
+  setDefaultProjectsDir,
 } from "./api";
-import type { Category, Entry, ProjectSummary, SaveState, TypeDef } from "./types";
+import type { Category, Entry, Preferences, ProjectSummary, SaveState, TypeDef } from "./types";
 import { useProjectRename } from "./useProjectRename";
 import type { SubmitOutcome } from "./useProjectRename";
 import { useEntryName } from "./useEntryName";
@@ -42,19 +46,13 @@ function openFailureMessage(err: unknown): string {
       case "lock_recovery_required":
         return (
           "This Project was not closed properly last time (for example after a crash or " +
-          "power loss), so a leftover lock is still recorded. Because that record is old, " +
-          "you can recover the Project and open it."
+          "power loss), so a leftover lock record is still present. The Project is not " +
+          "currently open anywhere else, so you can recover it and open it now."
         );
       case "lock_held":
         return (
           "This Project is currently open in another Worldcrafter instance. Close it there " +
           "first; an active Project is never taken over."
-        );
-      case "lock_not_stale":
-        return (
-          "This Project may still be in use: it was closed only very recently, or another " +
-          "instance may still be running. If another Worldcrafter is open, close it and try " +
-          "again. Otherwise wait a while before trying again."
         );
       case "lock_metadata_corrupt":
         return (
@@ -91,9 +89,31 @@ function closeWarningActionLabel(intent: CloseIntent): string {
     : "Close Project anyway (discard changes)";
 }
 
+/** Cosmetic preview only; the backend performs the authoritative sanitization. */
+function previewPackageName(workingName: string): string {
+  const stem = workingName
+    .trim()
+    .replace(/[^\p{L}\p{N} _-]/gu, "_")
+    .trim();
+  return `${stem || "Untitled Project"}.wcproj`;
+}
+
+function createFailureMessage(err: unknown): string {
+  if (err instanceof AppCommandError && err.kind === "already_exists") {
+    return (
+      "A Project package already exists at that location with that name. Choose a " +
+      "different working name, or pick another location, and try again."
+    );
+  }
+  return errorMessage(err);
+}
+
 function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void }) {
+  const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [baseDir, setBaseDir] = useState("");
+  const [baseDirTouched, setBaseDirTouched] = useState(false);
   const [newName, setNewName] = useState("");
+  const [createdSummary, setCreatedSummary] = useState<ProjectSummary | null>(null);
   const [openPath, setOpenPath] = useState("");
   const [backupPath, setBackupPath] = useState("");
   const [restoreDestination, setRestoreDestination] = useState("");
@@ -108,16 +128,54 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
   const openPathRef = useRef("");
   const openPathRevisionRef = useRef(0);
 
+  useEffect(() => {
+    void getPreferences()
+      .then((prefs) => {
+        setPreferences(prefs);
+        if (!baseDirTouched && prefs.defaultProjectsDir && prefs.defaultProjectsDirExists) {
+          setBaseDir(prefs.defaultProjectsDir);
+        }
+      })
+      .catch(() => {
+        // Preferences are a convenience default only; their absence never
+        // blocks Project creation or opening.
+      });
+    // Only ever runs once at mount to seed the initial default.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleChooseProjectsLocation() {
+    const picked = await pickDirectory(baseDir || preferences?.defaultProjectsDir);
+    if (picked) {
+      setBaseDirTouched(true);
+      setBaseDir(picked);
+    }
+  }
+
   async function handleCreate() {
     setBusy(true);
     setError(null);
     setErrorDetails(null);
+    setCreatedSummary(null);
     try {
-      onOpened(await createProject(baseDir, newName));
+      const summary = await createProject(baseDir, newName);
+      setCreatedSummary(summary);
+      onOpened(summary);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(createFailureMessage(err));
+      setErrorDetails(errorMessage(err) === createFailureMessage(err) ? null : errorMessage(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleChooseOpenPath() {
+    const picked = await pickDirectory(preferences?.defaultProjectsDir);
+    if (picked) {
+      openPathRef.current = picked;
+      openPathRevisionRef.current += 1;
+      setOpenPath(picked);
+      setRecoveryPath(null);
     }
   }
 
@@ -188,6 +246,28 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
     }
   }
 
+  async function handleChooseDefaultProjectsDir() {
+    const picked = await pickDirectory(preferences?.defaultProjectsDir);
+    if (picked) {
+      setPreferences(await setDefaultProjectsDir(picked));
+    }
+  }
+
+  async function handleClearDefaultProjectsDir() {
+    setPreferences(await setDefaultProjectsDir(null));
+  }
+
+  async function handleChooseDefaultBackupsDir() {
+    const picked = await pickDirectory(preferences?.defaultBackupsDir);
+    if (picked) {
+      setPreferences(await setDefaultBackupsDir(picked));
+    }
+  }
+
+  async function handleClearDefaultBackupsDir() {
+    setPreferences(await setDefaultBackupsDir(null));
+  }
+
   return (
     <main className="container">
       <h1>Worldcrafter</h1>
@@ -204,16 +284,41 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
       )}
 
       <section>
+        <h2>Preferences</h2>
+        <div className="preference-row">
+          <span className="preference-label">Default Projects folder</span>
+          <span className="preference-value">
+            {preferences?.defaultProjectsDir ?? "Not set"}
+            {preferences?.defaultProjectsDir && !preferences.defaultProjectsDirExists && (
+              <span className="preference-warning"> (missing or inaccessible)</span>
+            )}
+          </span>
+          <div className="row">
+            <button onClick={() => void handleChooseDefaultProjectsDir()}>Choose…</button>
+            {preferences?.defaultProjectsDir && (
+              <button onClick={() => void handleClearDefaultProjectsDir()}>Clear</button>
+            )}
+          </div>
+        </div>
+        <div className="preference-row">
+          <span className="preference-label">Default Backups folder</span>
+          <span className="preference-value">
+            {preferences?.defaultBackupsDir ?? "Not set"}
+            {preferences?.defaultBackupsDir && !preferences.defaultBackupsDirExists && (
+              <span className="preference-warning"> (missing or inaccessible)</span>
+            )}
+          </span>
+          <div className="row">
+            <button onClick={() => void handleChooseDefaultBackupsDir()}>Choose…</button>
+            {preferences?.defaultBackupsDir && (
+              <button onClick={() => void handleClearDefaultBackupsDir()}>Clear</button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section>
         <h2>New Project</h2>
-        <label>
-          Location
-          <input
-            aria-label="new-project-location"
-            value={baseDir}
-            onChange={(e) => setBaseDir(e.currentTarget.value)}
-            placeholder="/path/to/projects"
-          />
-        </label>
         <label>
           Working name
           <input
@@ -223,29 +328,65 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
             placeholder="Tortuga"
           />
         </label>
-        <button disabled={busy || !baseDir || !newName} onClick={handleCreate}>
+        <div className="preference-row">
+          <span className="preference-label">Location</span>
+          <span className="preference-value">{baseDir || "Choose a location"}</span>
+          <button onClick={() => void handleChooseProjectsLocation()}>Choose location…</button>
+        </div>
+        {baseDir && newName && (
+          <p className="package-preview">
+            Will be created as: {baseDir}/{previewPackageName(newName)}
+          </p>
+        )}
+        <div className="manual-path-diagnostics">
+          <p className="diagnostics-label">Enter location manually (diagnostics)</p>
+          <label>
+            Location
+            <input
+              aria-label="new-project-location"
+              value={baseDir}
+              onChange={(e) => {
+                setBaseDirTouched(true);
+                setBaseDir(e.currentTarget.value);
+              }}
+              placeholder="/path/to/projects"
+            />
+          </label>
+        </div>
+        <button disabled={busy || !baseDir || !newName} onClick={() => void handleCreate()}>
           Create Project
         </button>
+        {createdSummary && (
+          <p className="package-preview">Created at: {createdSummary.packagePath}</p>
+        )}
       </section>
 
       <section>
         <h2>Open Project</h2>
-        <label>
-          Package path
-          <input
-            aria-label="open-project-path"
-            value={openPath}
-            onChange={(e) => {
-              const path = e.currentTarget.value;
-              openPathRef.current = path;
-              openPathRevisionRef.current += 1;
-              setOpenPath(path);
-              setRecoveryPath(null);
-            }}
-            placeholder="/path/to/Tortuga.wcproj"
-          />
-        </label>
-        <button disabled={busy || !openPath} onClick={handleOpen}>
+        <div className="row">
+          <button disabled={busy} onClick={() => void handleChooseOpenPath()}>
+            Browse for Project…
+          </button>
+        </div>
+        <div className="manual-path-diagnostics">
+          <p className="diagnostics-label">Enter package path manually (diagnostics)</p>
+          <label>
+            Package path
+            <input
+              aria-label="open-project-path"
+              value={openPath}
+              onChange={(e) => {
+                const path = e.currentTarget.value;
+                openPathRef.current = path;
+                openPathRevisionRef.current += 1;
+                setOpenPath(path);
+                setRecoveryPath(null);
+              }}
+              placeholder="/path/to/Tortuga.wcproj"
+            />
+          </label>
+        </div>
+        <button disabled={busy || !openPath} onClick={() => void handleOpen()}>
           Open Project
         </button>
         {recoveryPath !== null && recoveryPath === openPath && (
@@ -255,7 +396,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
               modified. Use this only when you are sure no other Worldcrafter instance currently has
               this Project open.
             </p>
-            <button disabled={busy} onClick={handleRecoverLock}>
+            <button disabled={busy} onClick={() => void handleRecoverLock()}>
               Recover lock and open Project
             </button>
           </div>
@@ -289,7 +430,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
             onChange={(e) => setRestoreName(e.currentTarget.value)}
           />
         </label>
-        <button disabled={busy || !backupPath || !restoreDestination} onClick={handleRestore}>
+        <button disabled={busy || !backupPath || !restoreDestination} onClick={() => void handleRestore()}>
           Restore as Copy
         </button>
       </section>
@@ -790,19 +931,34 @@ function EntryWorkflow({
         Create Category inline
       </button>
       {showCategoryCreator && (
-        <div>
-          <input
-            aria-label="inline-category-name"
-            value={newCategoryName}
-            onChange={(event) => setNewCategoryName(event.currentTarget.value)}
-          />
-          <button
-            disabled={!newCategoryName.trim() || mutations.state === "saving"}
-            onClick={() => void addCategory()}
-          >
-            Add Category
-          </button>
-        </div>
+        <fieldset className="inline-creator">
+          <legend>New Category</legend>
+          <label>
+            Category name
+            <input
+              aria-label="inline-category-name"
+              value={newCategoryName}
+              onChange={(event) => setNewCategoryName(event.currentTarget.value)}
+            />
+          </label>
+          <div className="row">
+            <button
+              disabled={!newCategoryName.trim() || mutations.state === "saving"}
+              onClick={() => void addCategory()}
+            >
+              Add Category
+            </button>
+            <button
+              disabled={mutations.state === "saving"}
+              onClick={() => {
+                setNewCategoryName("");
+                setShowCategoryCreator(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </fieldset>
       )}
       <label>
         Type (optional)
@@ -827,19 +983,34 @@ function EntryWorkflow({
         Create Type inline
       </button>
       {showTypeCreator && (
-        <div>
-          <input
-            aria-label="inline-type-name"
-            value={newTypeName}
-            onChange={(event) => setNewTypeName(event.currentTarget.value)}
-          />
-          <button
-            disabled={!newTypeName.trim() || mutations.state === "saving"}
-            onClick={() => void addType()}
-          >
-            Add Type
-          </button>
-        </div>
+        <fieldset className="inline-creator">
+          <legend>New Type</legend>
+          <label>
+            Type name
+            <input
+              aria-label="inline-type-name"
+              value={newTypeName}
+              onChange={(event) => setNewTypeName(event.currentTarget.value)}
+            />
+          </label>
+          <div className="row">
+            <button
+              disabled={!newTypeName.trim() || mutations.state === "saving"}
+              onClick={() => void addType()}
+            >
+              Add Type
+            </button>
+            <button
+              disabled={mutations.state === "saving"}
+              onClick={() => {
+                setNewTypeName("");
+                setShowTypeCreator(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </fieldset>
       )}
       <button disabled={mutations.state === "saving"} onClick={() => void addEntry()}>
         Create Entry
@@ -859,6 +1030,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   } = mutations;
   const { submit: renameSubmit } = rename;
   const [backupDir, setBackupDir] = useState("");
+  const [backupDirTouched, setBackupDirTouched] = useState(false);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [pendingCloseIntent, setPendingCloseIntent] = useState<CloseIntent | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
@@ -886,6 +1058,28 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
     entryControllerRef.current = controller;
     setEntrySaveState(controller?.state ?? "saved");
   }, []);
+
+  useEffect(() => {
+    void getPreferences()
+      .then((prefs) => {
+        if (!backupDirTouched && prefs.defaultBackupsDir && prefs.defaultBackupsDirExists) {
+          setBackupDir(prefs.defaultBackupsDir);
+        }
+      })
+      .catch(() => {
+        // A missing/unreadable preferences file never blocks manual backups.
+      });
+    // Only ever runs once at mount to seed the initial default.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleChooseBackupDir() {
+    const picked = await pickDirectory(backupDir);
+    if (picked) {
+      setBackupDirTouched(true);
+      setBackupDir(picked);
+    }
+  }
 
   async function handleCreateBackup() {
     setBusy(true);
@@ -1124,12 +1318,18 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           <input
             aria-label="backup-destination"
             value={backupDir}
-            onChange={(e) => setBackupDir(e.currentTarget.value)}
+            onChange={(e) => {
+              setBackupDirTouched(true);
+              setBackupDir(e.currentTarget.value);
+            }}
           />
         </label>
-        <button disabled={busy || !backupDir} onClick={handleCreateBackup}>
-          Create Manual Backup
-        </button>
+        <div className="row">
+          <button onClick={() => void handleChooseBackupDir()}>Choose location…</button>
+          <button disabled={busy || !backupDir} onClick={() => void handleCreateBackup()}>
+            Create Manual Backup
+          </button>
+        </div>
         {backupStatus && <p>{backupStatus}</p>}
       </section>
 
