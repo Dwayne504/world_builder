@@ -126,9 +126,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
       const pathIsUnchanged =
         openPathRevisionRef.current === pathRevision && openPathRef.current === attemptedPath;
       setRecoveryPath(
-        err instanceof AppCommandError &&
-          err.kind === "lock_recovery_required" &&
-          pathIsUnchanged
+        err instanceof AppCommandError && err.kind === "lock_recovery_required" && pathIsUnchanged
           ? attemptedPath
           : null,
       );
@@ -158,9 +156,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
       const pathIsUnchanged =
         openPathRevisionRef.current === pathRevision && openPathRef.current === attemptedPath;
       setRecoveryPath(
-        err instanceof AppCommandError &&
-          err.kind === "lock_recovery_required" &&
-          pathIsUnchanged
+        err instanceof AppCommandError && err.kind === "lock_recovery_required" && pathIsUnchanged
           ? attemptedPath
           : null,
       );
