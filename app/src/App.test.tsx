@@ -423,6 +423,7 @@ describe("Home screen stale-lock recovery", () => {
 
     // Understandable wording leads; jargon stays out of the primary text.
     expect(screen.getByText(/not closed properly/i)).toBeInTheDocument();
+    expect(screen.getByText(/lock_recovery_required diagnostic detail/)).toBeInTheDocument();
 
     const recover = screen.getByRole("button", { name: "Recover lock and open Project" });
     expect(recover).toBeInTheDocument();
@@ -435,6 +436,44 @@ describe("Home screen stale-lock recovery", () => {
     await waitFor(() => screen.getByTestId("project-id"));
     expect(openProjectMock).toHaveBeenLastCalledWith("/tmp/Tortuga.wcproj", true);
     expect(screen.getByTestId("project-id").textContent).toBe(project.projectId);
+  });
+
+  it("invalidates recovery immediately when the Package path is edited", async () => {
+    await renderHomeAndFailOpen("lock_recovery_required");
+    const path = screen.getByLabelText("open-project-path");
+
+    fireEvent.change(path, { target: { value: "/tmp/Other.wcproj" } });
+    expect(
+      screen.queryByRole("button", { name: "Recover lock and open Project" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(path, { target: { value: "/tmp/Tortuga.wcproj" } });
+    expect(
+      screen.queryByRole("button", { name: "Recover lock and open Project" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("never authorizes recovery for an old path whose request finishes after an edit", async () => {
+    let rejectOpen: ((reason: AppCommandError) => void) | undefined;
+    openProjectMock.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectOpen = reject;
+      }),
+    );
+    render(<App />);
+    const path = screen.getByLabelText("open-project-path");
+    fireEvent.change(path, { target: { value: "/tmp/Old.wcproj" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
+
+    fireEvent.change(path, { target: { value: "/tmp/New.wcproj" } });
+    rejectOpen?.(backendError("lock_recovery_required", "old path diagnostic"));
+    await waitFor(() => expect(screen.getByText(/not closed properly/i)).toBeInTheDocument());
+
+    fireEvent.change(path, { target: { value: "/tmp/Old.wcproj" } });
+    expect(
+      screen.queryByRole("button", { name: "Recover lock and open Project" }),
+    ).not.toBeInTheDocument();
+    expect(openProjectMock).toHaveBeenCalledWith("/tmp/Old.wcproj");
   });
 
   it.each([
@@ -452,7 +491,12 @@ describe("Home screen stale-lock recovery", () => {
     expect(screen.getByLabelText("open-project-path")).toHaveValue("/tmp/Tortuga.wcproj");
   });
 
-  it("keeps a failed recovery visible and does not open the Project", async () => {
+  it.each([
+    ["lock_held", "held by pid 42"],
+    ["lock_not_stale", "heartbeat is too recent"],
+    ["lock_metadata_corrupt", "invalid lock metadata"],
+    ["invalid_package", "unrelated open failure"],
+  ])("clears recovery when the latest recovery attempt fails with %s", async (kind, diagnostic) => {
     openProjectMock.mockRejectedValueOnce(
       backendError("lock_recovery_required", "stale lock diagnostic"),
     );
@@ -463,19 +507,31 @@ describe("Home screen stale-lock recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
     await waitFor(() => screen.getByRole("button", { name: "Recover lock and open Project" }));
 
-    // The recovery attempt itself fails (e.g. another instance grabbed the
-    // Project first): the failure must stay visible.
-    openProjectMock.mockRejectedValueOnce(backendError("lock_held", "held by pid 42"));
+    openProjectMock.mockRejectedValueOnce(backendError(kind, diagnostic));
+    fireEvent.click(screen.getByRole("button", { name: "Recover lock and open Project" }));
+
+    await waitFor(() => expect(screen.getByText(new RegExp(diagnostic))).toBeInTheDocument());
+    expect(openProjectMock).toHaveBeenLastCalledWith("/tmp/Tortuga.wcproj", true);
+    expect(
+      screen.queryByRole("button", { name: "Recover lock and open Project" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("project-id")).not.toBeInTheDocument();
+  });
+
+  it("retains recovery only when the latest failure still requires it for the unchanged path", async () => {
+    await renderHomeAndFailOpen("lock_recovery_required");
+    openProjectMock.mockRejectedValueOnce(
+      backendError("lock_recovery_required", "still stale diagnostic"),
+    );
+
     fireEvent.click(screen.getByRole("button", { name: "Recover lock and open Project" }));
 
     await waitFor(() =>
       expect(
-        screen.getByText(/currently open in another Worldcrafter instance/i),
+        screen.getByRole("button", { name: "Recover lock and open Project" }),
       ).toBeInTheDocument(),
     );
-    expect(openProjectMock).toHaveBeenLastCalledWith("/tmp/Tortuga.wcproj", true);
-    // Still on the Home screen: nothing was opened.
-    expect(screen.queryByTestId("project-id")).not.toBeInTheDocument();
+    expect(screen.getByText(/still stale diagnostic/)).toBeInTheDocument();
   });
 
   it("does not offer recovery for non-lock open failures", async () => {
