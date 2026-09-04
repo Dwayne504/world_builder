@@ -106,6 +106,60 @@ function enableTauriWindow() {
   });
 }
 
+function mockEditableEntry() {
+  const entry = {
+    id: "entry",
+    categoryId: "characters",
+    typeId: "human",
+    authoredName: "Thron",
+    displayName: "Thron",
+    revision: 1,
+    globalRevision: 1,
+  };
+  listCategoriesMock.mockResolvedValue([
+    {
+      id: "characters",
+      name: "Characters",
+      isUncategorized: false,
+      revision: 1,
+      globalRevision: 1,
+    },
+    {
+      id: "places",
+      name: "Places",
+      isUncategorized: false,
+      revision: 1,
+      globalRevision: 1,
+    },
+  ]);
+  listTypesMock.mockImplementation((_projectId: string, categoryId: string) =>
+    Promise.resolve(
+      categoryId === "characters"
+        ? [
+            {
+              id: "human",
+              categoryId: "characters",
+              parentTypeId: null,
+              name: "Human",
+              revision: 1,
+              globalRevision: 1,
+            },
+            {
+              id: "mage",
+              categoryId: "characters",
+              parentTypeId: null,
+              name: "Mage",
+              revision: 1,
+              globalRevision: 1,
+            },
+          ]
+        : [],
+    ),
+  );
+  listEntriesMock.mockResolvedValue([entry]);
+  return entry;
+}
+
 describe("Project screen Saved contract", () => {
   beforeEach(() => {
     closeProjectMock.mockReset();
@@ -342,7 +396,9 @@ describe("Project screen Saved contract", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("disk full"));
     fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
     expect(closeProjectMock).not.toHaveBeenCalled();
-    expect(screen.queryByText(/discard changes/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Close Project anyway (discard changes)" }),
+    ).toBeInTheDocument();
   });
 
   it("guards repeated Category, Type, and Entry submissions", async () => {
@@ -494,6 +550,131 @@ describe("Project screen Saved contract", () => {
     expect(screen.queryByRole("option", { name: "Old Type" })).not.toBeInTheDocument();
   });
 
+  it("requires explicit discard when navigating Back with an unapplied Category", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.change(screen.getByLabelText("entry-category"), { target: { value: "places" } });
+    await act(async () => Promise.resolve());
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Pending");
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Pending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Entries" }));
+    expect(screen.getByRole("button", { name: "Discard and continue" })).toBeInTheDocument();
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard and continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Human" });
+    expect(screen.getByLabelText("entry-category")).toHaveValue("characters");
+    expect(screen.getByLabelText("entry-type")).toHaveValue("human");
+  });
+
+  it("requires explicit discard on native close with an unapplied Type", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
+
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Close app anyway (discard changes)" }),
+    ).toBeInTheDocument();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+  });
+
+  it("clears structural dirty state when selectors return to persisted values", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Pending");
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "human" } });
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saved");
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+  });
+
+  it("locks selectors during Apply and synchronizes the committed structure", async () => {
+    const entry = mockEditableEntry();
+    const pending = deferred<typeof entry>();
+    changeEntryStructureMock.mockReturnValue(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
+
+    await waitFor(() => expect(screen.getByLabelText("entry-category")).toBeDisabled());
+    expect(screen.getByLabelText("entry-type")).toBeDisabled();
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saving");
+
+    pending.resolve({ ...entry, typeId: "mage", revision: 2, globalRevision: 2 });
+    await waitFor(() => expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saved"));
+    expect(screen.getByLabelText("entry-category")).toHaveValue("characters");
+    expect(screen.getByLabelText("entry-type")).toHaveValue("mage");
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+  });
+
+  it("allows explicit discard-close after structural failure and preserves failure on cancel", async () => {
+    mockEditableEntry();
+    changeEntryStructureMock.mockRejectedValue(new Error("structure write failed"));
+    closeProjectMock.mockResolvedValue(undefined);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
+    await waitFor(() => expect(screen.getByText("structure write failed")).toBeInTheDocument());
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Failed to save");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    const discard = screen.getByRole("button", {
+      name: "Close Project anyway (discard changes)",
+    });
+    expect(discard).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("structure write failed")).toBeInTheDocument();
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Failed to save");
+    expect(closeProjectMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Project anyway (discard changes)" }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+  });
+
+  it("keeps a structural draft dirty after an overlapping name save settles", async () => {
+    const entry = mockEditableEntry();
+    const pendingName = deferred<typeof entry>();
+    updateEntryNameMock.mockReturnValue(pendingName.promise);
+    closeProjectMock.mockResolvedValue(undefined);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.change(screen.getByLabelText("entry-name"), { target: { value: "Thron II" } });
+    fireEvent.change(screen.getByLabelText("entry-category"), { target: { value: "places" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+
+    pendingName.resolve({
+      ...entry,
+      authoredName: "Thron II",
+      displayName: "Thron II",
+      revision: 2,
+      globalRevision: 2,
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Close Project anyway (discard changes)" }),
+      ).toBeInTheDocument(),
+    );
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Pending");
+  });
+
   it("handles overlapping name and structural saves without claiming either was discarded", async () => {
     const entry = {
       id: "entry",
@@ -505,6 +686,22 @@ describe("Project screen Saved contract", () => {
       globalRevision: 1,
     };
     listEntriesMock.mockResolvedValue([entry]);
+    listCategoriesMock.mockResolvedValue([
+      {
+        id: "uncategorized",
+        name: "Uncategorized",
+        isUncategorized: true,
+        revision: 0,
+        globalRevision: 0,
+      },
+      {
+        id: "characters",
+        name: "Characters",
+        isUncategorized: false,
+        revision: 1,
+        globalRevision: 1,
+      },
+    ]);
     const nameSave = deferred<typeof entry>();
     const structureSave = deferred<typeof entry>();
     updateEntryNameMock.mockReturnValue(nameSave.promise);
@@ -513,6 +710,10 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     fireEvent.change(screen.getByLabelText("entry-name"), { target: { value: "Thron II" } });
+    fireEvent.change(screen.getByLabelText("entry-category"), {
+      target: { value: "characters" },
+    });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
     await waitFor(() => expect(updateEntryNameMock).toHaveBeenCalledTimes(1));
     expect(changeEntryStructureMock).not.toHaveBeenCalled();

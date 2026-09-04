@@ -315,6 +315,7 @@ function saveStateLabel(state: string): string {
 interface EntrySaveController {
   state: SaveState;
   submit: () => Promise<SubmitOutcome>;
+  canSubmit: boolean;
 }
 
 type MutationCoordinator = ReturnType<typeof useMutationCoordinator>;
@@ -345,10 +346,20 @@ function EntryEditor({
   const [structureTypeChosen, setStructureTypeChosen] = useState(true);
   const onChangedRef = useRef(onChanged);
   onChangedRef.current = onChanged;
+  const structureDirty =
+    categoryId !== editor.entry.categoryId || typeId !== (editor.entry.typeId ?? "");
+  const combinedEntryState: SaveState =
+    editor.saveState === "saving" || mutations.state === "saving"
+      ? "saving"
+      : editor.saveState === "failed" || mutations.state === "failed"
+        ? "failed"
+        : editor.saveState === "dirty" || structureDirty
+          ? "dirty"
+          : "saved";
 
   useEffect(() => {
-    onController({ state: editor.saveState, submit });
-  }, [editor.saveState, onController, submit]);
+    onController({ state: combinedEntryState, submit, canSubmit: !structureDirty });
+  }, [combinedEntryState, onController, structureDirty, submit]);
 
   useEffect(() => {
     onChangedRef.current(editor.entry);
@@ -385,6 +396,10 @@ function EntryEditor({
       },
       (updated) => {
         editor.replaceEntry(updated);
+        setCategoryId(updated.categoryId);
+        setTypeId(updated.typeId ?? "");
+        setStructureTypeChosen(true);
+        onController({ state: "saved", submit, canSubmit: true });
         onChangedRef.current(updated);
         setStructureError(null);
       },
@@ -406,12 +421,13 @@ function EntryEditor({
           onChange={(event) => editor.onChangeDraft(event.currentTarget.value)}
         />
       </label>
-      <span data-testid="entry-save-state">{saveStateLabel(editor.saveState)}</span>
+      <span data-testid="entry-save-state">{saveStateLabel(combinedEntryState)}</span>
       {editor.errorMessage && <p role="alert">{editor.errorMessage}</p>}
       <label>
         Category
         <select
           aria-label="entry-category"
+          disabled={mutations.state === "saving"}
           value={categoryId}
           onChange={(event) => {
             setTypes([]);
@@ -432,6 +448,7 @@ function EntryEditor({
         Type (optional)
         <select
           aria-label="entry-type"
+          disabled={mutations.state === "saving"}
           value={typeId}
           onChange={(event) => {
             setTypeId(event.currentTarget.value);
@@ -455,6 +472,7 @@ function EntryEditor({
         <button
           disabled={
             mutations.state === "saving" ||
+            !structureDirty ||
             (categoryId !== editor.entry.categoryId && !structureTypeChosen)
           }
           onClick={() => void saveStructure()}
@@ -495,6 +513,7 @@ function EntryWorkflow({
   const [pendingEntry, setPendingEntry] = useState<Entry | null>(null);
   const [pendingBack, setPendingBack] = useState(false);
   const [controllerState, setControllerState] = useState<SaveState>("saved");
+  const [controllerCanSubmit, setControllerCanSubmit] = useState(true);
 
   const refresh = useCallback(async () => {
     const [nextCategories, nextEntries] = await Promise.all([
@@ -536,6 +555,7 @@ function EntryWorkflow({
     (controller: EntrySaveController) => {
       controllerRef.current = controller;
       setControllerState(controller.state);
+      setControllerCanSubmit(controller.canSubmit);
       onController(controller);
     },
     [onController],
@@ -680,9 +700,20 @@ function EntryWorkflow({
             <p>{error}</p>
             {(pendingEntry || pendingBack) && (
               <div className="row">
-                <button onClick={() => void saveAndNavigate()}>Save and continue</button>
+                {controllerCanSubmit && (
+                  <button onClick={() => void saveAndNavigate()}>Save and continue</button>
+                )}
                 <button disabled={controllerState === "saving"} onClick={discardAndNavigate}>
                   Discard and continue
+                </button>
+                <button
+                  onClick={() => {
+                    setPendingEntry(null);
+                    setPendingBack(false);
+                    setError(null);
+                  }}
+                >
+                  Cancel
                 </button>
               </div>
             )}
@@ -922,6 +953,10 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         waitForStructuralMutation(),
       ])
         .then(([renameOutcome, entryOutcome, structuralSuccessful]) => {
+          if (entryControllerRef.current?.canSubmit === false) {
+            setPendingCloseIntent(waitingCloseIntentRef.current ?? intent);
+            return undefined;
+          }
           if (
             structuralSuccessful &&
             [renameOutcome, entryOutcome].every(
@@ -953,10 +988,6 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         void waitForSaveThenClose(intent);
         return;
       }
-      if (mutationState === "failed") {
-        setCloseError(currentMutationError() ?? "Structural save failed.");
-        return;
-      }
       const decision = decideClose(saveStateRef.current, intent);
       switch (decision) {
         case "close-project":
@@ -976,13 +1007,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           );
       }
     },
-    [
-      closeAfterBackend,
-      currentMutationError,
-      isStructuralMutationPending,
-      mutationState,
-      waitForSaveThenClose,
-    ],
+    [closeAfterBackend, isStructuralMutationPending, waitForSaveThenClose],
   );
   const requestCloseRef = useRef(requestClose);
   requestCloseRef.current = requestClose;
@@ -1059,8 +1084,8 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           >
             {rename.saveState === "failed" ? "Retry save" : "Save"}
           </button>
-          <span data-testid="save-state" className={`save-state save-state-${rename.saveState}`}>
-            {saveStateLabel(rename.saveState)}
+          <span data-testid="save-state" className={`save-state save-state-${combinedSaveState}`}>
+            {saveStateLabel(combinedSaveState)}
           </span>
         </div>
         {rename.errorMessage && (
@@ -1108,6 +1133,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
             <button disabled={combinedSaveState === "saving"} onClick={handleForceCloseDiscarding}>
               {closeWarningActionLabel(pendingCloseIntent)}
             </button>
+            <button onClick={() => setPendingCloseIntent(null)}>Cancel</button>
           </div>
         )}
         {closeError && (
