@@ -248,6 +248,22 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
     [onClosed, project.projectId],
   );
 
+  const waitForSaveThenClose = useCallback(
+    (intent: CloseIntent): Promise<void> => {
+      // The save already in flight cannot be cancelled, so we never treat it
+      // as discardable: wait for it to settle, then close only if it landed
+      // on "saved". A failure must leave the app open showing the failed
+      // state, never claim the committed/failed save was "discarded".
+      return rename.submit().then(() => {
+        if (saveStateRef.current === "saved") {
+          return closeAfterBackend(intent);
+        }
+        return undefined;
+      });
+    },
+    [rename, closeAfterBackend],
+  );
+
   const requestClose = useCallback(
     (intent: CloseIntent): void => {
       setCloseError(null);
@@ -258,6 +274,11 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           setPendingCloseIntent(null);
           void closeAfterBackend(intent);
           return;
+        case "wait-for-save-project":
+        case "wait-for-save-native-window":
+          setPendingCloseIntent(null);
+          void waitForSaveThenClose(intent);
+          return;
         case "confirm-unsaved-project":
         case "confirm-unsaved-native-window":
           setPendingCloseIntent((current) =>
@@ -265,7 +286,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           );
       }
     },
-    [closeAfterBackend],
+    [closeAfterBackend, waitForSaveThenClose],
   );
 
   useEffect(() => {
@@ -327,7 +348,6 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
             aria-label="project-working-name"
             value={rename.draftName}
             onChange={(e) => rename.onChangeDraft(e.currentTarget.value)}
-            onBlur={() => rename.submit()}
           />
         </label>
         <div className="row">
