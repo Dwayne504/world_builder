@@ -185,6 +185,7 @@ function saveStateLabel(state: string): string {
 
 function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClosed: () => void }) {
   const rename = useProjectRename(project);
+  const { submit: renameSubmit } = rename;
   const [backupDir, setBackupDir] = useState("");
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [pendingCloseIntent, setPendingCloseIntent] = useState<CloseIntent | null>(null);
@@ -248,6 +249,25 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
     [onClosed, project.projectId],
   );
 
+  const waitForSaveThenClose = useCallback(
+    (intent: CloseIntent): Promise<void> => {
+      // The save already in flight cannot be cancelled, so we never treat it
+      // as discardable: wait for it to settle, then close only if the
+      // explicit outcome confirms the currently displayed draft committed.
+      // Reading `saveState` back out of React state here would race the
+      // render that applies it, so branch on the promise's own result
+      // instead -- this also correctly refuses to close when a newer draft
+      // was typed while the older save was still in flight.
+      return renameSubmit().then((outcome) => {
+        if (outcome.kind === "committed" || outcome.kind === "no-op") {
+          return closeAfterBackend(intent);
+        }
+        return undefined;
+      });
+    },
+    [renameSubmit, closeAfterBackend],
+  );
+
   const requestClose = useCallback(
     (intent: CloseIntent): void => {
       setCloseError(null);
@@ -258,6 +278,11 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           setPendingCloseIntent(null);
           void closeAfterBackend(intent);
           return;
+        case "wait-for-save-project":
+        case "wait-for-save-native-window":
+          setPendingCloseIntent(null);
+          void waitForSaveThenClose(intent);
+          return;
         case "confirm-unsaved-project":
         case "confirm-unsaved-native-window":
           setPendingCloseIntent((current) =>
@@ -265,7 +290,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           );
       }
     },
-    [closeAfterBackend],
+    [closeAfterBackend, waitForSaveThenClose],
   );
 
   useEffect(() => {
@@ -327,7 +352,6 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
             aria-label="project-working-name"
             value={rename.draftName}
             onChange={(e) => rename.onChangeDraft(e.currentTarget.value)}
-            onBlur={() => rename.submit()}
           />
         </label>
         <div className="row">

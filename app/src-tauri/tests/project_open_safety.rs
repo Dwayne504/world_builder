@@ -140,3 +140,30 @@ fn open_project_preflights_existing_db_before_lock_or_pragmas() {
     assert_eq!(user_version, 0);
     assert_eq!(schema_version, 0);
 }
+
+/// Regression test for a native-close discard bug: a working-name edit that
+/// is never submitted through `rename_project` must not be persisted by
+/// `close_project`, and must not reappear when the Project is reopened. The
+/// UI-level fix removes the blur-triggered save that used to let native
+/// window close commit an unsubmitted draft; this test pins the backend
+/// half of the contract that makes that fix sufficient: `close_project` has
+/// no side effect on `working_name` when no rename was ever submitted.
+#[test]
+fn discarding_an_unsubmitted_rename_preserves_the_saved_working_name_after_reopen() {
+    let state = AppState::default();
+    let dir = tempdir().unwrap();
+    let created = ProjectService::create_project(&state, dir.path(), "TEST").unwrap();
+    let package_path = PathBuf::from(&created.package_path);
+
+    // Simulate the user typing "test" into the working-name draft but never
+    // calling rename_project (i.e. choosing Discard instead of Save), then
+    // closing the Project -- exactly the reproduction from manual testing.
+    ProjectService::close_project(&state, created.project_id).unwrap();
+
+    let reopened = ProjectService::open_project(&state, &package_path, false).unwrap();
+    assert_eq!(reopened.project_id, created.project_id);
+    assert_eq!(reopened.working_name, "TEST");
+    assert_eq!(reopened.revision, created.revision);
+
+    ProjectService::close_project(&state, reopened.project_id).unwrap();
+}

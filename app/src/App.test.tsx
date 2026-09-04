@@ -165,6 +165,212 @@ describe("Project screen Saved contract", () => {
     await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
   });
 
+  it("does not call the rename API merely because a dirty draft blurred during native close", async () => {
+    enableTauriWindow();
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    const input = screen.getByLabelText("project-working-name");
+    fireEvent.change(input, { target: { value: "test" } });
+    // Native window closing blurs the focused input before/while handling
+    // the close: simulate that here. This must not trigger a save.
+    fireEvent.blur(input);
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+
+    expect(renameProjectMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/before closing the app/i)).toBeInTheDocument();
+  });
+
+  it("confirming discard from a dirty draft closes without ever submitting it", async () => {
+    enableTauriWindow();
+    closeProjectMock.mockResolvedValueOnce(undefined);
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    const input = screen.getByLabelText("project-working-name");
+    fireEvent.change(input, { target: { value: "test" } });
+    fireEvent.blur(input);
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close app anyway (discard changes)" }));
+
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
+    expect(renameProjectMock).not.toHaveBeenCalled();
+  });
+
+  it("in-app Close Project discards a dirty draft without submitting it", async () => {
+    closeProjectMock.mockResolvedValueOnce(undefined);
+    await openTheProjectScreen();
+
+    const input = screen.getByLabelText("project-working-name");
+    fireEvent.change(input, { target: { value: "test" } });
+    fireEvent.blur(input);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Project anyway (discard changes)" }));
+
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    expect(renameProjectMock).not.toHaveBeenCalled();
+  });
+
+  it("waits for an explicit save already in flight instead of pretending to cancel it", async () => {
+    enableTauriWindow();
+    let resolveRename!: (value: typeof project) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRename = resolve;
+      }),
+    );
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Tortuga Prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Saving…"));
+
+    const preventDefault = vi.fn();
+    await act(async () => closeRequestedHandler?.({ preventDefault }));
+
+    // While the save is in flight, close must not offer/claim a discard.
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Close app anyway (discard changes)" }),
+    ).not.toBeInTheDocument();
+
+    closeProjectMock.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      resolveRename({ ...project, workingName: "Tortuga Prime", revision: 1 });
+      await Promise.resolve();
+    });
+
+    // A successful in-flight save completes the pending close afterwards.
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the app open with an honest failed state when the in-flight save fails", async () => {
+    enableTauriWindow();
+    let rejectRename!: (reason: Error) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectRename = reject;
+      }),
+    );
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Tortuga Prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Saving…"));
+
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+
+    await act(async () => {
+      rejectRename(new Error("disk full"));
+      await Promise.resolve();
+    });
+
+    // Must not close, and must not claim the failed save was "discarded".
+    await waitFor(() =>
+      expect(screen.getByTestId("save-state").textContent).toBe("Failed to save"),
+    );
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+  });
+
+  it("completes a successful in-flight save's pending close from the explicit outcome, not a rerender", async () => {
+    enableTauriWindow();
+    let resolveRename!: (value: typeof project) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRename = resolve;
+      }),
+    );
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Tortuga Prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Saving…"));
+
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+
+    closeProjectMock.mockResolvedValueOnce(undefined);
+    // Resolve the rename and flush its `.then` continuation, but do not
+    // flush any subsequent scheduler/render pass first: if the close
+    // continuation depended on `saveState` having already re-rendered
+    // rather than on the explicit resolved outcome, this would still show
+    // the race. It must still complete the close correctly.
+    await act(async () => {
+      resolveRename({ ...project, workingName: "Tortuga Prime", revision: 1 });
+    });
+
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not close when a newer draft was typed while an older save was in flight", async () => {
+    enableTauriWindow();
+    let resolveRename!: (value: typeof project) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRename = resolve;
+      }),
+    );
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    const input = screen.getByLabelText("project-working-name");
+    fireEvent.change(input, { target: { value: "Tortuga Prime" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Saving…"));
+
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+
+    // A newer draft appears while the older submit is still in flight.
+    fireEvent.change(input, { target: { value: "Tortuga Prime Newer" } });
+
+    await act(async () => {
+      resolveRename({ ...project, workingName: "Tortuga Prime", revision: 1 });
+    });
+
+    // The older save committed, but the currently displayed draft never
+    // did: closing now would silently discard "Tortuga Prime Newer".
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Pending"));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+  });
+
+  it("does not re-register the native close listener merely because the draft or save state changes", async () => {
+    enableTauriWindow();
+    renameProjectMock.mockResolvedValueOnce({
+      ...project,
+      workingName: "Tortuga Prime",
+      revision: 1,
+    });
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Tortuga Prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Saved"));
+
+    // Typing (dirty), saving, and settling back to saved must not churn the
+    // native close listener effect: it should register exactly once.
+    expect(onCloseRequestedMock).toHaveBeenCalledTimes(1);
+  });
+
   it("cleans up a native close listener even when registration resolves after unmount", async () => {
     enableTauriWindow();
     let resolveListener!: (listener: () => void) => void;

@@ -9,11 +9,22 @@ export interface UseProjectRenameResult {
   committedName: string;
   revision: number;
   onChangeDraft: (value: string) => void;
-  submit: () => Promise<void>;
-  retry: () => Promise<void>;
+  submit: () => Promise<SubmitOutcome>;
+  retry: () => Promise<SubmitOutcome>;
   /** True while a rename is pending/saving/failed: closing must not discard this. */
   hasUnsavedWork: boolean;
 }
+
+/**
+ * Explicit, control-flow-friendly result of a `submit()` call. Callers that
+ * need to know whether it is safe to proceed (e.g. completing a pending
+ * close) must branch on this value rather than re-reading `saveState`
+ * afterwards: React state updates are not guaranteed to have committed by
+ * the time a `.then()` continuation on the same promise runs, so reading
+ * state there is a race, not a reliable signal.
+ */
+export type SubmitOutcome =
+  { kind: "no-op" } | { kind: "committed" } | { kind: "committed-stale" } | { kind: "failed" };
 
 /**
  * Drives the Saved-state contract for renaming a Project:
@@ -33,7 +44,7 @@ export function useProjectRename(project: ProjectSummary): UseProjectRenameResul
   const draftRef = useRef(draftName);
   const committedNameRef = useRef(committedName);
   const revisionRef = useRef(revision);
-  const inFlightRef = useRef<Promise<void> | null>(null);
+  const inFlightRef = useRef<Promise<SubmitOutcome> | null>(null);
 
   const onChangeDraft = useCallback((value: string) => {
     draftRef.current = value;
@@ -42,19 +53,19 @@ export function useProjectRename(project: ProjectSummary): UseProjectRenameResul
     setErrorMessage(null);
   }, []);
 
-  const submit = useCallback((): Promise<void> => {
+  const submit = useCallback((): Promise<SubmitOutcome> => {
     if (inFlightRef.current) {
       return inFlightRef.current;
     }
     const submittedName = draftRef.current;
     const submittedRevision = revisionRef.current;
     if (submittedName === committedNameRef.current) {
-      return Promise.resolve();
+      return Promise.resolve({ kind: "no-op" });
     }
     setSaveState("saving");
     setErrorMessage(null);
     const request = renameProject(project.projectId, submittedName, submittedRevision)
-      .then((updated) => {
+      .then((updated): SubmitOutcome => {
         committedNameRef.current = updated.workingName;
         revisionRef.current = updated.revision;
         setCommittedName(updated.workingName);
@@ -62,14 +73,19 @@ export function useProjectRename(project: ProjectSummary): UseProjectRenameResul
         if (draftRef.current === submittedName) {
           setDraftName(updated.workingName);
           setSaveState("saved");
-        } else {
-          setSaveState("dirty");
+          return { kind: "committed" };
         }
+        // A newer draft must remain pending even though this older submit
+        // committed successfully -- the currently displayed draft was never
+        // saved, so callers must not treat this as "safe to close".
+        setSaveState("dirty");
+        return { kind: "committed-stale" };
       })
-      .catch((err: unknown) => {
+      .catch((err: unknown): SubmitOutcome => {
         // A newer draft must remain pending even when the older save failed.
         setSaveState("failed");
         setErrorMessage(err instanceof Error ? err.message : "Failed to save.");
+        return { kind: "failed" };
       })
       .finally(() => {
         inFlightRef.current = null;
