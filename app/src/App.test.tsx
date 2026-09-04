@@ -41,6 +41,8 @@ const getPreferencesMock = vi.fn();
 const pickDirectoryMock = vi.fn();
 const setDefaultProjectsDirMock = vi.fn();
 const setDefaultBackupsDirMock = vi.fn();
+const resetPreferencesMock = vi.fn();
+const previewPackagePathMock = vi.fn();
 // Preferences are a convenience default; tests that don't care about them
 // get a harmless "nothing configured" response so mount effects never throw.
 getPreferencesMock.mockResolvedValue({
@@ -49,6 +51,9 @@ getPreferencesMock.mockResolvedValue({
   defaultBackupsDir: null,
   defaultBackupsDirExists: false,
 });
+previewPackagePathMock.mockImplementation((baseDir: string, workingName: string) =>
+  Promise.resolve(`${baseDir}/${workingName}.wcproj`),
+);
 let closeRequestedHandler: ((event: { preventDefault: () => void }) => void) | undefined;
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -85,6 +90,8 @@ vi.mock("./api", () => ({
   pickDirectory: (...args: unknown[]) => pickDirectoryMock(...args),
   setDefaultProjectsDir: (...args: unknown[]) => setDefaultProjectsDirMock(...args),
   setDefaultBackupsDir: (...args: unknown[]) => setDefaultBackupsDirMock(...args),
+  resetPreferences: (...args: unknown[]) => resetPreferencesMock(...args),
+  previewPackagePath: (...args: unknown[]) => previewPackagePathMock(...args),
 }));
 
 import App from "./App";
@@ -1290,8 +1297,11 @@ describe("Home screen preferences and native pickers", () => {
     const chooseButtons = await screen.findAllByRole("button", { name: "Choose…" });
     fireEvent.click(chooseButtons[0]);
 
-    await waitFor(() => expect(screen.getByText("/chosen/Projects")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("/chosen/Projects").length).toBeGreaterThan(0));
     expect(setDefaultProjectsDirMock).toHaveBeenCalledWith("/chosen/Projects");
+    // Immediately usable for New Project creation in this session, since the
+    // per-operation location was never manually changed.
+    expect(screen.getByLabelText("new-project-location")).toHaveValue("/chosen/Projects");
 
     setDefaultProjectsDirMock.mockResolvedValueOnce({
       defaultProjectsDir: null,
@@ -1301,6 +1311,92 @@ describe("Home screen preferences and native pickers", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     await waitFor(() => expect(setDefaultProjectsDirMock).toHaveBeenCalledWith(null));
+  });
+
+  it("shows a plain-language warning for corrupt preferences and offers an explicit reset", async () => {
+    getPreferencesMock.mockReset();
+    getPreferencesMock.mockRejectedValueOnce(
+      backendError("preferences_corrupt", "invalid JSON at line 1"),
+    );
+    render(<App />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/preferences could not be read/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Project files are unaffected/i)).toBeInTheDocument();
+
+    resetPreferencesMock.mockResolvedValueOnce({
+      defaultProjectsDir: null,
+      defaultProjectsDirExists: false,
+      defaultBackupsDir: null,
+      defaultBackupsDirExists: false,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reset application preferences" }));
+
+    await waitFor(() => expect(resetPreferencesMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByText(/preferences could not be read/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  it("shows an unsupported-version warning without offering to reset a version mismatch silently", async () => {
+    getPreferencesMock.mockReset();
+    getPreferencesMock.mockRejectedValueOnce(
+      backendError("unsupported_preferences_version", "found 99, supported 1"),
+    );
+    render(<App />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/different version of Worldcrafter/i)).toBeInTheDocument(),
+    );
+    // Reset is still offered (it is safe: it never overwrites the evidence
+    // silently), but the warning itself must be visible, never swallowed.
+    expect(
+      screen.getByRole("button", { name: "Reset application preferences" }),
+    ).toBeInTheDocument();
+  });
+
+  it("reports a reset failure visibly instead of swallowing it", async () => {
+    getPreferencesMock.mockReset();
+    getPreferencesMock.mockRejectedValueOnce(backendError("preferences_corrupt", "bad json"));
+    resetPreferencesMock.mockRejectedValueOnce(backendError("io_error", "disk full"));
+    render(<App />);
+
+    await waitFor(() => screen.getByRole("button", { name: "Reset application preferences" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset application preferences" }));
+
+    await waitFor(() => expect(screen.getByText(/Reset failed/i)).toBeInTheDocument());
+  });
+
+  it("catches and displays a failure when choosing a default directory instead of an unhandled rejection", async () => {
+    pickDirectoryMock.mockResolvedValueOnce("/blocked/Projects");
+    setDefaultProjectsDirMock.mockRejectedValueOnce(
+      backendError("invalid_directory", "'/blocked/Projects' does not exist or is not a directory"),
+    );
+    render(<App />);
+    await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
+
+    const chooseButtons = await screen.findAllByRole("button", { name: "Choose…" });
+    fireEvent.click(chooseButtons[0]);
+
+    await waitFor(() =>
+      expect(screen.getByText(/does not exist or is not a directory/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("previews the package path using the backend's authoritative sanitizer", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("new-project-location"), {
+      target: { value: "/p" },
+    });
+    fireEvent.change(screen.getByLabelText("new-project-name"), {
+      target: { value: "Tortuga" },
+    });
+
+    await waitFor(() => expect(previewPackagePathMock).toHaveBeenCalledWith("/p", "Tortuga"));
+    await waitFor(() =>
+      expect(screen.getByText(/Will be created as: \/p\/Tortuga\.wcproj/)).toBeInTheDocument(),
+    );
   });
 });
 
@@ -1326,6 +1422,7 @@ describe("Inline Category/Type creation forms", () => {
   it("shows a labelled container and lets Cancel discard the draft without submitting", async () => {
     await openTheProjectScreen();
     await waitFor(() => screen.getByText("Entries"));
+    await act(async () => {});
 
     fireEvent.click(screen.getByRole("button", { name: "Create Category inline" }));
     expect(screen.getByText("New Category")).toBeInTheDocument();
@@ -1341,6 +1438,7 @@ describe("Inline Category/Type creation forms", () => {
   it("never submits an empty Category name", async () => {
     await openTheProjectScreen();
     await waitFor(() => screen.getByText("Entries"));
+    await act(async () => {});
 
     fireEvent.click(screen.getByRole("button", { name: "Create Category inline" }));
     expect(screen.getByRole("button", { name: "Add Category" })).toBeDisabled();
@@ -1352,4 +1450,3 @@ describe("Inline Category/Type creation forms", () => {
     expect(createCategoryMock).not.toHaveBeenCalled();
   });
 });
-

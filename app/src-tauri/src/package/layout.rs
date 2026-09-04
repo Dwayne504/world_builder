@@ -51,27 +51,72 @@ impl PackagePaths {
     }
 }
 
+/// Windows reserved device names (case-insensitive, and reserved even with
+/// a trailing extension, e.g. `CON.txt`). Irrelevant on other platforms,
+/// but sanitization must produce one filesystem-safe name that works
+/// everywhere Worldcrafter runs, not a platform-specific one.
+const RESERVED_WINDOWS_STEMS: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// A generous bound well under Windows' ~260-character full-path limit,
+/// leaving room for the parent directory and the `.wcproj` extension.
+const MAX_STEM_CHARS: usize = 100;
+
 /// Sanitizes a working name into a filesystem-safe (but non-authoritative)
 /// directory stem. This never becomes identity: it only seeds the initial
-/// directory name shown to the user at creation time.
+/// directory name shown to the user at creation time. Handles control
+/// characters, characters invalid on supported platforms, Windows reserved
+/// device names, trailing spaces/dots (invalid on Windows), and bounds the
+/// result to a reasonable length.
 pub fn sanitize_directory_stem(working_name: &str) -> String {
     let mut stem: String = working_name
         .trim()
         .chars()
         .map(|c| {
-            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+            if c.is_control() {
+                '_'
+            } else if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' || c == '.' {
                 c
             } else {
                 '_'
             }
         })
-        .collect::<String>()
-        .trim()
-        .to_string();
+        .collect();
+
+    // Windows forbids a trailing space or dot on a file/directory name.
+    stem = trim_trailing_space_or_dot(stem.trim());
+
+    if stem.chars().count() > MAX_STEM_CHARS {
+        stem = stem.chars().take(MAX_STEM_CHARS).collect();
+        stem = trim_trailing_space_or_dot(stem.trim());
+    }
+
     if stem.is_empty() {
         stem = "Untitled Project".to_string();
     }
+
+    if is_reserved_windows_stem(&stem) {
+        // A single trailing underscore is enough to stop matching a
+        // reserved device name while keeping the name recognizable.
+        stem.push('_');
+    }
+
     stem
+}
+
+fn trim_trailing_space_or_dot(stem: &str) -> String {
+    stem.trim_end_matches([' ', '.']).to_string()
+}
+
+fn is_reserved_windows_stem(stem: &str) -> bool {
+    // The reservation applies to the name before any extension, e.g.
+    // `CON.txt` is reserved even though `CON` alone has no extension here.
+    let base = stem.split('.').next().unwrap_or(stem);
+    RESERVED_WINDOWS_STEMS
+        .iter()
+        .any(|reserved| reserved.eq_ignore_ascii_case(base))
 }
 
 /// Builds an available (non-colliding) package path under `base_dir` for
@@ -162,6 +207,53 @@ mod tests {
     #[test]
     fn sanitizes_unsafe_characters() {
         assert_eq!(sanitize_directory_stem("Tortuga / Isle"), "Tortuga _ Isle");
+    }
+
+    #[test]
+    fn sanitizes_control_characters() {
+        // A leading/trailing control character is whitespace-like enough
+        // to be trimmed by the initial `trim()`; embed it mid-string to
+        // prove it is still replaced, not merely trimmed away.
+        assert_eq!(sanitize_directory_stem("Tor\u{0007}tuga"), "Tor_tuga");
+    }
+
+    #[test]
+    fn suffixes_windows_reserved_device_names_case_insensitively() {
+        for reserved in ["CON", "con", "PRN", "Aux", "NUL", "COM1", "lpt9"] {
+            let stem = sanitize_directory_stem(reserved);
+            assert_ne!(
+                stem.to_ascii_uppercase(),
+                reserved.to_ascii_uppercase(),
+                "{reserved} must not sanitize to a reserved device name"
+            );
+        }
+        // An unrelated name is left alone.
+        assert_eq!(sanitize_directory_stem("Constantine"), "Constantine");
+    }
+
+    #[test]
+    fn reserved_device_name_is_still_reserved_with_a_trailing_extension_like_stem() {
+        // Sanitization itself never introduces a literal dot (it is
+        // replaced), but a caller-provided stem containing one must still
+        // be treated as reserved on the part before the dot.
+        assert!(is_reserved_windows_stem("CON.important"));
+        assert!(!is_reserved_windows_stem("Constantine"));
+    }
+
+    #[test]
+    fn trims_trailing_spaces_and_dots() {
+        assert_eq!(sanitize_directory_stem("Tortuga."), "Tortuga");
+        assert_eq!(sanitize_directory_stem("Tortuga   "), "Tortuga");
+        assert_eq!(sanitize_directory_stem("Tortuga..."), "Tortuga");
+    }
+
+    #[test]
+    fn bounds_an_excessively_long_working_name() {
+        let long_name = "A".repeat(500);
+        let stem = sanitize_directory_stem(&long_name);
+        assert!(stem.chars().count() <= MAX_STEM_CHARS);
+        assert!(!stem.is_empty());
+        assert!(!stem.ends_with(' ') && !stem.ends_with('.'));
     }
 
     #[test]

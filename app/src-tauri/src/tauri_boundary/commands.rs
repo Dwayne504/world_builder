@@ -10,7 +10,8 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::application::{AppState, ProjectService};
 use crate::domain::{CategoryId, EntryId, ProjectId, TypeId};
-use crate::preferences::{self, PreferencesError};
+use crate::package::layout;
+use crate::preferences::{self, PreferencesError, PreferencesStore};
 
 use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
@@ -33,7 +34,9 @@ impl From<PreferencesError> for AppErrorDto {
         let kind = match &error {
             PreferencesError::Io(_) => "io_error",
             PreferencesError::Corrupt(_) => "preferences_corrupt",
+            PreferencesError::UnsupportedVersion { .. } => "unsupported_preferences_version",
             PreferencesError::NoConfigDir(_) => "preferences_unavailable",
+            PreferencesError::InvalidDirectory(_) => "invalid_directory",
         };
         AppErrorDto {
             kind: kind.to_string(),
@@ -45,7 +48,7 @@ impl From<PreferencesError> for AppErrorDto {
 /// The single on-disk location for application-level preferences: the OS
 /// application-config directory, entirely outside every `.wcproj`
 /// package and never treated as Project data.
-fn preferences_path(app: &AppHandle) -> Result<PathBuf, AppErrorDto> {
+pub(crate) fn preferences_path(app: &AppHandle) -> Result<PathBuf, AppErrorDto> {
     let dir = app
         .path()
         .app_config_dir()
@@ -292,33 +295,56 @@ pub fn change_entry_structure(
 }
 
 #[tauri::command]
-pub fn get_preferences(app: AppHandle) -> Result<PreferencesDto, AppErrorDto> {
-    let path = preferences_path(&app)?;
-    Ok(preferences::load(&path)?.into())
+pub fn get_preferences(store: State<'_, PreferencesStore>) -> Result<PreferencesDto, AppErrorDto> {
+    Ok(store.load()?.into())
 }
 
 #[tauri::command]
 pub fn set_default_projects_dir(
-    app: AppHandle,
+    store: State<'_, PreferencesStore>,
     directory: Option<String>,
 ) -> Result<PreferencesDto, AppErrorDto> {
-    let path = preferences_path(&app)?;
-    let mut prefs = preferences::load(&path)?;
-    prefs.default_projects_dir = directory.filter(|d| !d.is_empty()).map(PathBuf::from);
-    preferences::save(&path, &prefs)?;
+    let directory = directory.filter(|d| !d.is_empty()).map(PathBuf::from);
+    if let Some(path) = &directory {
+        preferences::validate_directory(path)?;
+    }
+    let prefs = store.update(|prefs| prefs.default_projects_dir = directory)?;
     Ok(prefs.into())
 }
 
 #[tauri::command]
 pub fn set_default_backups_dir(
-    app: AppHandle,
+    store: State<'_, PreferencesStore>,
     directory: Option<String>,
 ) -> Result<PreferencesDto, AppErrorDto> {
-    let path = preferences_path(&app)?;
-    let mut prefs = preferences::load(&path)?;
-    prefs.default_backups_dir = directory.filter(|d| !d.is_empty()).map(PathBuf::from);
-    preferences::save(&path, &prefs)?;
+    let directory = directory.filter(|d| !d.is_empty()).map(PathBuf::from);
+    if let Some(path) = &directory {
+        preferences::validate_directory(path)?;
+    }
+    let prefs = store.update(|prefs| prefs.default_backups_dir = directory)?;
     Ok(prefs.into())
+}
+
+/// Explicit, user-initiated recovery from a corrupt or
+/// unsupported-schema-version preferences file. Never invoked
+/// automatically; the prior file is preserved under a diagnostic filename
+/// by `preferences::reset` before defaults are written.
+#[tauri::command]
+pub fn reset_preferences(
+    store: State<'_, PreferencesStore>,
+) -> Result<PreferencesDto, AppErrorDto> {
+    Ok(store.reset()?.into())
+}
+
+/// Previews the exact package path `create_project` would use for
+/// `working_name` under `base_dir`, using the same authoritative
+/// sanitization -- so the UI never maintains a second, potentially
+/// diverging sanitizer.
+#[tauri::command]
+pub fn preview_package_path(base_dir: String, working_name: String) -> String {
+    layout::single_candidate_package_path(&PathBuf::from(base_dir), &working_name)
+        .display()
+        .to_string()
 }
 
 /// Shows a native folder picker, optionally starting in `default_path`.

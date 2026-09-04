@@ -159,6 +159,20 @@ export function setDefaultBackupsDir(directory: string | null): Promise<Preferen
   return call("set_default_backups_dir", { directory });
 }
 
+/** Explicit, user-initiated recovery from a corrupt/unsupported-version preferences file. */
+export function resetPreferences(): Promise<Preferences> {
+  return call("reset_preferences", {});
+}
+
+/**
+ * Previews the exact package path `createProject` would use, computed by
+ * the backend's authoritative sanitizer so the UI never maintains a
+ * second, potentially diverging one.
+ */
+export function previewPackagePath(baseDir: string, workingName: string): Promise<string> {
+  return call("preview_package_path", { baseDir, workingName });
+}
+
 /** Shows a native folder picker. Returns `null` if the user cancels. */
 export function pickDirectory(defaultPath?: string | null): Promise<string | null> {
   return call("pick_directory", { defaultPath: defaultPath || null });

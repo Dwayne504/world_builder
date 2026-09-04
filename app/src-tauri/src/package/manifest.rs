@@ -8,7 +8,6 @@
 //! successful rename.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
@@ -62,61 +61,25 @@ impl Manifest {
         recover(path)
     }
 
-    /// Writes the manifest atomically: write to a sibling temp file, then
-    /// rename over the destination, so a crash mid-write never leaves a
-    /// truncated/corrupt `manifest.json`.
+    /// Writes the manifest via the shared Windows-safe, recoverable
+    /// publish protocol (see `crate::atomic_file`): a crash mid-write or
+    /// mid-publish never leaves a truncated/corrupt `manifest.json`, and
+    /// `read`/`recover_if_needed` repair an interruption on next open.
     pub fn write(&self, path: &Path) -> Result<(), PackageError> {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| PackageError::InvalidManifest(e.to_string()))?;
-        let tmp_path = path.with_extension("json.next");
-        let previous_path = path.with_extension("json.previous");
-        {
-            let mut f = fs::File::create(&tmp_path)?;
-            f.write_all(json.as_bytes())?;
-            f.sync_all()?;
-        }
-        if let Err(error) = fs::rename(&tmp_path, path) {
-            // Windows cannot replace an existing file with rename. Preserve
-            // the prior copy under a deterministic recovery name before
-            // publishing the synced successor; `read` repairs an interruption.
-            if path.exists() {
-                let _ = fs::remove_file(&previous_path);
-                fs::rename(path, &previous_path)?;
-                if let Err(rename_error) = fs::rename(&tmp_path, path) {
-                    return Err(PackageError::Io(rename_error));
-                }
-            } else {
-                let _ = fs::remove_file(&tmp_path);
-                return Err(PackageError::Io(error));
-            }
-        }
-        if let Some(parent) = path.parent() {
-            if let Ok(dir) = fs::File::open(parent) {
-                let _ = dir.sync_all();
-            }
-        }
-        Ok(())
+        crate::atomic_file::publish(path, json.as_bytes(), |bytes| {
+            serde_json::from_slice::<Manifest>(bytes).is_ok()
+        })
+        .map_err(PackageError::Io)
     }
 }
 
 fn recover(path: &Path) -> Result<(), PackageError> {
-    if path.is_file() {
-        return Ok(());
-    }
-    let next = path.with_extension("json.next");
-    let previous = path.with_extension("json.previous");
-    for candidate in [&next, &previous] {
-        if candidate.is_file()
-            && fs::read_to_string(candidate)
-                .ok()
-                .and_then(|raw| serde_json::from_str::<Manifest>(&raw).ok())
-                .is_some()
-        {
-            fs::rename(candidate, path)?;
-            return Ok(());
-        }
-    }
-    Ok(())
+    crate::atomic_file::recover(path, |bytes| {
+        serde_json::from_slice::<Manifest>(bytes).is_ok()
+    })
+    .map_err(PackageError::Io)
 }
 
 #[cfg(test)]

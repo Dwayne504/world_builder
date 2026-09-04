@@ -16,6 +16,8 @@ import {
   listTypes,
   openProject,
   pickDirectory,
+  previewPackagePath,
+  resetPreferences,
   restoreBackupAsCopy,
   setDefaultBackupsDir,
   setDefaultProjectsDir,
@@ -89,15 +91,6 @@ function closeWarningActionLabel(intent: CloseIntent): string {
     : "Close Project anyway (discard changes)";
 }
 
-/** Cosmetic preview only; the backend performs the authoritative sanitization. */
-function previewPackageName(workingName: string): string {
-  const stem = workingName
-    .trim()
-    .replace(/[^\p{L}\p{N} _-]/gu, "_")
-    .trim();
-  return `${stem || "Untitled Project"}.wcproj`;
-}
-
 function createFailureMessage(err: unknown): string {
   if (err instanceof AppCommandError && err.kind === "already_exists") {
     return (
@@ -108,11 +101,43 @@ function createFailureMessage(err: unknown): string {
   return errorMessage(err);
 }
 
+function preferencesFailureMessage(err: unknown): string {
+  const suffix =
+    "Your Project files are unaffected, and manual location entry remains available for " +
+    "every operation.";
+  if (err instanceof AppCommandError) {
+    switch (err.kind) {
+      case "preferences_corrupt":
+        return `Your saved application preferences could not be read (the file appears corrupted). ${suffix}`;
+      case "unsupported_preferences_version":
+        return `Your saved application preferences were written by a different version of Worldcrafter and can't be read by this build. ${suffix}`;
+      case "preferences_unavailable":
+        return `Worldcrafter could not determine where to store application preferences on this system. ${suffix}`;
+      default:
+        break;
+    }
+  }
+  return `Application preferences could not be loaded (${errorMessage(err)}). ${suffix}`;
+}
+
+function preferencesFailureKind(err: unknown): string | null {
+  return err instanceof AppCommandError ? err.kind : null;
+}
+
+function canResetPreferences(kind: string | null): boolean {
+  return kind === "preferences_corrupt" || kind === "unsupported_preferences_version";
+}
+
 function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void }) {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+  const [preferencesErrorKind, setPreferencesErrorKind] = useState<string | null>(null);
+  const [preferencesActionError, setPreferencesActionError] = useState<string | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
   const [baseDir, setBaseDir] = useState("");
   const [baseDirTouched, setBaseDirTouched] = useState(false);
   const [newName, setNewName] = useState("");
+  const [packagePreview, setPackagePreview] = useState<string | null>(null);
   const [createdSummary, setCreatedSummary] = useState<ProjectSummary | null>(null);
   const [openPath, setOpenPath] = useState("");
   const [backupPath, setBackupPath] = useState("");
@@ -128,21 +153,54 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
   const openPathRef = useRef("");
   const openPathRevisionRef = useRef(0);
 
-  useEffect(() => {
-    void getPreferences()
+  const loadPreferences = useCallback(() => {
+    return getPreferences()
       .then((prefs) => {
         setPreferences(prefs);
+        setPreferencesError(null);
+        setPreferencesErrorKind(null);
         if (!baseDirTouched && prefs.defaultProjectsDir && prefs.defaultProjectsDirExists) {
           setBaseDir(prefs.defaultProjectsDir);
         }
+        return prefs;
       })
-      .catch(() => {
-        // Preferences are a convenience default only; their absence never
-        // blocks Project creation or opening.
+      .catch((err: unknown) => {
+        // A corrupt/unreadable preferences file must never be silently
+        // swallowed: it is shown, with manual entry remaining available.
+        setPreferences(null);
+        setPreferencesError(preferencesFailureMessage(err));
+        setPreferencesErrorKind(preferencesFailureKind(err));
+        return null;
       });
-    // Only ever runs once at mount to seed the initial default.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    // Only ever runs once at mount to seed the initial default.
+    void loadPreferences();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!baseDir || !newName) {
+      setPackagePreview(null);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      void previewPackagePath(baseDir, newName)
+        .then((path) => {
+          if (current) setPackagePreview(path);
+        })
+        .catch(() => {
+          if (current) setPackagePreview(null);
+        });
+    }, 150);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [baseDir, newName]);
 
   async function handleChooseProjectsLocation() {
     const picked = await pickDirectory(baseDir || preferences?.defaultProjectsDir);
@@ -247,25 +305,65 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
   }
 
   async function handleChooseDefaultProjectsDir() {
-    const picked = await pickDirectory(preferences?.defaultProjectsDir);
-    if (picked) {
-      setPreferences(await setDefaultProjectsDir(picked));
+    setPreferencesActionError(null);
+    try {
+      const picked = await pickDirectory(preferences?.defaultProjectsDir);
+      if (!picked) return;
+      const updated = await setDefaultProjectsDir(picked);
+      setPreferences(updated);
+      // Immediately use the newly chosen default for New Project creation,
+      // but only if the user has not already manually chosen a different
+      // location for this operation.
+      if (!baseDirTouched) {
+        setBaseDir(picked);
+      }
+    } catch (err) {
+      setPreferencesActionError(errorMessage(err));
     }
   }
 
   async function handleClearDefaultProjectsDir() {
-    setPreferences(await setDefaultProjectsDir(null));
+    setPreferencesActionError(null);
+    try {
+      setPreferences(await setDefaultProjectsDir(null));
+    } catch (err) {
+      setPreferencesActionError(errorMessage(err));
+    }
   }
 
   async function handleChooseDefaultBackupsDir() {
-    const picked = await pickDirectory(preferences?.defaultBackupsDir);
-    if (picked) {
+    setPreferencesActionError(null);
+    try {
+      const picked = await pickDirectory(preferences?.defaultBackupsDir);
+      if (!picked) return;
       setPreferences(await setDefaultBackupsDir(picked));
+    } catch (err) {
+      setPreferencesActionError(errorMessage(err));
     }
   }
 
   async function handleClearDefaultBackupsDir() {
-    setPreferences(await setDefaultBackupsDir(null));
+    setPreferencesActionError(null);
+    try {
+      setPreferences(await setDefaultBackupsDir(null));
+    } catch (err) {
+      setPreferencesActionError(errorMessage(err));
+    }
+  }
+
+  async function handleResetPreferences() {
+    setResetBusy(true);
+    setPreferencesActionError(null);
+    try {
+      const defaults = await resetPreferences();
+      setPreferences(defaults);
+      setPreferencesError(null);
+      setPreferencesErrorKind(null);
+    } catch (err) {
+      setPreferencesActionError(`Reset failed: ${errorMessage(err)}`);
+    } finally {
+      setResetBusy(false);
+    }
   }
 
   return (
@@ -285,6 +383,21 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
 
       <section>
         <h2>Preferences</h2>
+        {preferencesError && (
+          <div role="alert" className="error-banner">
+            <p>{preferencesError}</p>
+            {canResetPreferences(preferencesErrorKind) && (
+              <button disabled={resetBusy} onClick={() => void handleResetPreferences()}>
+                Reset application preferences
+              </button>
+            )}
+          </div>
+        )}
+        {preferencesActionError && (
+          <p role="alert" className="error-banner">
+            {preferencesActionError}
+          </p>
+        )}
         <div className="preference-row">
           <span className="preference-label">Default Projects folder</span>
           <span className="preference-value">
@@ -333,11 +446,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
           <span className="preference-value">{baseDir || "Choose a location"}</span>
           <button onClick={() => void handleChooseProjectsLocation()}>Choose location…</button>
         </div>
-        {baseDir && newName && (
-          <p className="package-preview">
-            Will be created as: {baseDir}/{previewPackageName(newName)}
-          </p>
-        )}
+        {packagePreview && <p className="package-preview">Will be created as: {packagePreview}</p>}
         <div className="manual-path-diagnostics">
           <p className="diagnostics-label">Enter location manually (diagnostics)</p>
           <label>
@@ -430,7 +539,10 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
             onChange={(e) => setRestoreName(e.currentTarget.value)}
           />
         </label>
-        <button disabled={busy || !backupPath || !restoreDestination} onClick={() => void handleRestore()}>
+        <button
+          disabled={busy || !backupPath || !restoreDestination}
+          onClick={() => void handleRestore()}
+        >
           Restore as Copy
         </button>
       </section>
