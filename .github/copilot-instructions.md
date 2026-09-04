@@ -72,6 +72,32 @@ Prefer safe, reversible operations such as rename, move, Archive, Trash, reparen
 
 Permanent destructive operations require explicit handling.
 
+## Approved Milestone 01 product decisions
+
+### Project-scoped identity
+
+Record identity is interpreted within its Project boundary.
+
+Restore as Copy creates a new Project ID while preserving all snapshot-internal record and definition IDs. Internal references must remain valid without recursively regenerating IDs.
+
+### References and semantic relationships
+
+Use Relationships for semantic world facts requiring inverse meaning, metadata, roles, lifecycle/history, or semantic cardinality.
+
+Plain Entry Reference Fields are reserved for non-semantic navigational or configurational pointers. They may generate generic backlinks but not semantic inverse projections.
+
+### Soft cardinality
+
+Relationship cardinality is a soft expectation in Milestone 01.
+
+Conflicting authored relationships must be preserved and visibly flagged. They must never be silently overwritten, deleted, selected, or automatically repaired. Replacement requires an explicit user operation.
+
+### Story links and Roles
+
+A Story Unit–Entry link exists independently from its Roles.
+
+One Story link may have zero, one, or multiple Roles. Multiple Roles must not create duplicate Story links.
+
 ## Scope discipline
 
 Implement only the currently approved milestone scope.
@@ -80,8 +106,7 @@ Do not implement deferred systems merely because the architecture could support 
 
 Examples currently outside Milestone 01 include:
 
-* advanced timelines
-* fictional calendars
+* timelines and fictional calendar systems
 * editable maps
 * graph visualization
 * storyboards
@@ -120,12 +145,12 @@ When implementation exposes an unresolved product question:
 
 ## Architecture-first rule
 
-For Milestone 01, do not begin broad feature implementation until:
+Do not begin application implementation until the current Milestone 01 architecture proposal has received explicit approval after technical review.
 
-`docs/architecture/MILESTONE_01_ARCHITECTURE_PROPOSAL.md`
+The existence or review of a proposal does not imply approval.
 
-has been created and reviewed.
+During the current architecture correction cycle, the expected proposal is:
 
-The architecture proposal should follow the requirements in:
+`docs/architecture/MILESTONE_01_ARCHITECTURE_PROPOSAL_V2.md`
 
-`docs/milestones/MILESTONE_01_IMPLEMENTATION.md`
+Until that proposal is approved, perform documentation and architecture work only. Do not scaffold or implement the application.
