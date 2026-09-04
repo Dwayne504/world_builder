@@ -237,4 +237,22 @@ describe("useProjectRename", () => {
     });
     expect(failedOutcome).toEqual({ kind: "failed" });
   });
+
+  it("accepts acknowledged global revisions from other Project mutations", async () => {
+    const project = makeProject();
+    renameProjectMock.mockResolvedValueOnce({
+      ...project,
+      workingName: "Renamed",
+      revision: 6,
+    });
+    const { result } = renderHook(() => useProjectRename(project));
+    act(() => {
+      result.current.updateRevision(5);
+      result.current.onChangeDraft("Renamed");
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    expect(renameProjectMock).toHaveBeenCalledWith(project.projectId, "Renamed", 5);
+  });
 });

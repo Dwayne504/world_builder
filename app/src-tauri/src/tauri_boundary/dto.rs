@@ -42,6 +42,7 @@ pub struct CategoryDto {
     pub name: String,
     pub is_uncategorized: bool,
     pub revision: i64,
+    pub global_revision: i64,
 }
 
 impl From<Category> for CategoryDto {
@@ -51,6 +52,7 @@ impl From<Category> for CategoryDto {
             name: value.name,
             is_uncategorized: value.is_uncategorized,
             revision: value.revision,
+            global_revision: value.global_revision,
         }
     }
 }
@@ -63,6 +65,7 @@ pub struct TypeDto {
     pub parent_type_id: Option<String>,
     pub name: String,
     pub revision: i64,
+    pub global_revision: i64,
 }
 
 impl From<TypeDef> for TypeDto {
@@ -73,6 +76,7 @@ impl From<TypeDef> for TypeDto {
             parent_type_id: value.parent_type_id.map(|id| id.to_string()),
             name: value.name,
             revision: value.revision,
+            global_revision: value.global_revision,
         }
     }
 }

@@ -28,6 +28,7 @@ export interface Category {
   name: string;
   isUncategorized: boolean;
   revision: number;
+  globalRevision: number;
 }
 
 export interface TypeDef {
@@ -36,6 +37,7 @@ export interface TypeDef {
   parentTypeId: string | null;
   name: string;
   revision: number;
+  globalRevision: number;
 }
 
 export interface Entry {

@@ -116,6 +116,7 @@ describe("Project screen Saved contract", () => {
         name: "Uncategorized",
         isUncategorized: true,
         revision: 0,
+        globalRevision: 0,
       },
     ]);
     listTypesMock.mockResolvedValue([]);
@@ -138,6 +139,7 @@ describe("Project screen Saved contract", () => {
       name: "Characters",
       isUncategorized: false,
       revision: 1,
+      globalRevision: 1,
     });
     createTypeMock.mockResolvedValue({
       id: "human",
@@ -145,6 +147,7 @@ describe("Project screen Saved contract", () => {
       parentTypeId: null,
       name: "Human",
       revision: 1,
+      globalRevision: 2,
     });
     createEntryMock.mockResolvedValue({
       id: "entry-thron",

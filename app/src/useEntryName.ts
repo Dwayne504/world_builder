@@ -78,15 +78,36 @@ export function useEntryName(projectId: string, initialEntry: Entry) {
     [],
   );
 
-  const replaceEntry = useCallback((updated: Entry) => {
-    entryRef.current = updated;
-    committedRef.current = updated.authoredName ?? "";
-    draftRef.current = updated.authoredName ?? "";
-    setEntry(updated);
-    setDraftName(updated.authoredName ?? "");
-    setSaveState("saved");
-    setErrorMessage(null);
-  }, []);
+  const replaceEntry = useCallback(
+    (updated: Entry) => {
+      const hasNewerDraft = draftRef.current !== committedRef.current;
+      entryRef.current = updated;
+      committedRef.current = updated.authoredName ?? "";
+      setEntry(updated);
+      if (hasNewerDraft) {
+        setSaveState("dirty");
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => void submit(), 500);
+      } else {
+        draftRef.current = updated.authoredName ?? "";
+        setDraftName(updated.authoredName ?? "");
+        setSaveState("saved");
+      }
+      setErrorMessage(null);
+    },
+    [submit],
+  );
 
-  return { entry, draftName, saveState, errorMessage, onChangeDraft, submit, replaceEntry };
+  const currentEntry = useCallback(() => entryRef.current, []);
+
+  return {
+    entry,
+    draftName,
+    saveState,
+    errorMessage,
+    onChangeDraft,
+    submit,
+    replaceEntry,
+    currentEntry,
+  };
 }

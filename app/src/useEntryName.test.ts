@@ -80,4 +80,20 @@ describe("useEntryName", () => {
     expect(result.current.saveState).toBe("failed");
     expect(result.current.draftName).toBe("Broken");
   });
+
+  it("does not erase a newer name draft when a structure response is merged", () => {
+    const { result } = renderHook(() => useEntryName("project-id", entry));
+    act(() => {
+      result.current.onChangeDraft("Newer draft");
+      result.current.replaceEntry({
+        ...entry,
+        categoryId: "new-category",
+        revision: 2,
+        globalRevision: 3,
+      });
+    });
+    expect(result.current.draftName).toBe("Newer draft");
+    expect(result.current.saveState).toBe("dirty");
+    expect(result.current.entry.categoryId).toBe("new-category");
+  });
 });

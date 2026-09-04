@@ -10,7 +10,6 @@ import {
   createProject,
   createType,
   changeEntryStructure,
-  getEntry,
   listCategories,
   listEntries,
   listTypes,
@@ -338,6 +337,7 @@ function EntryEditor({
   const [categoryId, setCategoryId] = useState(editor.entry.categoryId);
   const [typeId, setTypeId] = useState(editor.entry.typeId ?? "");
   const [structureError, setStructureError] = useState<string | null>(null);
+  const [structureTypeChosen, setStructureTypeChosen] = useState(true);
   const onChangedRef = useRef(onChanged);
   onChangedRef.current = onChanged;
 
@@ -359,7 +359,7 @@ function EntryEditor({
     const nameOutcome = await submit();
     if (nameOutcome.kind === "failed" || nameOutcome.kind === "committed-stale") return;
     try {
-      const current = await getEntry(projectId, editor.entry.id);
+      const current = editor.currentEntry();
       const updated = await changeEntryStructure(
         projectId,
         current.id,
@@ -396,7 +396,9 @@ function EntryEditor({
           value={categoryId}
           onChange={(event) => {
             setCategoryId(event.currentTarget.value);
-            setTypeId("");
+            setStructureTypeChosen(
+              event.currentTarget.value === editor.entry.categoryId || !typeId,
+            );
           }}
         >
           {categories.map((category) => (
@@ -411,9 +413,17 @@ function EntryEditor({
         <select
           aria-label="entry-type"
           value={typeId}
-          onChange={(event) => setTypeId(event.currentTarget.value)}
+          onChange={(event) => {
+            setTypeId(event.currentTarget.value);
+            setStructureTypeChosen(true);
+          }}
         >
           <option value="">No Type</option>
+          {typeId && !types.some((type) => type.id === typeId) && (
+            <option value={typeId} disabled>
+              Incompatible current Type — choose explicitly
+            </option>
+          )}
           {types.map((type) => (
             <option key={type.id} value={type.id}>
               {type.name}
@@ -422,7 +432,12 @@ function EntryEditor({
         </select>
       </label>
       <div className="row">
-        <button onClick={() => void saveStructure()}>Apply Category / Type</button>
+        <button
+          disabled={categoryId !== editor.entry.categoryId && !structureTypeChosen}
+          onClick={() => void saveStructure()}
+        >
+          Apply Category / Type
+        </button>
         <button onClick={onClose}>Back to Entries</button>
       </div>
       {structureError && <p role="alert">{structureError}</p>}
@@ -433,9 +448,11 @@ function EntryEditor({
 function EntryWorkflow({
   projectId,
   onController,
+  onGlobalRevision,
 }: {
   projectId: string;
   onController: (controller: EntrySaveController | null) => void;
+  onGlobalRevision: (revision: number) => void;
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -451,6 +468,8 @@ function EntryWorkflow({
   const [error, setError] = useState<string | null>(null);
   const controllerRef = useRef<EntrySaveController | null>(null);
   const [pendingEntry, setPendingEntry] = useState<Entry | null>(null);
+  const [pendingBack, setPendingBack] = useState(false);
+  const [controllerState, setControllerState] = useState<SaveState>("saved");
 
   const refresh = useCallback(async () => {
     const [nextCategories, nextEntries] = await Promise.all([
@@ -481,6 +500,7 @@ function EntryWorkflow({
   const receiveController = useCallback(
     (controller: EntrySaveController) => {
       controllerRef.current = controller;
+      setControllerState(controller.state);
       onController(controller);
     },
     [onController],
@@ -489,6 +509,7 @@ function EntryWorkflow({
   function closeEditor() {
     if (controllerRef.current?.state !== "saved") {
       setPendingEntry(null);
+      setPendingBack(true);
       setError("This Entry has unsaved changes. Save or discard them before navigating.");
       return;
     }
@@ -500,6 +521,7 @@ function EntryWorkflow({
   function openEntry(entry: Entry) {
     if (selected && controllerRef.current?.state !== "saved") {
       setPendingEntry(entry);
+      setPendingBack(false);
       setError("This Entry has unsaved changes. Save or discard them before navigating.");
       return;
     }
@@ -510,24 +532,34 @@ function EntryWorkflow({
     const outcome = await controllerRef.current?.submit();
     if (outcome?.kind === "committed" || outcome?.kind === "no-op") {
       const destination = pendingEntry;
+      const goBack = pendingBack;
       setPendingEntry(null);
+      setPendingBack(false);
       setError(null);
       if (destination) setSelected(destination);
+      else if (goBack) {
+        controllerRef.current = null;
+        onController(null);
+        setSelected(null);
+      }
     }
   }
 
   function discardAndNavigate() {
     const destination = pendingEntry;
+    const goBack = pendingBack;
     setPendingEntry(null);
+    setPendingBack(false);
     setError(null);
     controllerRef.current = null;
     onController(null);
-    setSelected(destination);
+    setSelected(goBack ? null : destination);
   }
 
   async function addCategory() {
     try {
       const category = await createCategory(projectId, newCategoryName);
+      onGlobalRevision(category.globalRevision);
       setCategories((items) => [...items, category]);
       setCategoryId(category.id);
       setTypeId("");
@@ -541,6 +573,7 @@ function EntryWorkflow({
   async function addType() {
     try {
       const type = await createType(projectId, categoryId, newTypeName);
+      onGlobalRevision(type.globalRevision);
       setTypes((items) => [...items, type]);
       setTypeId(type.id);
       setNewTypeName("");
@@ -559,6 +592,7 @@ function EntryWorkflow({
         typeId || undefined,
       );
       setEntries((items) => [...items, entry]);
+      onGlobalRevision(entry.globalRevision);
       setDraftName("");
       setSelected(entry);
     } catch (reason) {
@@ -572,10 +606,12 @@ function EntryWorkflow({
         {error && (
           <div role="alert">
             <p>{error}</p>
-            {pendingEntry && (
+            {(pendingEntry || pendingBack) && (
               <div className="row">
                 <button onClick={() => void saveAndNavigate()}>Save and continue</button>
-                <button onClick={discardAndNavigate}>Discard and continue</button>
+                <button disabled={controllerState === "saving"} onClick={discardAndNavigate}>
+                  Discard and continue
+                </button>
               </div>
             )}
           </div>
@@ -588,6 +624,7 @@ function EntryWorkflow({
           onController={receiveController}
           onClose={closeEditor}
           onChanged={(updated) => {
+            onGlobalRevision(updated.globalRevision);
             setSelected(updated);
             setEntries((items) => items.map((item) => (item.id === updated.id ? updated : item)));
           }}
@@ -695,7 +732,8 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const saveStateRef = useRef<SaveState>(rename.saveState);
   const closeInFlight = useRef<Promise<void> | null>(null);
   const nativeWindowCloseRequested = useRef(false);
-  saveStateRef.current = entrySaveState === "saved" ? rename.saveState : entrySaveState;
+  const combinedSaveState = entrySaveState === "saved" ? rename.saveState : entrySaveState;
+  saveStateRef.current = combinedSaveState;
 
   const receiveEntryController = useCallback((controller: EntrySaveController | null) => {
     entryControllerRef.current = controller;
@@ -817,6 +855,10 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
     }
     const intent = pendingCloseIntent;
     setPendingCloseIntent(null);
+    if (saveStateRef.current === "saving") {
+      void waitForSaveThenClose(intent);
+      return;
+    }
     void closeAfterBackend(intent);
   }
 
@@ -887,7 +929,11 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         </dl>
       </section>
 
-      <EntryWorkflow projectId={project.projectId} onController={receiveEntryController} />
+      <EntryWorkflow
+        projectId={project.projectId}
+        onController={receiveEntryController}
+        onGlobalRevision={rename.updateRevision}
+      />
 
       <section>
         <h2>Manual Backup</h2>
@@ -910,7 +956,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         {pendingCloseIntent && (
           <div role="alert" className="error-banner">
             <p>{closeWarningMessage(pendingCloseIntent)}</p>
-            <button onClick={handleForceCloseDiscarding}>
+            <button disabled={combinedSaveState === "saving"} onClick={handleForceCloseDiscarding}>
               {closeWarningActionLabel(pendingCloseIntent)}
             </button>
           </div>

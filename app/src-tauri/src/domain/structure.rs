@@ -46,6 +46,7 @@ pub struct Category {
     pub name: String,
     pub is_uncategorized: bool,
     pub revision: i64,
+    pub global_revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -55,6 +56,7 @@ pub struct TypeDef {
     pub parent_type_id: Option<TypeId>,
     pub name: String,
     pub revision: i64,
+    pub global_revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -61,6 +61,9 @@ pub fn create_pre_migration_snapshot(
         fs::remove_file(&snapshot_path)?;
     }
     fs::rename(staging_path, &snapshot_path)?;
+    if let Ok(directory) = fs::File::open(&recovery_root) {
+        directory.sync_all()?;
+    }
     Ok(snapshot_path)
 }
 

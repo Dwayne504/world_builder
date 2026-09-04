@@ -229,13 +229,8 @@ impl ProjectDbWorker {
                 OpenFlags::SQLITE_OPEN_READ_WRITE
             },
         )?;
-        if is_initializing {
-            pragmas::apply(&conn)?;
-            migrations::migrate(&conn)?;
-        } else {
-            pragmas::apply(&conn)?;
-            migrations::migrate(&conn)?;
-        }
+        pragmas::apply(&conn)?;
+        migrations::migrate(&conn)?;
 
         let existing = read_existing_project_meta(&conn)?;
 
@@ -666,6 +661,11 @@ fn next_global_revision(
 }
 
 fn list_categories(conn: &Connection) -> Result<Vec<Category>, PersistenceError> {
+    let global_revision: i64 = conn.query_row(
+        "SELECT last_committed_revision FROM project_meta WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
     let mut statement = conn.prepare(
         "SELECT id, name, is_uncategorized, revision
              FROM category ORDER BY is_uncategorized DESC, name COLLATE NOCASE, id",
@@ -681,6 +681,7 @@ fn list_categories(conn: &Connection) -> Result<Vec<Category>, PersistenceError>
             name,
             is_uncategorized,
             revision,
+            global_revision,
         })
     })
     .collect()
@@ -693,7 +694,7 @@ fn create_category(
 ) -> Result<Category, PersistenceError> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let now = Utc::now().to_rfc3339();
-    next_global_revision(&tx, &now)?;
+    let global_revision = next_global_revision(&tx, &now)?;
     tx.execute(
         "INSERT INTO category (id, name, is_uncategorized, created_at, updated_at, revision)
              VALUES (?1, ?2, 0, ?3, ?3, 1)",
@@ -705,6 +706,7 @@ fn create_category(
         name: name.to_string(),
         is_uncategorized: false,
         revision: 1,
+        global_revision,
     })
 }
 
@@ -712,6 +714,11 @@ fn list_types(
     conn: &Connection,
     category_id: CategoryId,
 ) -> Result<Vec<TypeDef>, PersistenceError> {
+    let global_revision: i64 = conn.query_row(
+        "SELECT last_committed_revision FROM project_meta WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
     let mut statement = conn.prepare(
         "SELECT id, category_id, parent_type_id, name, revision
              FROM type_def WHERE category_id = ?1 ORDER BY name COLLATE NOCASE, id",
@@ -737,6 +744,7 @@ fn list_types(
                 .map_err(|e| PersistenceError::Other(e.to_string()))?,
             name,
             revision,
+            global_revision,
         })
     })
     .collect()
@@ -751,7 +759,7 @@ fn create_type(
 ) -> Result<TypeDef, PersistenceError> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let now = Utc::now().to_rfc3339();
-    next_global_revision(&tx, &now)?;
+    let global_revision = next_global_revision(&tx, &now)?;
     tx.execute(
         "INSERT INTO type_def (
                 id, category_id, parent_type_id, name, created_at, updated_at, revision
@@ -771,6 +779,7 @@ fn create_type(
         parent_type_id,
         name: name.to_string(),
         revision: 1,
+        global_revision,
     })
 }
 

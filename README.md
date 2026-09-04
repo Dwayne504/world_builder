@@ -269,7 +269,7 @@ cargo tauri build                 # full desktop bundle; requires a display/wind
                                    # not expected to succeed in a headless CI/sandbox
 ```
 
-### Current implemented slice: Project Trust Foundation (Milestone 01, Task 01)
+### Current implemented slice: Project Structure Backbone (Milestone 01, Task 02A)
 
 This slice proves the desktop stack starts, a real self-contained `.wcproj`
 package can be created/opened/renamed/closed, Project identity (UUIDv7) is
@@ -282,10 +282,21 @@ new Project ID. See `app/src-tauri/src/` for the module boundaries
 (`domain`, `application`, `persistence`, `package`, `backup_recovery`,
 `tauri_boundary`) and their automated tests.
 
-**Current non-goals** (deliberately out of scope for this slice): Categories,
-Types, Entries, Fields, Relationships, Spatial, Chapters/Story Units, TipTap
-prose editing, search/FTS, Tags/Roles/Statuses, Archive/Trash UI, final
-Recent/Pinned navigation, and any final visual design system.
+Task 02A adds crash-recoverable schema-v1 migration with an external validated
+pre-migration SQLite recovery point, coordinated database/manifest version
+publication, and recovery after an interrupted manifest publication. Projects
+now have stable UUIDv7 Categories, optional Category-local Types, and
+record-registered Entries. Every Project has exactly one system-managed
+Uncategorized Category; unnamed Entries remain valid and display an unstored
+`[Unnamed Entry]` fallback. The plain Project Home supports listing and creating
+Categories, Types, and Entries, inline Category/Type creation during Entry
+creation, and revision-checked continuous saving of Entry names.
+
+**Current non-goals** (deliberately out of scope for this slice): Fields,
+Capabilities, Relationships, Spatial, Chapters/Story Units, TipTap prose
+editing and rich descriptions, search/FTS, Tags/Roles/Statuses, aliases,
+Archive/Trash, deletion/retirement, final Recent/Pinned navigation, and any
+final visual design system.
 
 ### Manual native-close verification
 
