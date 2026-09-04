@@ -185,6 +185,7 @@ function saveStateLabel(state: string): string {
 
 function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClosed: () => void }) {
   const rename = useProjectRename(project);
+  const { submit: renameSubmit } = rename;
   const [backupDir, setBackupDir] = useState("");
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [pendingCloseIntent, setPendingCloseIntent] = useState<CloseIntent | null>(null);
@@ -251,17 +252,20 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const waitForSaveThenClose = useCallback(
     (intent: CloseIntent): Promise<void> => {
       // The save already in flight cannot be cancelled, so we never treat it
-      // as discardable: wait for it to settle, then close only if it landed
-      // on "saved". A failure must leave the app open showing the failed
-      // state, never claim the committed/failed save was "discarded".
-      return rename.submit().then(() => {
-        if (saveStateRef.current === "saved") {
+      // as discardable: wait for it to settle, then close only if the
+      // explicit outcome confirms the currently displayed draft committed.
+      // Reading `saveState` back out of React state here would race the
+      // render that applies it, so branch on the promise's own result
+      // instead -- this also correctly refuses to close when a newer draft
+      // was typed while the older save was still in flight.
+      return renameSubmit().then((outcome) => {
+        if (outcome.kind === "committed" || outcome.kind === "no-op") {
           return closeAfterBackend(intent);
         }
         return undefined;
       });
     },
-    [rename, closeAfterBackend],
+    [renameSubmit, closeAfterBackend],
   );
 
   const requestClose = useCallback(

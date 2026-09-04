@@ -285,6 +285,92 @@ describe("Project screen Saved contract", () => {
     expect(nativeWindowCloseMock).not.toHaveBeenCalled();
   });
 
+  it("completes a successful in-flight save's pending close from the explicit outcome, not a rerender", async () => {
+    enableTauriWindow();
+    let resolveRename!: (value: typeof project) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRename = resolve;
+      }),
+    );
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Tortuga Prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Saving…"));
+
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+
+    closeProjectMock.mockResolvedValueOnce(undefined);
+    // Resolve the rename and flush its `.then` continuation, but do not
+    // flush any subsequent scheduler/render pass first: if the close
+    // continuation depended on `saveState` having already re-rendered
+    // rather than on the explicit resolved outcome, this would still show
+    // the race. It must still complete the close correctly.
+    await act(async () => {
+      resolveRename({ ...project, workingName: "Tortuga Prime", revision: 1 });
+    });
+
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not close when a newer draft was typed while an older save was in flight", async () => {
+    enableTauriWindow();
+    let resolveRename!: (value: typeof project) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRename = resolve;
+      }),
+    );
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    const input = screen.getByLabelText("project-working-name");
+    fireEvent.change(input, { target: { value: "Tortuga Prime" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Saving…"));
+
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+
+    // A newer draft appears while the older submit is still in flight.
+    fireEvent.change(input, { target: { value: "Tortuga Prime Newer" } });
+
+    await act(async () => {
+      resolveRename({ ...project, workingName: "Tortuga Prime", revision: 1 });
+    });
+
+    // The older save committed, but the currently displayed draft never
+    // did: closing now would silently discard "Tortuga Prime Newer".
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Pending"));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+  });
+
+  it("does not re-register the native close listener merely because the draft or save state changes", async () => {
+    enableTauriWindow();
+    renameProjectMock.mockResolvedValueOnce({
+      ...project,
+      workingName: "Tortuga Prime",
+      revision: 1,
+    });
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("project-working-name"), {
+      target: { value: "Tortuga Prime" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("save-state").textContent).toBe("Saved"));
+
+    // Typing (dirty), saving, and settling back to saved must not churn the
+    // native close listener effect: it should register exactly once.
+    expect(onCloseRequestedMock).toHaveBeenCalledTimes(1);
+  });
+
   it("cleans up a native close listener even when registration resolves after unmount", async () => {
     enableTauriWindow();
     let resolveListener!: (listener: () => void) => void;
