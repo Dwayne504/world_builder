@@ -7,6 +7,7 @@ vi.mock("./api", () => ({
 }));
 
 import { useProjectRename } from "./useProjectRename";
+import type { SubmitOutcome } from "./useProjectRename";
 import type { ProjectSummary } from "./types";
 
 function makeProject(overrides: Partial<ProjectSummary> = {}): ProjectSummary {
@@ -41,7 +42,7 @@ describe("useProjectRename", () => {
     act(() => result.current.onChangeDraft("Tortuga Prime"));
     expect(result.current.saveState).toBe("dirty");
 
-    let submitPromise!: Promise<void>;
+    let submitPromise!: Promise<SubmitOutcome>;
     act(() => {
       submitPromise = result.current.submit();
     });
@@ -123,7 +124,7 @@ describe("useProjectRename", () => {
     );
     const { result } = renderHook(() => useProjectRename(project));
     act(() => result.current.onChangeDraft("A"));
-    let saving!: Promise<void>;
+    let saving!: Promise<SubmitOutcome>;
     act(() => {
       saving = result.current.submit();
     });
@@ -148,8 +149,8 @@ describe("useProjectRename", () => {
     );
     const { result } = renderHook(() => useProjectRename(project));
     act(() => result.current.onChangeDraft("A"));
-    let first!: Promise<void>;
-    let second!: Promise<void>;
+    let first!: Promise<SubmitOutcome>;
+    let second!: Promise<SubmitOutcome>;
     act(() => {
       first = result.current.submit();
       second = result.current.submit();
@@ -171,7 +172,7 @@ describe("useProjectRename", () => {
     );
     const { result } = renderHook(() => useProjectRename(makeProject()));
     act(() => result.current.onChangeDraft("A"));
-    let saving!: Promise<void>;
+    let saving!: Promise<SubmitOutcome>;
     act(() => {
       saving = result.current.submit();
       result.current.onChangeDraft("B");
@@ -182,5 +183,58 @@ describe("useProjectRename", () => {
     });
     expect(result.current.draftName).toBe("B");
     expect(result.current.saveState).toBe("failed");
+  });
+
+  it("resolves submit() with an explicit outcome control-flow callers can branch on", async () => {
+    const project = makeProject();
+
+    // Nothing to save: resolves immediately with "no-op", not "committed".
+    const { result: idle } = renderHook(() => useProjectRename(project));
+    let idleOutcome!: SubmitOutcome;
+    await act(async () => {
+      idleOutcome = await idle.current.submit();
+    });
+    expect(idleOutcome).toEqual({ kind: "no-op" });
+
+    // The currently displayed draft commits successfully: "committed".
+    renameProjectMock.mockResolvedValueOnce({ ...project, workingName: "A", revision: 1 });
+    const { result: committed } = renderHook(() => useProjectRename(project));
+    act(() => committed.current.onChangeDraft("A"));
+    let committedOutcome!: SubmitOutcome;
+    await act(async () => {
+      committedOutcome = await committed.current.submit();
+    });
+    expect(committedOutcome).toEqual({ kind: "committed" });
+
+    // The submitted value commits, but a newer draft was typed meanwhile:
+    // the currently displayed draft was never saved, so this must be
+    // distinguishable from a plain "committed" outcome.
+    let resolveStale!: (value: ProjectSummary) => void;
+    renameProjectMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStale = resolve;
+      }),
+    );
+    const { result: stale } = renderHook(() => useProjectRename(project));
+    act(() => stale.current.onChangeDraft("A"));
+    let staleOutcome!: Promise<SubmitOutcome>;
+    act(() => {
+      staleOutcome = stale.current.submit();
+    });
+    act(() => stale.current.onChangeDraft("B"));
+    act(() => resolveStale({ ...project, workingName: "A", revision: 1 }));
+    await act(async () => {
+      expect(await staleOutcome).toEqual({ kind: "committed-stale" });
+    });
+
+    // The save fails outright: "failed".
+    renameProjectMock.mockRejectedValueOnce(new Error("disk full"));
+    const { result: failed } = renderHook(() => useProjectRename(project));
+    act(() => failed.current.onChangeDraft("A"));
+    let failedOutcome!: SubmitOutcome;
+    await act(async () => {
+      failedOutcome = await failed.current.submit();
+    });
+    expect(failedOutcome).toEqual({ kind: "failed" });
   });
 });
