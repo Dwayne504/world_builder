@@ -11,6 +11,7 @@ export interface UseProjectRenameResult {
   onChangeDraft: (value: string) => void;
   submit: () => Promise<SubmitOutcome>;
   retry: () => Promise<SubmitOutcome>;
+  updateRevision: (revision: number) => void;
   /** True while a rename is pending/saving/failed: closing must not discard this. */
   hasUnsavedWork: boolean;
 }
@@ -95,6 +96,10 @@ export function useProjectRename(project: ProjectSummary): UseProjectRenameResul
   }, [project.projectId]);
 
   const retry = submit;
+  const updateRevision = useCallback((nextRevision: number) => {
+    revisionRef.current = Math.max(revisionRef.current, nextRevision);
+    setRevision((current) => Math.max(current, nextRevision));
+  }, []);
 
   return {
     draftName,
@@ -105,6 +110,7 @@ export function useProjectRename(project: ProjectSummary): UseProjectRenameResul
     onChangeDraft,
     submit,
     retry,
+    updateRevision,
     hasUnsavedWork: saveState !== "saved",
   };
 }

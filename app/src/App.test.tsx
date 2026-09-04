@@ -2,6 +2,16 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectSummary } from "./types";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 const project: ProjectSummary = {
   projectId: "0198c000-0000-7000-8000-000000000000",
   workingName: "Tortuga",
@@ -18,6 +28,15 @@ const renameProjectMock = vi.fn();
 const openProjectMock = vi.fn();
 const nativeWindowCloseMock = vi.fn();
 const onCloseRequestedMock = vi.fn();
+const listCategoriesMock = vi.fn();
+const listTypesMock = vi.fn();
+const listEntriesMock = vi.fn();
+const createCategoryMock = vi.fn();
+const createTypeMock = vi.fn();
+const createEntryMock = vi.fn();
+const getEntryMock = vi.fn();
+const updateEntryNameMock = vi.fn();
+const changeEntryStructureMock = vi.fn();
 let closeRequestedHandler: ((event: { preventDefault: () => void }) => void) | undefined;
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -41,6 +60,15 @@ vi.mock("./api", () => ({
   createBackup: vi.fn(),
   closeProject: (...args: unknown[]) => closeProjectMock(...args),
   renameProject: (...args: unknown[]) => renameProjectMock(...args),
+  listCategories: (...args: unknown[]) => listCategoriesMock(...args),
+  listTypes: (...args: unknown[]) => listTypesMock(...args),
+  listEntries: (...args: unknown[]) => listEntriesMock(...args),
+  createCategory: (...args: unknown[]) => createCategoryMock(...args),
+  createType: (...args: unknown[]) => createTypeMock(...args),
+  createEntry: (...args: unknown[]) => createEntryMock(...args),
+  getEntry: (...args: unknown[]) => getEntryMock(...args),
+  updateEntryName: (...args: unknown[]) => updateEntryNameMock(...args),
+  changeEntryStructure: (...args: unknown[]) => changeEntryStructureMock(...args),
 }));
 
 import App from "./App";
@@ -78,11 +106,85 @@ function enableTauriWindow() {
   });
 }
 
+function mockEditableEntry() {
+  const entry = {
+    id: "entry",
+    categoryId: "characters",
+    typeId: "human",
+    authoredName: "Thron",
+    displayName: "Thron",
+    revision: 1,
+    globalRevision: 1,
+  };
+  listCategoriesMock.mockResolvedValue([
+    {
+      id: "characters",
+      name: "Characters",
+      isUncategorized: false,
+      revision: 1,
+      globalRevision: 1,
+    },
+    {
+      id: "places",
+      name: "Places",
+      isUncategorized: false,
+      revision: 1,
+      globalRevision: 1,
+    },
+  ]);
+  listTypesMock.mockImplementation((_projectId: string, categoryId: string) =>
+    Promise.resolve(
+      categoryId === "characters"
+        ? [
+            {
+              id: "human",
+              categoryId: "characters",
+              parentTypeId: null,
+              name: "Human",
+              revision: 1,
+              globalRevision: 1,
+            },
+            {
+              id: "mage",
+              categoryId: "characters",
+              parentTypeId: null,
+              name: "Mage",
+              revision: 1,
+              globalRevision: 1,
+            },
+          ]
+        : [],
+    ),
+  );
+  listEntriesMock.mockResolvedValue([entry]);
+  return entry;
+}
+
 describe("Project screen Saved contract", () => {
   beforeEach(() => {
     closeProjectMock.mockReset();
     renameProjectMock.mockReset();
     openProjectMock.mockReset();
+    listCategoriesMock.mockReset();
+    listTypesMock.mockReset();
+    listEntriesMock.mockReset();
+    createCategoryMock.mockReset();
+    createTypeMock.mockReset();
+    createEntryMock.mockReset();
+    getEntryMock.mockReset();
+    updateEntryNameMock.mockReset();
+    changeEntryStructureMock.mockReset();
+    listCategoriesMock.mockResolvedValue([
+      {
+        id: "uncategorized",
+        name: "Uncategorized",
+        isUncategorized: true,
+        revision: 0,
+        globalRevision: 0,
+      },
+    ]);
+    listTypesMock.mockResolvedValue([]);
+    listEntriesMock.mockResolvedValue([]);
     nativeWindowCloseMock.mockReset();
     closeRequestedHandler = undefined;
     onCloseRequestedMock.mockReset();
@@ -93,6 +195,551 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("creates a missing Category and Type inline without losing the Entry draft", async () => {
+    createCategoryMock.mockResolvedValue({
+      id: "characters",
+      name: "Characters",
+      isUncategorized: false,
+      revision: 1,
+      globalRevision: 1,
+    });
+    createTypeMock.mockResolvedValue({
+      id: "human",
+      categoryId: "characters",
+      parentTypeId: null,
+      name: "Human",
+      revision: 1,
+      globalRevision: 2,
+    });
+    createEntryMock.mockResolvedValue({
+      id: "entry-thron",
+      categoryId: "characters",
+      typeId: "human",
+      authoredName: "Thron",
+      displayName: "Thron",
+      revision: 1,
+      globalRevision: 3,
+    });
+    await openTheProjectScreen();
+    await waitFor(() => expect(screen.getByLabelText("new-entry-name")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("new-entry-name"), { target: { value: "Thron" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Category inline" }));
+    fireEvent.change(screen.getByLabelText("inline-category-name"), {
+      target: { value: "Characters" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Category" }));
+    await waitFor(() => expect(createCategoryMock).toHaveBeenCalled());
+    expect(screen.getByLabelText("new-entry-name")).toHaveValue("Thron");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Type inline" }));
+    fireEvent.change(screen.getByLabelText("inline-type-name"), { target: { value: "Human" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add Type" }));
+    await waitFor(() =>
+      expect(createTypeMock).toHaveBeenCalledWith(project.projectId, "characters", "Human"),
+    );
+    expect(screen.getByLabelText("new-entry-name")).toHaveValue("Thron");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Entry" }));
+    await waitFor(() =>
+      expect(createEntryMock).toHaveBeenCalledWith(
+        project.projectId,
+        "Thron",
+        "characters",
+        "human",
+      ),
+    );
+    expect(await screen.findByText("Entry ID: entry-thron")).toBeInTheDocument();
+  });
+
+  it("creates an incomplete unnamed Entry", async () => {
+    createEntryMock.mockResolvedValue({
+      id: "entry-unnamed",
+      categoryId: "uncategorized",
+      typeId: null,
+      authoredName: null,
+      displayName: "[Unnamed Entry]",
+      revision: 1,
+      globalRevision: 1,
+    });
+    await openTheProjectScreen();
+    await waitFor(() => screen.getByRole("button", { name: "Create Entry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Entry" }));
+    await waitFor(() =>
+      expect(createEntryMock).toHaveBeenCalledWith(
+        project.projectId,
+        undefined,
+        "uncategorized",
+        undefined,
+      ),
+    );
+    expect(await screen.findByText("[Unnamed Entry]")).toBeInTheDocument();
+  });
+
+  it("native close waits for submitted Category creation", async () => {
+    enableTauriWindow();
+    closeProjectMock.mockResolvedValue(undefined);
+    const categorySave = deferred<{
+      id: string;
+      name: string;
+      isUncategorized: boolean;
+      revision: number;
+      globalRevision: number;
+    }>();
+    createCategoryMock.mockReturnValue(categorySave.promise);
+    await openTheProjectScreen();
+    await waitFor(() => screen.getByRole("button", { name: "Create Category inline" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Category inline" }));
+    fireEvent.change(screen.getByLabelText("inline-category-name"), {
+      target: { value: "Characters" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Category" }));
+    await waitFor(() => expect(createCategoryMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    categorySave.resolve({
+      id: "characters",
+      name: "Characters",
+      isUncategorized: false,
+      revision: 1,
+      globalRevision: 1,
+    });
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("in-app close waits for submitted Entry creation", async () => {
+    closeProjectMock.mockResolvedValue(undefined);
+    const entrySave = deferred<{
+      id: string;
+      categoryId: string;
+      typeId: null;
+      authoredName: null;
+      displayName: string;
+      revision: number;
+      globalRevision: number;
+    }>();
+    createEntryMock.mockReturnValue(entrySave.promise);
+    await openTheProjectScreen();
+    await waitFor(() => screen.getByRole("button", { name: "Create Entry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Entry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    entrySave.resolve({
+      id: "entry",
+      categoryId: "uncategorized",
+      typeId: null,
+      authoredName: null,
+      displayName: "[Unnamed Entry]",
+      revision: 1,
+      globalRevision: 1,
+    });
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+  });
+
+  it("Entry navigation waits for an in-flight Category and Type change", async () => {
+    const entry = {
+      id: "entry",
+      categoryId: "uncategorized",
+      typeId: null,
+      authoredName: "Thron",
+      displayName: "Thron",
+      revision: 1,
+      globalRevision: 1,
+    };
+    listCategoriesMock.mockResolvedValue([
+      {
+        id: "uncategorized",
+        name: "Uncategorized",
+        isUncategorized: true,
+        revision: 0,
+        globalRevision: 0,
+      },
+      {
+        id: "characters",
+        name: "Characters",
+        isUncategorized: false,
+        revision: 1,
+        globalRevision: 1,
+      },
+    ]);
+    listEntriesMock.mockResolvedValue([entry]);
+    const structureSave = deferred<typeof entry>();
+    changeEntryStructureMock.mockReturnValue(structureSave.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.change(screen.getByLabelText("entry-category"), {
+      target: { value: "characters" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
+    await waitFor(() => expect(changeEntryStructureMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Back to Entries" }));
+    expect(screen.getByText("Entry ID: entry")).toBeInTheDocument();
+    structureSave.resolve({
+      ...entry,
+      categoryId: "characters",
+      revision: 2,
+      globalRevision: 2,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Entries" })).toBeInTheDocument(),
+    );
+  });
+
+  it("structural failure stays open, is visible, and cannot be described as discarded", async () => {
+    createEntryMock.mockRejectedValue(new Error("disk full"));
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Create Entry" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("disk full"));
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Close Project anyway (discard changes)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("guards repeated Category, Type, and Entry submissions", async () => {
+    const categorySave = deferred<{
+      id: string;
+      name: string;
+      isUncategorized: boolean;
+      revision: number;
+      globalRevision: number;
+    }>();
+    createCategoryMock.mockReturnValue(categorySave.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Create Category inline" }));
+    fireEvent.change(screen.getByLabelText("inline-category-name"), { target: { value: "A" } });
+    const addCategory = screen.getByRole("button", { name: "Add Category" });
+    fireEvent.click(addCategory);
+    fireEvent.click(addCategory);
+    expect(createCategoryMock).toHaveBeenCalledTimes(1);
+    categorySave.resolve({
+      id: "characters",
+      name: "A",
+      isUncategorized: false,
+      revision: 1,
+      globalRevision: 1,
+    });
+    await waitFor(() =>
+      expect(screen.queryByLabelText("inline-category-name")).not.toBeInTheDocument(),
+    );
+
+    const typeSave = deferred<{
+      id: string;
+      categoryId: string;
+      parentTypeId: null;
+      name: string;
+      revision: number;
+      globalRevision: number;
+    }>();
+    createTypeMock.mockReturnValue(typeSave.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Create Type inline" }));
+    fireEvent.change(screen.getByLabelText("inline-type-name"), { target: { value: "Human" } });
+    const addType = screen.getByRole("button", { name: "Add Type" });
+    fireEvent.click(addType);
+    fireEvent.click(addType);
+    expect(createTypeMock).toHaveBeenCalledTimes(1);
+    typeSave.resolve({
+      id: "human",
+      categoryId: "characters",
+      parentTypeId: null,
+      name: "Human",
+      revision: 1,
+      globalRevision: 2,
+    });
+    await waitFor(() =>
+      expect(screen.queryByLabelText("inline-type-name")).not.toBeInTheDocument(),
+    );
+
+    const entrySave = deferred<{
+      id: string;
+      categoryId: string;
+      typeId: string;
+      authoredName: string;
+      displayName: string;
+      revision: number;
+      globalRevision: number;
+    }>();
+    createEntryMock.mockReturnValue(entrySave.promise);
+    const addEntry = screen.getByRole("button", { name: "Create Entry" });
+    fireEvent.click(addEntry);
+    fireEvent.click(addEntry);
+    expect(createEntryMock).toHaveBeenCalledTimes(1);
+    entrySave.resolve({
+      id: "thron",
+      categoryId: "characters",
+      typeId: "human",
+      authoredName: "Thron",
+      displayName: "Thron",
+      revision: 1,
+      globalRevision: 3,
+    });
+    expect(await screen.findByText("Entry ID: thron")).toBeInTheDocument();
+  });
+
+  it("does not allow an old Type-list response to replace the current Category options", async () => {
+    listCategoriesMock.mockResolvedValue([
+      {
+        id: "uncategorized",
+        name: "Uncategorized",
+        isUncategorized: true,
+        revision: 0,
+        globalRevision: 0,
+      },
+      {
+        id: "characters",
+        name: "Characters",
+        isUncategorized: false,
+        revision: 1,
+        globalRevision: 1,
+      },
+    ]);
+    const oldTypes = deferred<
+      Array<{
+        id: string;
+        categoryId: string;
+        parentTypeId: null;
+        name: string;
+        revision: number;
+        globalRevision: number;
+      }>
+    >();
+    const currentTypes = deferred<
+      Array<{
+        id: string;
+        categoryId: string;
+        parentTypeId: null;
+        name: string;
+        revision: number;
+        globalRevision: number;
+      }>
+    >();
+    listTypesMock.mockImplementation((_projectId: string, categoryId: string) =>
+      categoryId === "characters" ? currentTypes.promise : oldTypes.promise,
+    );
+    await openTheProjectScreen();
+    const categorySelect = await screen.findByLabelText("new-entry-category");
+    fireEvent.change(categorySelect, { target: { value: "characters" } });
+    currentTypes.resolve([
+      {
+        id: "human",
+        categoryId: "characters",
+        parentTypeId: null,
+        name: "Human",
+        revision: 1,
+        globalRevision: 1,
+      },
+    ]);
+    expect(await screen.findByRole("option", { name: "Human" })).toBeInTheDocument();
+    oldTypes.resolve([
+      {
+        id: "old",
+        categoryId: "uncategorized",
+        parentTypeId: null,
+        name: "Old Type",
+        revision: 1,
+        globalRevision: 1,
+      },
+    ]);
+    await act(async () => Promise.resolve());
+    expect(screen.getByRole("option", { name: "Human" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Old Type" })).not.toBeInTheDocument();
+  });
+
+  it("requires explicit discard when navigating Back with an unapplied Category", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.change(screen.getByLabelText("entry-category"), { target: { value: "places" } });
+    await act(async () => Promise.resolve());
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Pending");
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Pending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Entries" }));
+    expect(screen.getByRole("button", { name: "Discard and continue" })).toBeInTheDocument();
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard and continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Human" });
+    expect(screen.getByLabelText("entry-category")).toHaveValue("characters");
+    expect(screen.getByLabelText("entry-type")).toHaveValue("human");
+  });
+
+  it("requires explicit discard on native close with an unapplied Type", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    await openTheProjectScreen();
+    await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
+
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Close app anyway (discard changes)" }),
+    ).toBeInTheDocument();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+  });
+
+  it("clears structural dirty state when selectors return to persisted values", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Pending");
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "human" } });
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saved");
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+  });
+
+  it("locks selectors during Apply and synchronizes the committed structure", async () => {
+    const entry = mockEditableEntry();
+    const pending = deferred<typeof entry>();
+    changeEntryStructureMock.mockReturnValue(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
+
+    await waitFor(() => expect(screen.getByLabelText("entry-category")).toBeDisabled());
+    expect(screen.getByLabelText("entry-type")).toBeDisabled();
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saving");
+
+    pending.resolve({ ...entry, typeId: "mage", revision: 2, globalRevision: 2 });
+    await waitFor(() => expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saved"));
+    expect(screen.getByLabelText("entry-category")).toHaveValue("characters");
+    expect(screen.getByLabelText("entry-type")).toHaveValue("mage");
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+  });
+
+  it("allows explicit discard-close after structural failure and preserves failure on cancel", async () => {
+    mockEditableEntry();
+    changeEntryStructureMock.mockRejectedValue(new Error("structure write failed"));
+    closeProjectMock.mockResolvedValue(undefined);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "mage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
+    await waitFor(() => expect(screen.getByText("structure write failed")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("save-state")).toHaveTextContent("Failed to save"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    const discard = screen.getByRole("button", {
+      name: "Close Project anyway (discard changes)",
+    });
+    expect(discard).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("structure write failed")).toBeInTheDocument();
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Failed to save");
+    expect(closeProjectMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Project anyway (discard changes)" }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+  });
+
+  it("keeps a structural draft dirty after an overlapping name save settles", async () => {
+    const entry = mockEditableEntry();
+    const pendingName = deferred<typeof entry>();
+    updateEntryNameMock.mockReturnValue(pendingName.promise);
+    closeProjectMock.mockResolvedValue(undefined);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.change(screen.getByLabelText("entry-name"), { target: { value: "Thron II" } });
+    fireEvent.change(screen.getByLabelText("entry-category"), { target: { value: "places" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+
+    pendingName.resolve({
+      ...entry,
+      authoredName: "Thron II",
+      displayName: "Thron II",
+      revision: 2,
+      globalRevision: 2,
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Close Project anyway (discard changes)" }),
+      ).toBeInTheDocument(),
+    );
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Pending");
+  });
+
+  it("handles overlapping name and structural saves without claiming either was discarded", async () => {
+    const entry = {
+      id: "entry",
+      categoryId: "uncategorized",
+      typeId: null,
+      authoredName: "Thron",
+      displayName: "Thron",
+      revision: 1,
+      globalRevision: 1,
+    };
+    listEntriesMock.mockResolvedValue([entry]);
+    listCategoriesMock.mockResolvedValue([
+      {
+        id: "uncategorized",
+        name: "Uncategorized",
+        isUncategorized: true,
+        revision: 0,
+        globalRevision: 0,
+      },
+      {
+        id: "characters",
+        name: "Characters",
+        isUncategorized: false,
+        revision: 1,
+        globalRevision: 1,
+      },
+    ]);
+    const nameSave = deferred<typeof entry>();
+    const structureSave = deferred<typeof entry>();
+    updateEntryNameMock.mockReturnValue(nameSave.promise);
+    changeEntryStructureMock.mockReturnValue(structureSave.promise);
+    closeProjectMock.mockResolvedValue(undefined);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.change(screen.getByLabelText("entry-name"), { target: { value: "Thron II" } });
+    fireEvent.change(screen.getByLabelText("entry-category"), {
+      target: { value: "characters" },
+    });
+    fireEvent.change(screen.getByLabelText("entry-type"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
+    await waitFor(() => expect(updateEntryNameMock).toHaveBeenCalledTimes(1));
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("entry-category")).toBeDisabled();
+    expect(screen.getByLabelText("entry-type")).toBeDisabled();
+    expect(screen.getByLabelText("entry-name")).toBeDisabled();
+    nameSave.resolve({
+      ...entry,
+      authoredName: "Thron II",
+      displayName: "Thron II",
+      revision: 2,
+      globalRevision: 2,
+    });
+    await waitFor(() => expect(changeEntryStructureMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    structureSave.resolve({
+      ...entry,
+      authoredName: "Thron II",
+      displayName: "Thron II",
+      revision: 3,
+      globalRevision: 3,
+    });
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
   });
 
   it("shows the Project ID unchanged after a successful rename", async () => {

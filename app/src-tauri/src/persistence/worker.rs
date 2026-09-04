@@ -13,7 +13,9 @@ use std::thread::{self, JoinHandle};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 
-use crate::domain::ProjectId;
+use crate::domain::{
+    authored_name, Category, CategoryId, Entry, EntryId, ProjectId, TypeDef, TypeId,
+};
 
 use super::error::PersistenceError;
 use super::{migrations, pragmas};
@@ -43,6 +45,11 @@ pub struct RenameOutcome {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExistingProjectPreflight {
+    pub schema_version: i64,
+}
+
 type Reply<T> = Sender<Result<T, PersistenceError>>;
 
 enum Job {
@@ -53,6 +60,52 @@ enum Job {
         expected_revision: i64,
         new_working_name: String,
         reply: Reply<RenameOutcome>,
+    },
+    ListCategories {
+        reply: Reply<Vec<Category>>,
+    },
+    CreateCategory {
+        id: CategoryId,
+        name: String,
+        reply: Reply<Category>,
+    },
+    ListTypes {
+        category_id: CategoryId,
+        reply: Reply<Vec<TypeDef>>,
+    },
+    CreateType {
+        id: TypeId,
+        category_id: CategoryId,
+        parent_type_id: Option<TypeId>,
+        name: String,
+        reply: Reply<TypeDef>,
+    },
+    ListEntries {
+        reply: Reply<Vec<Entry>>,
+    },
+    CreateEntry {
+        id: EntryId,
+        category_id: Option<CategoryId>,
+        type_id: Option<TypeId>,
+        authored_name: Option<String>,
+        reply: Reply<Entry>,
+    },
+    GetEntry {
+        id: EntryId,
+        reply: Reply<Entry>,
+    },
+    UpdateEntryName {
+        id: EntryId,
+        expected_revision: i64,
+        authored_name: Option<String>,
+        reply: Reply<Entry>,
+    },
+    ChangeEntryStructure {
+        id: EntryId,
+        expected_revision: i64,
+        category_id: CategoryId,
+        type_id: Option<TypeId>,
+        reply: Reply<Entry>,
     },
     /// Runs a consistent SQLite Online Backup of the live database to
     /// `dest_path`, executed on the worker thread so it observes the same
@@ -86,11 +139,34 @@ impl ProjectDbWorker {
     pub fn preflight_existing(
         db_path: PathBuf,
         expected_project_id: ProjectId,
-    ) -> Result<(), PersistenceError> {
+    ) -> Result<ExistingProjectPreflight, PersistenceError> {
         let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        migrations::require_current_schema(&conn)?;
-        validate_existing_project_meta(&conn, expected_project_id)?;
-        Ok(())
+        let user_version = migrations::user_version(&conn)?;
+        if user_version > migrations::CURRENT_SCHEMA_VERSION {
+            return Err(PersistenceError::UnsupportedSchemaVersion {
+                found: user_version,
+                supported: migrations::CURRENT_SCHEMA_VERSION,
+            });
+        }
+        let Some((database_id, _, format_version, schema_version)) =
+            read_existing_project_meta(&conn)?
+        else {
+            return Err(PersistenceError::MissingProjectMeta);
+        };
+        let database_id = ProjectId::parse(&database_id)
+            .map_err(|error| PersistenceError::Other(error.to_string()))?;
+        if database_id != expected_project_id {
+            return Err(PersistenceError::ProjectIdMismatch {
+                manifest: expected_project_id,
+                database: database_id,
+            });
+        }
+        if format_version != crate::package::FORMAT_VERSION || schema_version != user_version {
+            return Err(PersistenceError::Other(
+                "project metadata version does not match the database schema".to_string(),
+            ));
+        }
+        Ok(ExistingProjectPreflight { schema_version })
     }
 
     /// Spawns the worker thread, opens `db_path`, applies durability
@@ -153,21 +229,14 @@ impl ProjectDbWorker {
                 OpenFlags::SQLITE_OPEN_READ_WRITE
             },
         )?;
-        if is_initializing {
-            pragmas::apply(&conn)?;
-            migrations::migrate(&conn)?;
-        } else {
-            migrations::require_current_schema(&conn)?;
-        }
+        pragmas::apply(&conn)?;
+        migrations::migrate(&conn)?;
 
         let existing = read_existing_project_meta(&conn)?;
 
         match (existing, initial) {
             (Some(_), _) => {
                 validate_existing_project_meta(&conn, expected_project_id)?;
-                if !is_initializing {
-                    pragmas::apply(&conn)?;
-                }
                 Ok(conn)
             }
             (None, Some(init)) => {
@@ -209,6 +278,79 @@ impl ProjectDbWorker {
                         &new_working_name,
                     ));
                 }
+                Job::ListCategories { reply } => {
+                    let _ = reply.send(list_categories(&conn));
+                }
+                Job::CreateCategory { id, name, reply } => {
+                    let _ = reply.send(create_category(&mut conn, id, &name));
+                }
+                Job::ListTypes { category_id, reply } => {
+                    let _ = reply.send(list_types(&conn, category_id));
+                }
+                Job::CreateType {
+                    id,
+                    category_id,
+                    parent_type_id,
+                    name,
+                    reply,
+                } => {
+                    let _ = reply.send(create_type(
+                        &mut conn,
+                        id,
+                        category_id,
+                        parent_type_id,
+                        &name,
+                    ));
+                }
+                Job::ListEntries { reply } => {
+                    let _ = reply.send(list_entries(&conn));
+                }
+                Job::CreateEntry {
+                    id,
+                    category_id,
+                    type_id,
+                    authored_name,
+                    reply,
+                } => {
+                    let _ = reply.send(create_entry(
+                        &mut conn,
+                        id,
+                        category_id,
+                        type_id,
+                        authored_name,
+                    ));
+                }
+                Job::GetEntry { id, reply } => {
+                    let _ = reply.send(get_entry(&conn, id));
+                }
+                Job::UpdateEntryName {
+                    id,
+                    expected_revision,
+                    authored_name,
+                    reply,
+                } => {
+                    let _ = reply.send(update_entry_name(
+                        &mut conn,
+                        id,
+                        expected_revision,
+                        authored_name,
+                    ));
+                }
+                Job::ChangeEntryStructure {
+                    id,
+                    expected_revision,
+                    category_id,
+                    type_id,
+                    reply,
+                } => {
+                    let _ = reply.send(change_entry_structure(
+                        &mut conn,
+                        id,
+                        expected_revision,
+                        category_id,
+                        type_id,
+                    ));
+                }
                 Job::BackupTo { dest_path, reply } => {
                     let _ =
                         reply.send(backup_to(&conn, &dest_path).and_then(|()| read_meta(&conn)));
@@ -243,6 +385,92 @@ impl ProjectDbWorker {
         self.call(|reply| Job::RenameProject {
             expected_revision,
             new_working_name,
+            reply,
+        })
+    }
+
+    pub fn list_categories(&self) -> Result<Vec<Category>, PersistenceError> {
+        self.call(|reply| Job::ListCategories { reply })
+    }
+
+    pub fn create_category(
+        &self,
+        id: CategoryId,
+        name: String,
+    ) -> Result<Category, PersistenceError> {
+        self.call(|reply| Job::CreateCategory { id, name, reply })
+    }
+
+    pub fn list_types(&self, category_id: CategoryId) -> Result<Vec<TypeDef>, PersistenceError> {
+        self.call(|reply| Job::ListTypes { category_id, reply })
+    }
+
+    pub fn create_type(
+        &self,
+        id: TypeId,
+        category_id: CategoryId,
+        parent_type_id: Option<TypeId>,
+        name: String,
+    ) -> Result<TypeDef, PersistenceError> {
+        self.call(|reply| Job::CreateType {
+            id,
+            category_id,
+            parent_type_id,
+            name,
+            reply,
+        })
+    }
+
+    pub fn list_entries(&self) -> Result<Vec<Entry>, PersistenceError> {
+        self.call(|reply| Job::ListEntries { reply })
+    }
+
+    pub fn create_entry(
+        &self,
+        id: EntryId,
+        category_id: Option<CategoryId>,
+        type_id: Option<TypeId>,
+        name: Option<String>,
+    ) -> Result<Entry, PersistenceError> {
+        self.call(|reply| Job::CreateEntry {
+            id,
+            category_id,
+            type_id,
+            authored_name: authored_name(name),
+            reply,
+        })
+    }
+
+    pub fn get_entry(&self, id: EntryId) -> Result<Entry, PersistenceError> {
+        self.call(|reply| Job::GetEntry { id, reply })
+    }
+
+    pub fn update_entry_name(
+        &self,
+        id: EntryId,
+        expected_revision: i64,
+        name: Option<String>,
+    ) -> Result<Entry, PersistenceError> {
+        self.call(|reply| Job::UpdateEntryName {
+            id,
+            expected_revision,
+            authored_name: authored_name(name),
+            reply,
+        })
+    }
+
+    pub fn change_entry_structure(
+        &self,
+        id: EntryId,
+        expected_revision: i64,
+        category_id: CategoryId,
+        type_id: Option<TypeId>,
+    ) -> Result<Entry, PersistenceError> {
+        self.call(|reply| Job::ChangeEntryStructure {
+            id,
+            expected_revision,
+            category_id,
+            type_id,
             reply,
         })
     }
@@ -412,22 +640,358 @@ fn rename_project(
 }
 
 fn backup_to(conn: &Connection, dest_path: &std::path::Path) -> Result<(), PersistenceError> {
-    if let Some(parent) = dest_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut dest = Connection::open(dest_path)?;
-    {
-        let backup = rusqlite::backup::Backup::new(conn, &mut dest)?;
-        backup.run_to_completion(5, std::time::Duration::from_millis(50), None)?;
-    }
-    // Validate the snapshot before declaring success.
-    let integrity: String = dest.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-    if integrity != "ok" {
-        return Err(PersistenceError::Other(format!(
-            "backup snapshot failed integrity_check: {integrity}"
-        )));
+    super::snapshot::backup_connection(conn, dest_path)
+}
+
+fn next_global_revision(
+    tx: &rusqlite::Transaction<'_>,
+    now: &str,
+) -> Result<i64, PersistenceError> {
+    let current: i64 = tx.query_row(
+        "SELECT last_committed_revision FROM project_meta WHERE id = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    let next = current + 1;
+    tx.execute(
+        "UPDATE project_meta SET last_committed_revision = ?1, updated_at = ?2 WHERE id = 1",
+        rusqlite::params![next, now],
+    )?;
+    Ok(next)
+}
+
+fn list_categories(conn: &Connection) -> Result<Vec<Category>, PersistenceError> {
+    let global_revision: i64 = conn.query_row(
+        "SELECT last_committed_revision FROM project_meta WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let mut statement = conn.prepare(
+        "SELECT id, name, is_uncategorized, revision
+             FROM category ORDER BY is_uncategorized DESC, name COLLATE NOCASE, id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let id: String = row.get(0)?;
+        Ok((id, row.get(1)?, row.get::<_, bool>(2)?, row.get(3)?))
+    })?;
+    rows.map(|row| {
+        let (id, name, is_uncategorized, revision) = row?;
+        Ok(Category {
+            id: CategoryId::parse(&id).map_err(|e| PersistenceError::Other(e.to_string()))?,
+            name,
+            is_uncategorized,
+            revision,
+            global_revision,
+        })
+    })
+    .collect()
+}
+
+fn create_category(
+    conn: &mut Connection,
+    id: CategoryId,
+    name: &str,
+) -> Result<Category, PersistenceError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let now = Utc::now().to_rfc3339();
+    let global_revision = next_global_revision(&tx, &now)?;
+    tx.execute(
+        "INSERT INTO category (id, name, is_uncategorized, created_at, updated_at, revision)
+             VALUES (?1, ?2, 0, ?3, ?3, 1)",
+        rusqlite::params![id.to_string(), name, now],
+    )?;
+    tx.commit()?;
+    Ok(Category {
+        id,
+        name: name.to_string(),
+        is_uncategorized: false,
+        revision: 1,
+        global_revision,
+    })
+}
+
+fn list_types(
+    conn: &Connection,
+    category_id: CategoryId,
+) -> Result<Vec<TypeDef>, PersistenceError> {
+    let global_revision: i64 = conn.query_row(
+        "SELECT last_committed_revision FROM project_meta WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let mut statement = conn.prepare(
+        "SELECT id, category_id, parent_type_id, name, revision
+             FROM type_def WHERE category_id = ?1 ORDER BY name COLLATE NOCASE, id",
+    )?;
+    let rows = statement.query_map([category_id.to_string()], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i64>(4)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (id, category, parent, name, revision) = row?;
+        Ok(TypeDef {
+            id: TypeId::parse(&id).map_err(|e| PersistenceError::Other(e.to_string()))?,
+            category_id: CategoryId::parse(&category)
+                .map_err(|e| PersistenceError::Other(e.to_string()))?,
+            parent_type_id: parent
+                .map(|id| TypeId::parse(&id))
+                .transpose()
+                .map_err(|e| PersistenceError::Other(e.to_string()))?,
+            name,
+            revision,
+            global_revision,
+        })
+    })
+    .collect()
+}
+
+fn create_type(
+    conn: &mut Connection,
+    id: TypeId,
+    category_id: CategoryId,
+    parent_type_id: Option<TypeId>,
+    name: &str,
+) -> Result<TypeDef, PersistenceError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let now = Utc::now().to_rfc3339();
+    let global_revision = next_global_revision(&tx, &now)?;
+    tx.execute(
+        "INSERT INTO type_def (
+                id, category_id, parent_type_id, name, created_at, updated_at, revision
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?5, 1)",
+        rusqlite::params![
+            id.to_string(),
+            category_id.to_string(),
+            parent_type_id.map(|id| id.to_string()),
+            name,
+            now
+        ],
+    )?;
+    tx.commit()?;
+    Ok(TypeDef {
+        id,
+        category_id,
+        parent_type_id,
+        name: name.to_string(),
+        revision: 1,
+        global_revision,
+    })
+}
+
+fn list_entries(conn: &Connection) -> Result<Vec<Entry>, PersistenceError> {
+    let global_revision: i64 = conn.query_row(
+        "SELECT last_committed_revision FROM project_meta WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let mut statement = conn.prepare(
+        "SELECT id, category_id, type_id, authored_name, revision
+             FROM entry ORDER BY COALESCE(authored_name, '') COLLATE NOCASE, id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, i64>(4)?,
+        ))
+    })?;
+    rows.map(|row| entry_from_row(row?, global_revision))
+        .collect()
+}
+
+fn get_entry(conn: &Connection, id: EntryId) -> Result<Entry, PersistenceError> {
+    let global_revision: i64 = conn.query_row(
+        "SELECT last_committed_revision FROM project_meta WHERE id = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let row = conn
+        .query_row(
+            "SELECT id, category_id, type_id, authored_name, revision
+                 FROM entry WHERE id = ?1",
+            [id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| PersistenceError::Other(format!("Entry {id} was not found")))?;
+    entry_from_row(row, global_revision)
+}
+
+fn entry_from_row(
+    row: (String, String, Option<String>, Option<String>, i64),
+    global_revision: i64,
+) -> Result<Entry, PersistenceError> {
+    Ok(Entry {
+        id: EntryId::parse(&row.0).map_err(|e| PersistenceError::Other(e.to_string()))?,
+        category_id: CategoryId::parse(&row.1)
+            .map_err(|e| PersistenceError::Other(e.to_string()))?,
+        type_id: row
+            .2
+            .map(|id| TypeId::parse(&id))
+            .transpose()
+            .map_err(|e| PersistenceError::Other(e.to_string()))?,
+        authored_name: row.3,
+        revision: row.4,
+        global_revision,
+    })
+}
+
+fn create_entry(
+    conn: &mut Connection,
+    id: EntryId,
+    category_id: Option<CategoryId>,
+    type_id: Option<TypeId>,
+    name: Option<String>,
+) -> Result<Entry, PersistenceError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let category_id = match category_id {
+        Some(id) => id,
+        None => {
+            let raw: String = tx.query_row(
+                "SELECT id FROM category WHERE is_uncategorized = 1",
+                [],
+                |row| row.get(0),
+            )?;
+            CategoryId::parse(&raw).map_err(|e| PersistenceError::Other(e.to_string()))?
+        }
+    };
+    validate_type_category(&tx, category_id, type_id)?;
+    let now = Utc::now().to_rfc3339();
+    let global_revision = next_global_revision(&tx, &now)?;
+    tx.execute(
+        "INSERT INTO record_identity (
+                record_id, kind, workspace_state, lifecycle_changed_at, created_at
+             ) VALUES (?1, 'entry', 'active', ?2, ?2)",
+        rusqlite::params![id.to_string(), now],
+    )?;
+    tx.execute(
+        "INSERT INTO entry (
+                id, category_id, type_id, authored_name, created_at, updated_at, revision
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?5, 1)",
+        rusqlite::params![
+            id.to_string(),
+            category_id.to_string(),
+            type_id.map(|id| id.to_string()),
+            name,
+            now
+        ],
+    )?;
+    tx.commit()?;
+    Ok(Entry {
+        id,
+        category_id,
+        type_id,
+        authored_name: name,
+        revision: 1,
+        global_revision,
+    })
+}
+
+fn validate_type_category(
+    tx: &rusqlite::Transaction<'_>,
+    category_id: CategoryId,
+    type_id: Option<TypeId>,
+) -> Result<(), PersistenceError> {
+    if let Some(type_id) = type_id {
+        let matches: bool = tx.query_row(
+            "SELECT EXISTS(
+                    SELECT 1 FROM type_def WHERE id = ?1 AND category_id = ?2
+                 )",
+            rusqlite::params![type_id.to_string(), category_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if !matches {
+            return Err(PersistenceError::Other(
+                "the selected Type does not belong to the selected Category".to_string(),
+            ));
+        }
     }
     Ok(())
+}
+
+fn checked_entry_revision(
+    tx: &rusqlite::Transaction<'_>,
+    id: EntryId,
+    expected: i64,
+) -> Result<(), PersistenceError> {
+    let current: i64 = tx
+        .query_row(
+            "SELECT revision FROM entry WHERE id = ?1",
+            [id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| PersistenceError::Other(format!("Entry {id} was not found")))?;
+    if current != expected {
+        return Err(PersistenceError::StaleRevision { expected, current });
+    }
+    Ok(())
+}
+
+fn update_entry_name(
+    conn: &mut Connection,
+    id: EntryId,
+    expected_revision: i64,
+    name: Option<String>,
+) -> Result<Entry, PersistenceError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    checked_entry_revision(&tx, id, expected_revision)?;
+    let now = Utc::now().to_rfc3339();
+    let global_revision = next_global_revision(&tx, &now)?;
+    tx.execute(
+        "UPDATE entry
+             SET authored_name = ?1, updated_at = ?2, revision = revision + 1
+             WHERE id = ?3",
+        rusqlite::params![name, now, id.to_string()],
+    )?;
+    tx.commit()?;
+    let mut result = get_entry(conn, id)?;
+    result.global_revision = global_revision;
+    Ok(result)
+}
+
+fn change_entry_structure(
+    conn: &mut Connection,
+    id: EntryId,
+    expected_revision: i64,
+    category_id: CategoryId,
+    type_id: Option<TypeId>,
+) -> Result<Entry, PersistenceError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    checked_entry_revision(&tx, id, expected_revision)?;
+    validate_type_category(&tx, category_id, type_id)?;
+    let now = Utc::now().to_rfc3339();
+    let global_revision = next_global_revision(&tx, &now)?;
+    tx.execute(
+        "UPDATE entry
+             SET category_id = ?1, type_id = ?2, updated_at = ?3, revision = revision + 1
+             WHERE id = ?4",
+        rusqlite::params![
+            category_id.to_string(),
+            type_id.map(|id| id.to_string()),
+            now,
+            id.to_string()
+        ],
+    )?;
+    tx.commit()?;
+    let mut result = get_entry(conn, id)?;
+    result.global_revision = global_revision;
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -570,7 +1134,7 @@ mod tests {
     }
 
     #[test]
-    fn older_existing_schema_is_refused_without_mutating_version_markers() {
+    fn schema_v1_existing_database_migrates_without_changing_project_data() {
         let dir = tempdir().unwrap();
         let project_id = ProjectId::new();
         {
@@ -580,33 +1144,100 @@ mod tests {
 
         let db_path = dir.path().join("project.sqlite");
         let conn = Connection::open(&db_path).unwrap();
-        conn.pragma_update(None, "user_version", 0).unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER entry_type_category_update;
+             DROP TRIGGER entry_type_category_insert;
+             DROP TABLE entry;
+             DROP TABLE record_identity;
+             DROP TRIGGER type_parent_cycle_update;
+             DROP TRIGGER type_parent_valid_insert;
+             DROP TABLE type_def;
+             DROP TABLE category;",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
         conn.execute(
-            "UPDATE project_meta SET schema_version = 0 WHERE id = 1",
+            "UPDATE project_meta SET schema_version = 1 WHERE id = 1",
             [],
         )
         .unwrap();
         drop(conn);
 
-        let err = ProjectDbWorker::spawn(db_path.clone(), project_id, None).unwrap_err();
-        assert!(matches!(
-            err,
-            PersistenceError::MigrationRequired {
-                found: 0,
-                supported: migrations::CURRENT_SCHEMA_VERSION,
-            }
-        ));
+        let preflight = ProjectDbWorker::preflight_existing(db_path.clone(), project_id).unwrap();
+        assert_eq!(preflight.schema_version, 1);
+        let worker = ProjectDbWorker::spawn(db_path, project_id, None).unwrap();
+        assert_eq!(worker.read_meta().unwrap().project_id, project_id);
+        let categories = worker.list_categories().unwrap();
+        assert_eq!(
+            categories
+                .iter()
+                .filter(|category| category.is_uncategorized)
+                .count(),
+            1
+        );
+        worker.shutdown().unwrap();
+    }
 
-        let conn = Connection::open(&db_path).unwrap();
-        let user_version = migrations::user_version(&conn).unwrap();
-        let schema_version: i64 = conn
-            .query_row(
-                "SELECT schema_version FROM project_meta WHERE id = 1",
-                [],
-                |r| r.get(0),
+    #[test]
+    fn entries_preserve_identity_and_reject_incompatible_types_and_stale_writes() {
+        let dir = tempdir().unwrap();
+        let worker = spawn_fresh(dir.path(), ProjectId::new());
+        let characters = worker
+            .create_category(CategoryId::new(), "Characters".into())
+            .unwrap();
+        let places = worker
+            .create_category(CategoryId::new(), "Places".into())
+            .unwrap();
+        let human = worker
+            .create_type(TypeId::new(), characters.id, None, "Human".into())
+            .unwrap();
+        let entry = worker
+            .create_entry(
+                EntryId::new(),
+                Some(characters.id),
+                Some(human.id),
+                Some("Thron".into()),
             )
             .unwrap();
-        assert_eq!(user_version, 0);
-        assert_eq!(schema_version, 0);
+        let renamed = worker
+            .update_entry_name(entry.id, entry.revision, Some("Thron II".into()))
+            .unwrap();
+        assert_eq!(renamed.id, entry.id);
+
+        let incompatible =
+            worker.change_entry_structure(entry.id, renamed.revision, places.id, Some(human.id));
+        assert!(incompatible.is_err());
+        let unchanged = worker.get_entry(entry.id).unwrap();
+        assert_eq!(unchanged.category_id, characters.id);
+        assert_eq!(unchanged.type_id, Some(human.id));
+
+        let moved = worker
+            .change_entry_structure(entry.id, renamed.revision, places.id, None)
+            .unwrap();
+        assert_eq!(moved.id, entry.id);
+        assert_eq!(moved.type_id, None);
+        assert!(matches!(
+            worker.update_entry_name(entry.id, renamed.revision, Some("stale".into())),
+            Err(PersistenceError::StaleRevision { .. })
+        ));
+        worker.shutdown().unwrap();
+    }
+
+    #[test]
+    fn entry_without_category_is_valid_and_uses_uncategorized() {
+        let dir = tempdir().unwrap();
+        let worker = spawn_fresh(dir.path(), ProjectId::new());
+        let uncategorized = worker
+            .list_categories()
+            .unwrap()
+            .into_iter()
+            .find(|category| category.is_uncategorized)
+            .unwrap();
+        let entry = worker
+            .create_entry(EntryId::new(), None, None, None)
+            .unwrap();
+        assert_eq!(entry.category_id, uncategorized.id);
+        assert_eq!(entry.authored_name, None);
+        worker.shutdown().unwrap();
     }
 }

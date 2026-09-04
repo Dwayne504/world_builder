@@ -20,6 +20,78 @@ use crate::domain::{ProjectId, WorkingName};
 use crate::package::{layout, manifest::Manifest, PackagePaths};
 use crate::persistence::ProjectDbWorker;
 
+pub fn create_pre_migration_snapshot(
+    live_paths: &PackagePaths,
+    project_id: ProjectId,
+    database_schema_version: i64,
+) -> Result<PathBuf, BackupError> {
+    let package_parent = live_paths
+        .root
+        .parent()
+        .ok_or_else(|| BackupError::NotABackup(live_paths.root.display().to_string()))?;
+    let recovery_root = package_parent
+        .join(".worldcrafter-migration-recovery")
+        .join(project_id.to_string());
+    fs::create_dir_all(&recovery_root)?;
+    let snapshot_path = recovery_root.join(format!("schema-v{database_schema_version}.sqlite"));
+    let prior_path = recovery_root.join(format!(".schema-v{database_schema_version}.prior.sqlite"));
+    if !snapshot_path.exists() && prior_path.exists() {
+        fs::rename(&prior_path, &snapshot_path)?;
+        sync_directory(&recovery_root)?;
+    } else if snapshot_path.exists() && prior_path.exists() {
+        fs::remove_file(&prior_path)?;
+        sync_directory(&recovery_root)?;
+    }
+    let staging_path = recovery_root.join(format!(
+        ".{}.creating.sqlite",
+        chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ")
+    ));
+    let source = Connection::open_with_flags(
+        live_paths.db_path(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
+    crate::persistence::snapshot::backup_connection(&source, &staging_path)?;
+    let snapshot =
+        Connection::open_with_flags(&staging_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let (snapshot_project_id, schema_version): (String, i64) = snapshot.query_row(
+        "SELECT project_id, schema_version FROM project_meta WHERE id = 1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if snapshot_project_id != project_id.to_string() || schema_version != database_schema_version {
+        drop(snapshot);
+        let _ = fs::remove_file(&staging_path);
+        return Err(BackupError::CorruptSnapshot(
+            staging_path.display().to_string(),
+        ));
+    }
+    drop(snapshot);
+    if snapshot_path.exists() {
+        fs::rename(&snapshot_path, &prior_path)?;
+        sync_directory(&recovery_root)?;
+    }
+    if let Err(error) = fs::rename(&staging_path, &snapshot_path) {
+        if prior_path.exists() {
+            let _ = fs::rename(&prior_path, &snapshot_path);
+            let _ = sync_directory(&recovery_root);
+        }
+        return Err(error.into());
+    }
+    sync_directory(&recovery_root)?;
+    if prior_path.exists() {
+        fs::remove_file(prior_path)?;
+        sync_directory(&recovery_root)?;
+    }
+    Ok(snapshot_path)
+}
+
+fn sync_directory(path: &Path) -> Result<(), std::io::Error> {
+    if let Ok(directory) = fs::File::open(path) {
+        directory.sync_all()?;
+    }
+    Ok(())
+}
+
 /// Creates a manual backup of the Project owning `worker`/`live_paths`
 /// under `backup_root` (outside the live package), returning the path to
 /// the created `.wcbackup` directory.

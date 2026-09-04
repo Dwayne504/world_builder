@@ -9,7 +9,11 @@ pub mod error;
 pub mod lock;
 pub mod migrations;
 pub mod pragmas;
+pub mod snapshot;
 pub mod worker;
 
 pub use error::PersistenceError;
-pub use worker::{InitialProjectMeta, ProjectDbWorker, ProjectMetaSnapshot, RenameOutcome};
+pub use worker::{
+    ExistingProjectPreflight, InitialProjectMeta, ProjectDbWorker, ProjectMetaSnapshot,
+    RenameOutcome,
+};
