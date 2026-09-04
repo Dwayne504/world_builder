@@ -44,6 +44,21 @@ vi.mock("./api", () => ({
 }));
 
 import App from "./App";
+import { AppCommandError } from "./api";
+
+function backendError(kind: string, message: string): AppCommandError {
+  return new AppCommandError({ kind, message });
+}
+
+async function renderHomeAndFailOpen(kind: string) {
+  openProjectMock.mockRejectedValueOnce(backendError(kind, `${kind} diagnostic detail`));
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("open-project-path"), {
+    target: { value: "/tmp/Tortuga.wcproj" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
+  await waitFor(() => expect(screen.getAllByRole("alert").length).toBeGreaterThan(0));
+}
 
 async function openTheProjectScreen() {
   openProjectMock.mockResolvedValueOnce(project);
@@ -392,5 +407,82 @@ describe("Project screen Saved contract", () => {
     resolveListener(lateUnlisten);
 
     await waitFor(() => expect(lateUnlisten).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("Home screen stale-lock recovery", () => {
+  beforeEach(() => {
+    openProjectMock.mockReset();
+  });
+
+  it("offers explicit recovery only when the backend reports lock_recovery_required", async () => {
+    await renderHomeAndFailOpen("lock_recovery_required");
+
+    // The entered path is retained after the failed open.
+    expect(screen.getByLabelText("open-project-path")).toHaveValue("/tmp/Tortuga.wcproj");
+
+    // Understandable wording leads; jargon stays out of the primary text.
+    expect(screen.getByText(/not closed properly/i)).toBeInTheDocument();
+
+    const recover = screen.getByRole("button", { name: "Recover lock and open Project" });
+    expect(recover).toBeInTheDocument();
+    // The safety caveat is shown next to the action.
+    expect(screen.getByText(/no other Worldcrafter instance/i)).toBeInTheDocument();
+
+    // The recovery action opens the same path with forceStaleLockRecovery=true.
+    openProjectMock.mockResolvedValueOnce(project);
+    fireEvent.click(recover);
+    await waitFor(() => screen.getByTestId("project-id"));
+    expect(openProjectMock).toHaveBeenLastCalledWith("/tmp/Tortuga.wcproj", true);
+    expect(screen.getByTestId("project-id").textContent).toBe(project.projectId);
+  });
+
+  it.each([
+    ["lock_held", /currently open in another Worldcrafter instance/i],
+    ["lock_not_stale", /may still be in use/i],
+    ["lock_metadata_corrupt", /lock information is unreadable/i],
+  ])("offers no unsafe recovery action for %s", async (kind, wording) => {
+    await renderHomeAndFailOpen(kind);
+
+    expect(screen.getByText(wording)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Recover lock and open Project" }),
+    ).not.toBeInTheDocument();
+    // The path is retained so the user can retry or edit it.
+    expect(screen.getByLabelText("open-project-path")).toHaveValue("/tmp/Tortuga.wcproj");
+  });
+
+  it("keeps a failed recovery visible and does not open the Project", async () => {
+    openProjectMock.mockRejectedValueOnce(
+      backendError("lock_recovery_required", "stale lock diagnostic"),
+    );
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("open-project-path"), {
+      target: { value: "/tmp/Tortuga.wcproj" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
+    await waitFor(() => screen.getByRole("button", { name: "Recover lock and open Project" }));
+
+    // The recovery attempt itself fails (e.g. another instance grabbed the
+    // Project first): the failure must stay visible.
+    openProjectMock.mockRejectedValueOnce(backendError("lock_held", "held by pid 42"));
+    fireEvent.click(screen.getByRole("button", { name: "Recover lock and open Project" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/currently open in another Worldcrafter instance/i),
+      ).toBeInTheDocument(),
+    );
+    expect(openProjectMock).toHaveBeenLastCalledWith("/tmp/Tortuga.wcproj", true);
+    // Still on the Home screen: nothing was opened.
+    expect(screen.queryByTestId("project-id")).not.toBeInTheDocument();
+  });
+
+  it("does not offer recovery for non-lock open failures", async () => {
+    await renderHomeAndFailOpen("invalid_package");
+    expect(screen.getByText(/invalid_package/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Recover lock and open Project" }),
+    ).not.toBeInTheDocument();
   });
 });

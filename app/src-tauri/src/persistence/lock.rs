@@ -27,7 +27,10 @@ pub struct LockInfo {
     pub heartbeat_at: DateTime<Utc>,
 }
 impl LockInfo {
-    fn new(project_id: ProjectId) -> Self {
+    /// Visible to integration tests so they can plant orphaned metadata;
+    /// production callers always go through `acquire`.
+    #[doc(hidden)]
+    pub fn new(project_id: ProjectId) -> Self {
         let now = Utc::now();
         Self {
             project_id,
@@ -57,13 +60,15 @@ pub enum LockError {
         host: String,
         acquired_at: DateTime<Utc>,
     },
-    #[error("a stale lock requires explicit recovery")]
+    #[error("a previous session ended without releasing the Project; the leftover lock metadata is old enough to discard, so you can explicitly recover the Project")]
     RecoveryRequired,
-    #[error("lock is not stale enough to recover")]
+    #[error(
+        "a previous session ended recently; the leftover lock metadata is not old enough to discard safely, so explicit recovery is not available yet"
+    )]
     NotStale,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("lock file is present but unreadable/corrupt: {0}")]
+    #[error("the leftover lock metadata is unreadable or corrupt ({0}); it was left untouched")]
     Corrupt(String),
 }
 
@@ -148,6 +153,17 @@ pub fn acquire(
     project_id: ProjectId,
     recover_stale: bool,
 ) -> Result<LockGuard, LockError> {
+    // Decision order matters:
+    // 1. The OS advisory guard is authoritative -- first prove it is not
+    //    actively held by another instance. An active lock is never stolen
+    //    or bypassed, not even with `recover_stale`.
+    // 2. Only once the guard is ours, read and validate the heartbeat
+    //    metadata (never authoritative, only evidence about a previous
+    //    session).
+    // 3. Determine whether the metadata satisfies the stale threshold.
+    //    Only genuinely stale metadata may report that explicit recovery is
+    //    available; fresh metadata must not be labelled "stale", and the
+    //    stale file is never removed without an explicit `recover_stale`.
     let guard = OpenOptions::new()
         .read(true)
         .write(true)
@@ -155,26 +171,49 @@ pub fn acquire(
         .truncate(false)
         .open(guard_path(lock_path))?;
     if let Err(error) = guard.try_lock() {
-        let info = read_metadata(lock_path)?;
         return Err(if matches!(error, std::fs::TryLockError::WouldBlock) {
-            LockError::Held {
-                pid: info.pid,
-                host: info.host,
-                acquired_at: info.acquired_at,
+            // The OS lock is actively held: never steal it. Ownership
+            // details come from the heartbeat metadata when readable, but a
+            // missing/corrupt file must not downgrade the report -- the
+            // authoritative fact is the actively held OS lock itself.
+            match read_metadata(lock_path) {
+                Ok(info) => LockError::Held {
+                    pid: info.pid,
+                    host: info.host,
+                    acquired_at: info.acquired_at,
+                },
+                Err(_) => LockError::Held {
+                    pid: 0,
+                    host: "unknown-host".to_string(),
+                    acquired_at: DateTime::<Utc>::UNIX_EPOCH,
+                },
             }
         } else {
             LockError::Io(error.into())
         });
     }
     if lock_path.exists() {
-        let previous = read_metadata(lock_path)?;
-        if !recover_stale {
-            let _ = guard.unlock();
-            return Err(LockError::RecoveryRequired);
-        }
+        let previous = match read_metadata(lock_path) {
+            Ok(info) => info,
+            Err(error) => {
+                // Corrupt/unreadable metadata is never deleted: failing
+                // safely preserves the evidence for manual inspection.
+                let _ = guard.unlock();
+                return Err(error);
+            }
+        };
         if !previous.is_stale() {
+            // Leftover metadata that is too fresh to declare stale must not
+            // be reported as recoverable: a live (or just-crashed) owner
+            // may still be around.
             let _ = guard.unlock();
             return Err(LockError::NotStale);
+        }
+        if !recover_stale {
+            // The stale file stays exactly where it is until the caller
+            // explicitly re-runs with recovery enabled.
+            let _ = guard.unlock();
+            return Err(LockError::RecoveryRequired);
         }
     }
     let info = LockInfo::new(project_id);
@@ -244,5 +283,112 @@ mod tests {
             Err(LockError::Held { .. })
         ));
         owner.release();
+    }
+
+    #[test]
+    fn fresh_metadata_without_an_os_owner_reports_not_stale_not_recovery() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("lock.json");
+        // Orphaned metadata from a crashed session with a recent heartbeat.
+        write_metadata(&path, &LockInfo::new(ProjectId::new())).unwrap();
+
+        // Normal open must not call fresh leftover metadata "stale".
+        assert!(matches!(
+            acquire(&path, ProjectId::new(), false),
+            Err(LockError::NotStale)
+        ));
+        // Even an explicit recovery request must refuse: it is not old
+        // enough to discard safely.
+        assert!(matches!(
+            acquire(&path, ProjectId::new(), true),
+            Err(LockError::NotStale)
+        ));
+        // The fresh metadata was left untouched, and the guard was
+        // released again so a future acquisition is not blocked by us.
+        assert!(read_metadata(&path).is_ok());
+        let owner = acquire(&path, ProjectId::new(), true);
+        assert!(matches!(owner, Err(LockError::NotStale)));
+    }
+
+    #[test]
+    fn stale_metadata_without_an_os_owner_requires_explicit_recovery() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("lock.json");
+        let mut orphan = LockInfo::new(ProjectId::new());
+        orphan.heartbeat_at = Utc::now() - chrono::Duration::hours(2);
+        write_metadata(&path, &orphan).unwrap();
+
+        // Normal open reports that explicit recovery is available...
+        assert!(matches!(
+            acquire(&path, ProjectId::new(), false),
+            Err(LockError::RecoveryRequired)
+        ));
+        // ...and must not have removed or rewritten the stale file.
+        let after = read_metadata(&path).unwrap();
+        assert_eq!(after.session_token, orphan.session_token);
+
+        // The explicit recovery acquires the lock and replaces metadata.
+        let project_id = ProjectId::new();
+        let guard = acquire(&path, project_id, true).unwrap();
+        let recovered = read_metadata(&path).unwrap();
+        assert_eq!(recovered.project_id, project_id);
+        assert_ne!(recovered.session_token, orphan.session_token);
+        guard.release();
+        // A clean release removes the metadata it owned.
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn corrupt_metadata_without_an_os_owner_fails_safely_and_is_preserved() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("lock.json");
+        fs::write(&path, b"{ this is not json").unwrap();
+
+        for recover in [false, true] {
+            let result = acquire(&path, ProjectId::new(), recover);
+            assert!(
+                matches!(result, Err(LockError::Corrupt(_))),
+                "expected Corrupt for recover={recover}, got {result:?}"
+            );
+        }
+        // The unreadable file is evidence, not debris: never deleted.
+        assert_eq!(fs::read(&path).unwrap(), b"{ this is not json");
+        // Our failed attempts did not leave the OS guard held.
+        let guard = acquire_guard_only(&path);
+        drop(guard);
+    }
+
+    #[test]
+    fn corrupt_metadata_with_an_active_os_owner_reports_held_not_corrupt() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("lock.json");
+        let owner = acquire(&path, ProjectId::new(), false).unwrap();
+        // The owner crashed hard enough to corrupt its own metadata, yet
+        // still holds the OS advisory lock (e.g. another instance did the
+        // damage). Ownership must never be inferred from metadata alone.
+        fs::write(&path, b"garbage").unwrap();
+
+        for recover in [false, true] {
+            assert!(matches!(
+                acquire(&path, ProjectId::new(), recover),
+                Err(LockError::Held { .. })
+            ));
+        }
+        assert_eq!(fs::read(&path).unwrap(), b"garbage");
+        owner.release();
+    }
+
+    /// Acquires only the OS advisory guard file, bypassing metadata
+    /// handling, to prove a previous failure did not leave it held.
+    fn acquire_guard_only(lock_path: &Path) -> File {
+        let guard = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(guard_path(lock_path))
+            .unwrap();
+        guard.try_lock().unwrap();
+        guard
     }
 }
