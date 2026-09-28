@@ -125,6 +125,26 @@ button:focus-visible {
   background-color: rgba(57, 108, 216, 0.05);
 }
 
+.fields-panel {
+  border-top: 1px solid #888;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+}
+.field-value {
+  margin: 1rem 0;
+}
+.field-note {
+  font-size: 0.9rem;
+}
+.fields-panel textarea {
+  width: 100%;
+  min-height: 5rem;
+  box-sizing: border-box;
+}
+.fields-panel select[multiple] {
+  min-height: 6rem;
+}
+
 .inline-creator legend {
   padding: 0 0.4em;
   font-weight: 600;

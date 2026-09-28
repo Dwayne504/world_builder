@@ -56,3 +56,54 @@ export interface Preferences {
   defaultBackupsDir: string | null;
   defaultBackupsDirExists: boolean;
 }
+
+export type FieldKind = "short_text" | "number" | "boolean" | "choice" | "multi_choice";
+export interface FieldProvider {
+  kind: "category" | "type" | "entry";
+  id: string;
+}
+export interface ChoiceOption {
+  id: string;
+  label: string;
+  retired: boolean;
+}
+export interface FieldDefinition {
+  id: string;
+  name: string;
+  kind: FieldKind;
+  retired: boolean;
+  revision: number;
+  options: ChoiceOption[];
+  bindings: { provider: FieldProvider; label: string }[];
+}
+export type FieldValue =
+  | { kind: "text"; value: string }
+  | { kind: "number"; value: number }
+  | { kind: "boolean"; value: boolean }
+  | { kind: "choices"; value: string[] };
+export interface EntryField {
+  definition: FieldDefinition;
+  available: boolean;
+  value: FieldValue | null;
+}
+export interface EntryFields {
+  globalRevision: number;
+  fields: EntryField[];
+  definitions: FieldDefinition[];
+}
+export type FieldCommand =
+  | {
+      kind: "create";
+      name: string;
+      fieldKind: FieldKind;
+      provider: FieldProvider;
+      options: string[];
+      value: FieldValue | null;
+    }
+  | { kind: "set_values"; edits: { fieldId: string; value: FieldValue | null }[] }
+  | { kind: "rename"; fieldId: string; name: string }
+  | { kind: "set_retired"; fieldId: string; retired: boolean }
+  | { kind: "bind" | "unbind"; fieldId: string; provider: FieldProvider }
+  | { kind: "add_choice"; fieldId: string; label: string }
+  | { kind: "rename_choice"; optionId: string; label: string }
+  | { kind: "set_choice_retired"; optionId: string; retired: boolean };

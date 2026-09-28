@@ -51,8 +51,19 @@ pub struct ExistingProjectPreflight {
 }
 
 type Reply<T> = Sender<Result<T, PersistenceError>>;
+use crate::domain::fields::{EntryFields, FieldCommand};
 
 enum Job {
+    ReadFields {
+        entry: EntryId,
+        reply: Reply<EntryFields>,
+    },
+    ApplyFields {
+        entry: EntryId,
+        expected: i64,
+        command: FieldCommand,
+        reply: Reply<EntryFields>,
+    },
     ReadMeta {
         reply: Reply<ProjectMetaSnapshot>,
     },
@@ -264,6 +275,17 @@ impl ProjectDbWorker {
         let mut conn = conn;
         for job in jobs {
             match job {
+                Job::ReadFields { entry, reply } => {
+                    let _ = reply.send(super::fields::read(&conn, entry));
+                }
+                Job::ApplyFields {
+                    entry,
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::fields::apply(&mut conn, entry, expected, command));
+                }
                 Job::ReadMeta { reply } => {
                     let _ = reply.send(read_meta(&conn));
                 }
@@ -375,6 +397,23 @@ impl ProjectDbWorker {
 
     pub fn read_meta(&self) -> Result<ProjectMetaSnapshot, PersistenceError> {
         self.call(|reply| Job::ReadMeta { reply })
+    }
+
+    pub fn read_fields(&self, entry: EntryId) -> Result<EntryFields, PersistenceError> {
+        self.call(|reply| Job::ReadFields { entry, reply })
+    }
+    pub fn apply_fields(
+        &self,
+        entry: EntryId,
+        expected: i64,
+        command: FieldCommand,
+    ) -> Result<EntryFields, PersistenceError> {
+        self.call(|reply| Job::ApplyFields {
+            entry,
+            expected,
+            command,
+            reply,
+        })
     }
 
     pub fn rename_project(
@@ -1145,7 +1184,15 @@ mod tests {
         let db_path = dir.path().join("project.sqlite");
         let conn = Connection::open(&db_path).unwrap();
         conn.execute_batch(
-            "DROP TRIGGER entry_type_category_update;
+            "DROP TRIGGER field_category_restrict;
+             DROP TRIGGER field_type_restrict;
+             DROP TRIGGER field_entry_restrict;
+             DROP TABLE field_choice_value;
+             DROP TABLE field_value;
+             DROP TABLE choice_option;
+             DROP TABLE field_availability;
+             DROP TABLE field_definition;
+             DROP TRIGGER entry_type_category_update;
              DROP TRIGGER entry_type_category_insert;
              DROP TABLE entry;
              DROP TABLE record_identity;

@@ -6,6 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { AppErrorDto, Category, Entry, Preferences, ProjectSummary, TypeDef } from "./types";
+import type { EntryFields, FieldCommand } from "./types";
 
 export class AppCommandError extends Error {
   kind: string;
@@ -25,6 +26,18 @@ async function call<T>(command: string, args: Record<string, unknown>): Promise<
     }
     throw err;
   }
+}
+
+export function readFields(projectId: string, entryId: string): Promise<EntryFields> {
+  return call("read_fields", { projectId, entryId });
+}
+export function applyFields(
+  projectId: string,
+  entryId: string,
+  expectedRevision: number,
+  command: FieldCommand,
+): Promise<EntryFields> {
+  return call("apply_fields", { projectId, entryId, expectedRevision, command });
 }
 
 function isAppErrorDto(value: unknown): value is AppErrorDto {

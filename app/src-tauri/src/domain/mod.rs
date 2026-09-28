@@ -5,6 +5,7 @@
 //! SQLite, or the filesystem.
 
 pub mod error;
+pub mod fields;
 pub mod ids;
 pub mod structure;
 pub mod working_name;

@@ -39,6 +39,8 @@ macro_rules! stable_id {
 stable_id!(CategoryId, "Category");
 stable_id!(TypeId, "Type");
 stable_id!(EntryId, "Entry");
+stable_id!(FieldId, "Field");
+stable_id!(ChoiceOptionId, "Choice option");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Category {

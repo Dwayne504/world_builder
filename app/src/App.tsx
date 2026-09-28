@@ -28,6 +28,7 @@ import type { SubmitOutcome } from "./useProjectRename";
 import { useEntryName } from "./useEntryName";
 import { useMutationCoordinator } from "./useMutationCoordinator";
 import { decideClose, type CloseIntent } from "./closeDecision";
+import { EntryFieldsPanel, type FieldsController } from "./EntryFieldsPanel";
 
 function errorMessage(err: unknown): string {
   if (err instanceof AppCommandError) {
@@ -649,7 +650,22 @@ function EntryEditor({
   mutations: MutationCoordinator;
 }) {
   const editor = useEntryName(projectId, initialEntry);
-  const { submit } = editor;
+  const { submit: submitName } = editor;
+  const fieldsController = useRef<FieldsController | null>(null);
+  const [fieldsState, setFieldsState] = useState<SaveState>("saved");
+  const [fieldsCanSubmit, setFieldsCanSubmit] = useState(true);
+  const receiveFields = useCallback((controller: FieldsController) => {
+    fieldsController.current = controller;
+    setFieldsState(controller.state);
+    setFieldsCanSubmit(controller.canSubmit);
+  }, []);
+  const submit = useCallback(async (): Promise<SubmitOutcome> => {
+    const fieldOutcome = await (fieldsController.current?.submit() ??
+      Promise.resolve({ kind: "no-op" } as SubmitOutcome));
+    if (fieldOutcome.kind === "failed" || fieldOutcome.kind === "committed-stale")
+      return fieldOutcome;
+    return submitName();
+  }, [submitName]);
   const [types, setTypes] = useState<TypeDef[]>([]);
   const [categoryId, setCategoryId] = useState(editor.entry.categoryId);
   const [typeId, setTypeId] = useState(editor.entry.typeId ?? "");
@@ -660,17 +676,21 @@ function EntryEditor({
   const structureDirty =
     categoryId !== editor.entry.categoryId || typeId !== (editor.entry.typeId ?? "");
   const combinedEntryState: SaveState =
-    editor.saveState === "saving" || mutations.state === "saving"
+    editor.saveState === "saving" || mutations.state === "saving" || fieldsState === "saving"
       ? "saving"
-      : editor.saveState === "failed" || mutations.state === "failed"
+      : editor.saveState === "failed" || mutations.state === "failed" || fieldsState === "failed"
         ? "failed"
-        : editor.saveState === "dirty" || structureDirty
+        : editor.saveState === "dirty" || structureDirty || fieldsState === "dirty"
           ? "dirty"
           : "saved";
 
   useEffect(() => {
-    onController({ state: combinedEntryState, submit, canSubmit: !structureDirty });
-  }, [combinedEntryState, onController, structureDirty, submit]);
+    onController({
+      state: combinedEntryState,
+      submit,
+      canSubmit: !structureDirty && fieldsCanSubmit,
+    });
+  }, [combinedEntryState, onController, structureDirty, fieldsCanSubmit, submit]);
 
   useEffect(() => {
     onChangedRef.current(editor.entry);
@@ -801,6 +821,15 @@ function EntryEditor({
         <button onClick={onClose}>Back to Entries</button>
       </div>
       {structureError && <p role="alert">{structureError}</p>}
+      <EntryFieldsPanel
+        projectId={projectId}
+        entry={editor.entry}
+        disabled={mutations.state === "saving" || editor.saveState === "saving"}
+        onController={receiveFields}
+        onRevision={(revision) =>
+          onChangedRef.current({ ...editor.currentEntry(), globalRevision: revision })
+        }
+      />
     </section>
   );
 }
