@@ -308,11 +308,10 @@ to Home without exiting the application.
 
 ### Engineering spike notes affecting later slices
 
-* **Project locking is age-based, not PID-liveness-based.** Cross-platform
-  liveness checks for another process's PID are unreliable (especially over
-  network/cloud-synced filesystems), so a lock is only considered "stale"
-  after a fixed inactivity threshold; recovering a stale lock is always an
-  explicit, separate operation and is never automatic.
+* **The OS advisory lock is authoritative.** An active owner cannot be
+  taken over. Once the OS lock is free, readable leftover lock metadata
+  offers immediate explicit recovery, regardless of heartbeat age. There
+  is no 30-minute delay. Corrupt lock metadata is preserved and reported.
 * **`ProjectDbWorker` is a single dedicated OS thread per open Project**
   owning the one `rusqlite::Connection`, driven by a serialized job queue
   over `std::sync::mpsc` channels (no async pseudocode wrapping a shared
@@ -325,6 +324,29 @@ to Home without exiting the application.
   managed package directories alongside it, but does not compress the result
   into a `.wcbackup` archive; a compression step can be layered on later
   without changing the snapshot/validation contract.
-* **No file-picker dialogs are used yet.** The minimal UI takes filesystem
-  paths as plain text input to avoid adding a dialog plugin dependency before
-  it is genuinely needed.
+* **Native folder selection and application defaults are available.** Home
+  configures default Projects and Backups folders, stored outside packages
+  in the OS application-config directory. New defaults apply in the current
+  session while manual per-operation choices are preserved. Manual path
+  entry remains available. Changing defaults never moves existing data.
+
+### Preferences and location safety
+
+Configured folders must be absolute, accessible existing directories outside
+Project and backup packages. Operation destinations are checked again before
+creation, backup, or restore; write failures remain visible. New package names
+are sanitized by Rust, including Windows device names and extensions, and the
+UI previews that same path. Collisions are reported without overwriting or
+silently choosing another name. Backups are grouped under the Project ID.
+
+Preference reads, updates, recovery, and reset share a mutex and an OS file
+lock across app instances. Publication syncs and validates a `.next` file;
+where direct replacement fails, `.previous` preserves the prior file until
+the successor is published. Interrupted publication recovers a valid copy,
+while corrupt-only recovery files and I/O errors remain visible. Unsupported
+schema versions refuse updates and reset, including when other fields changed.
+An explicit corrupt-preferences reset preserves all existing publication files
+under unique diagnostic names before publishing defaults.
+
+For the PR #10 handoff audit, verification and manual checks, see
+[`docs/PR10_VERIFICATION.md`](docs/PR10_VERIFICATION.md).

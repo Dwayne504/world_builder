@@ -5,7 +5,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppErrorDto, Category, Entry, ProjectSummary, TypeDef } from "./types";
+import type { AppErrorDto, Category, Entry, Preferences, ProjectSummary, TypeDef } from "./types";
 
 export class AppCommandError extends Error {
   kind: string;
@@ -145,4 +145,35 @@ export function changeEntryStructure(
     typeId: typeId || null,
     expectedRevision,
   });
+}
+
+export function getPreferences(): Promise<Preferences> {
+  return call("get_preferences", {});
+}
+
+export function setDefaultProjectsDir(directory: string | null): Promise<Preferences> {
+  return call("set_default_projects_dir", { directory });
+}
+
+export function setDefaultBackupsDir(directory: string | null): Promise<Preferences> {
+  return call("set_default_backups_dir", { directory });
+}
+
+/** Explicit recovery from corrupt preferences; unsupported versions remain protected. */
+export function resetPreferences(): Promise<Preferences> {
+  return call("reset_preferences", {});
+}
+
+/**
+ * Previews the exact package path `createProject` would use, computed by
+ * the backend's authoritative sanitizer so the UI never maintains a
+ * second, potentially diverging one.
+ */
+export function previewPackagePath(baseDir: string, workingName: string): Promise<string> {
+  return call("preview_package_path", { baseDir, workingName });
+}
+
+/** Shows a native folder picker. Returns `null` if the user cancels. */
+export function pickDirectory(defaultPath?: string | null): Promise<string | null> {
+  return call("pick_directory", { defaultPath: defaultPath || null });
 }

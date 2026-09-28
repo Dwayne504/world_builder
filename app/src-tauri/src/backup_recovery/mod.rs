@@ -456,6 +456,10 @@ mod tests {
 
         let backup_root = dir.path().join("backups");
         let backup_path = create_backup(&worker, &p1_paths, &backup_root).unwrap();
+        assert_eq!(
+            backup_path.parent().unwrap(),
+            backup_root.join(p1_id.to_string())
+        );
         assert!(backup_path.join(package::layout::MANIFEST_FILE).is_file());
 
         let restore_dest = dir.path().join("restored");
