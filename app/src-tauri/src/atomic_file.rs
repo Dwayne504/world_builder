@@ -2,9 +2,8 @@
 //! every small JSON file this crate replaces in place (currently
 //! `manifest.json` and the application preferences file).
 //!
-//! `std::fs::rename` reliably replaces an existing destination file on
-//! POSIX, but **not** on Windows (`ERROR_ALREADY_EXISTS`). Nothing in this
-//! module claims otherwise: instead of relying on an atomic replace, a
+//! Direct replacement with `std::fs::rename` is attempted first. Where
+//! replacement fails (including Windows sharing/filesystem constraints), a
 //! successor is written and fsynced to a sibling `.next` file, validated by
 //! reading it back, and only then is any existing destination moved aside
 //! to a sibling `.previous` file immediately before the successor is
@@ -12,8 +11,7 @@
 //! recoverable states on disk: the original file untouched, a valid
 //! `.previous` plus a valid `.next`, or a valid `.previous` with the
 //! destination already replaced -- never a half-written destination.
-//! [`recover`] repairs the first two of those into a valid destination the
-//! next time the file is opened.
+//! [`recover`] repairs missing destinations the next time the file is opened.
 
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -44,8 +42,7 @@ fn sibling_with_suffix(path: &Path, suffix: &str) -> PathBuf {
 ///    disk; a validation failure removes the unpublished `.next` and
 ///    leaves `path` completely untouched.
 /// 3. Only after successful validation does it attempt to publish: a
-///    direct rename when `path` does not yet exist, or -- because that
-///    rename cannot replace an existing file on Windows -- moving the
+///    direct rename first, falling back where needed to moving the
 ///    existing `path` aside as `.previous` immediately before renaming
 ///    `.next` into place.
 /// 4. Best-effort `fsync`s the parent directory (ignored where the
@@ -71,7 +68,7 @@ pub fn publish(path: &Path, bytes: &[u8], validate: impl Fn(&[u8]) -> bool) -> i
     }
     if let Err(error) = fs::rename(&next, path) {
         if path.exists() {
-            // Windows: an existing destination must be moved aside before
+            // Fallback: an existing destination must be moved aside before
             // the successor can take its place. The prior file remains
             // fully recoverable as `.previous` throughout this step.
             let _ = fs::remove_file(&previous);
@@ -204,5 +201,16 @@ mod tests {
         assert!(err.is_err());
         assert_eq!(fs::read(&path).unwrap(), b"good");
         assert!(!next_path(&path).exists());
+    }
+
+    #[test]
+    fn failed_successor_creation_preserves_the_published_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        publish(&path, b"prior", always_valid).unwrap();
+        fs::create_dir(next_path(&path)).unwrap();
+        assert!(publish(&path, b"replacement", always_valid).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"prior");
+        assert!(next_path(&path).is_dir());
     }
 }

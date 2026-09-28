@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProjectSummary } from "./types";
+import type { Preferences, ProjectSummary } from "./types";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -1212,11 +1212,18 @@ describe("Home screen stale-lock recovery", () => {
 });
 
 describe("Home screen preferences and native pickers", () => {
+  const defaults: Preferences = {
+    defaultProjectsDir: null,
+    defaultProjectsDirExists: false,
+    defaultBackupsDir: null,
+    defaultBackupsDirExists: false,
+  };
   beforeEach(() => {
     getPreferencesMock.mockReset();
     pickDirectoryMock.mockReset();
     setDefaultProjectsDirMock.mockReset();
     setDefaultBackupsDirMock.mockReset();
+    resetPreferencesMock.mockReset();
     (createProject as ReturnType<typeof vi.fn>).mockReset();
     getPreferencesMock.mockResolvedValue({
       defaultProjectsDir: null,
@@ -1224,6 +1231,92 @@ describe("Home screen preferences and native pickers", () => {
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
     });
+  });
+
+  it("preserves manual input when the initial preferences request resolves late", async () => {
+    const pending = deferred<Preferences>();
+    getPreferencesMock.mockReturnValueOnce(pending.promise);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("new-project-location"), {
+      target: { value: "/manual" },
+    });
+    await act(async () =>
+      pending.resolve({
+        ...defaults,
+        defaultProjectsDir: "/default",
+        defaultProjectsDirExists: true,
+      }),
+    );
+    expect(screen.getByLabelText("new-project-location")).toHaveValue("/manual");
+  });
+
+  it("does not let an old initial load overwrite a newly selected default", async () => {
+    const pending = deferred<Preferences>();
+    getPreferencesMock.mockReturnValueOnce(pending.promise);
+    pickDirectoryMock.mockResolvedValueOnce("/new");
+    setDefaultProjectsDirMock.mockResolvedValueOnce({
+      ...defaults,
+      defaultProjectsDir: "/new",
+      defaultProjectsDirExists: true,
+    });
+    render(<App />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Choose…" })[0]);
+    await waitFor(() => expect(screen.getByLabelText("new-project-location")).toHaveValue("/new"));
+    await act(async () =>
+      pending.resolve({ ...defaults, defaultProjectsDir: "/old", defaultProjectsDirExists: true }),
+    );
+    expect(screen.getByLabelText("new-project-location")).toHaveValue("/new");
+  });
+
+  it("reports native chooser failures without changing the selected location", async () => {
+    pickDirectoryMock.mockRejectedValueOnce(new Error("Picker unavailable"));
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("new-project-location"), {
+      target: { value: "/manual" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Choose location…" }));
+    await screen.findByText("Picker unavailable");
+    expect(screen.getByLabelText("new-project-location")).toHaveValue("/manual");
+  });
+
+  it("uses a newly selected backup default when opening a Project in the same session", async () => {
+    const updated = { ...defaults, defaultBackupsDir: "/backups", defaultBackupsDirExists: true };
+    pickDirectoryMock.mockResolvedValueOnce("/backups");
+    setDefaultBackupsDirMock.mockResolvedValueOnce(updated);
+    render(<App />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Choose…" })[1]);
+    await screen.findByText("/backups");
+    getPreferencesMock.mockResolvedValue(updated);
+    openProjectMock.mockResolvedValueOnce(project);
+    fireEvent.change(screen.getByLabelText("open-project-path"), {
+      target: { value: project.packagePath },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("backup-destination")).toHaveValue("/backups"),
+    );
+  });
+
+  it("preserves a manual backup location against a delayed preference load", async () => {
+    const pending = deferred<Preferences>();
+    getPreferencesMock.mockResolvedValueOnce(defaults).mockReturnValueOnce(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.change(screen.getByLabelText("backup-destination"), { target: { value: "/manual" } });
+    await act(async () =>
+      pending.resolve({
+        ...defaults,
+        defaultBackupsDir: "/default",
+        defaultBackupsDirExists: true,
+      }),
+    );
+    expect(screen.getByLabelText("backup-destination")).toHaveValue("/manual");
+  });
+
+  it("warns about a missing configured Projects folder without using it", async () => {
+    getPreferencesMock.mockResolvedValueOnce({ ...defaults, defaultProjectsDir: "/missing" });
+    render(<App />);
+    await screen.findByText(/missing or inaccessible/);
+    expect(screen.getByLabelText("new-project-location")).toHaveValue("");
   });
 
   it("prefills the New Project location from a configured default Projects directory", async () => {
@@ -1311,6 +1404,7 @@ describe("Home screen preferences and native pickers", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     await waitFor(() => expect(setDefaultProjectsDirMock).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(screen.getByLabelText("new-project-location")).toHaveValue(""));
   });
 
   it("shows a plain-language warning for corrupt preferences and offers an explicit reset", async () => {
@@ -1349,11 +1443,9 @@ describe("Home screen preferences and native pickers", () => {
     await waitFor(() =>
       expect(screen.getByText(/different version of Worldcrafter/i)).toBeInTheDocument(),
     );
-    // Reset is still offered (it is safe: it never overwrites the evidence
-    // silently), but the warning itself must be visible, never swallowed.
     expect(
-      screen.getByRole("button", { name: "Reset application preferences" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Reset application preferences" }),
+    ).not.toBeInTheDocument();
   });
 
   it("reports a reset failure visibly instead of swallowing it", async () => {

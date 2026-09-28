@@ -45,15 +45,19 @@ impl Default for AppPreferences {
 /// been published yet -- this is the documented, intentional behavior
 /// until a real migration exists, rather than an accidental gap.
 fn parse_and_check_version(bytes: &[u8]) -> Result<AppPreferences, PreferencesError> {
-    let parsed: AppPreferences =
+    #[derive(Deserialize)]
+    struct Version {
+        schema_version: i64,
+    }
+    let version: Version =
         serde_json::from_slice(bytes).map_err(|e| PreferencesError::Corrupt(e.to_string()))?;
-    if parsed.schema_version != PREFERENCES_SCHEMA_VERSION {
+    if version.schema_version != PREFERENCES_SCHEMA_VERSION {
         return Err(PreferencesError::UnsupportedVersion {
-            found: parsed.schema_version,
+            found: version.schema_version,
             supported: PREFERENCES_SCHEMA_VERSION,
         });
     }
-    Ok(parsed)
+    serde_json::from_slice(bytes).map_err(|e| PreferencesError::Corrupt(e.to_string()))
 }
 
 /// Loads preferences from `path`, first repairing an interrupted
@@ -62,20 +66,50 @@ fn parse_and_check_version(bytes: &[u8]) -> Result<AppPreferences, PreferencesEr
 /// unsupported-schema-version file fails safely instead of being silently
 /// discarded, downgraded, or rewritten.
 pub fn load(path: &Path) -> Result<AppPreferences, PreferencesError> {
-    let _ = crate::atomic_file::recover(path, |bytes| parse_and_check_version(bytes).is_ok());
-    if !path.exists() {
-        return Ok(AppPreferences::default());
+    if let Some(raw) = read_optional(path)? {
+        return parse_and_check_version(&raw);
     }
-    let raw = fs::read(path)?;
-    parse_and_check_version(&raw)
+    let mut valid = None;
+    let mut corrupt = None;
+    for candidate in [
+        crate::atomic_file::next_path(path),
+        crate::atomic_file::previous_path(path),
+    ] {
+        if let Some(raw) = read_optional(&candidate)? {
+            match parse_and_check_version(&raw) {
+                Ok(prefs) => {
+                    if valid.is_none() {
+                        valid = Some((candidate, prefs));
+                    }
+                }
+                Err(error @ PreferencesError::UnsupportedVersion { .. }) => return Err(error),
+                Err(error) => corrupt = Some(error),
+            }
+        }
+    }
+    if let Some((candidate, prefs)) = valid {
+        fs::rename(candidate, path)?;
+        return Ok(prefs);
+    }
+    match corrupt {
+        Some(error) => Err(error),
+        None => Ok(AppPreferences::default()),
+    }
+}
+
+fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, PreferencesError> {
+    match fs::read(path) {
+        Ok(raw) => Ok(Some(raw)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Publishes `prefs` at `path` via the shared Windows-safe, recoverable
 /// publish protocol (see `crate::atomic_file`). This does not claim atomic
-/// replacement on every platform: `fs::rename` cannot replace an existing
-/// file on Windows, so the previous file is moved aside as `.previous`
-/// immediately before the validated successor is published, and cleaned
-/// up only after publication succeeds.
+/// replacement on every filesystem: if direct replacement fails, the old
+/// file is moved aside as `.previous` before the validated successor is
+/// published, and cleaned up only after publication succeeds.
 pub fn save(path: &Path, prefs: &AppPreferences) -> Result<(), PreferencesError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -88,14 +122,31 @@ pub fn save(path: &Path, prefs: &AppPreferences) -> Result<(), PreferencesError>
     .map_err(PreferencesError::Io)
 }
 
-/// Explicit, deliberate recovery from a corrupt or unsupported-version
+/// Explicit, deliberate recovery from corrupt
 /// preferences file: preserves the existing file untouched under a unique
 /// diagnostic filename (never overwriting earlier diagnostic evidence),
 /// then publishes fresh defaults. Never invoked automatically.
 pub fn reset(path: &Path) -> Result<AppPreferences, PreferencesError> {
-    if path.is_file() {
-        let diagnostic = diagnostic_backup_path(path);
-        fs::rename(path, &diagnostic)?;
+    let candidates = [
+        path.to_path_buf(),
+        crate::atomic_file::next_path(path),
+        crate::atomic_file::previous_path(path),
+    ];
+    // A newer schema may have changed all other fields: never downgrade it,
+    // even via reset, and never lose interrupted-publication evidence.
+    for candidate in &candidates {
+        if let Some(raw) = read_optional(candidate)? {
+            if let Err(error @ PreferencesError::UnsupportedVersion { .. }) =
+                parse_and_check_version(&raw)
+            {
+                return Err(error);
+            }
+        }
+    }
+    for candidate in &candidates {
+        if candidate.is_file() {
+            fs::rename(candidate, diagnostic_backup_path(candidate))?;
+        }
     }
     let defaults = AppPreferences::default();
     save(path, &defaults)?;
@@ -127,7 +178,7 @@ fn diagnostic_backup_path(path: &Path) -> PathBuf {
 /// become inaccessible, without ever silently falling back to a different
 /// location.
 pub fn directory_is_usable(path: &Path) -> bool {
-    path.is_dir()
+    validate_directory(path).is_ok()
 }
 
 /// Validates a directory *at the moment it is chosen* for a preference: it
@@ -135,19 +186,114 @@ pub fn directory_is_usable(path: &Path) -> bool {
 /// `directory_is_usable`, which only reports the state of an already
 /// configured value for display.
 pub fn validate_directory(path: &Path) -> Result<(), PreferencesError> {
-    if directory_is_usable(path) {
-        Ok(())
-    } else {
-        Err(PreferencesError::InvalidDirectory(
-            path.display().to_string(),
-        ))
+    let invalid = || PreferencesError::InvalidDirectory(path.display().to_string());
+    if !path.is_absolute() || !path.is_dir() {
+        return Err(invalid());
     }
+    let canonical = fs::canonicalize(path).map_err(|_| invalid())?;
+    if path
+        .ancestors()
+        .chain(canonical.ancestors())
+        .any(|ancestor| {
+            ancestor
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("wcproj") || ext.eq_ignore_ascii_case("wcbackup")
+                })
+        })
+    {
+        return Err(invalid());
+    }
+    fs::read_dir(&canonical).map_err(|_| invalid())?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn newer_shapes_and_interrupted_publications_fail_closed() {
+        for suffix in ["json", "json.next", "json.previous"] {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("preferences.json");
+            let candidate = path.with_extension(suffix);
+            let future = br#"{"schema_version":99,"default_projects_dir":{"new_shape":true}}"#;
+            fs::write(&candidate, future).unwrap();
+            assert!(matches!(
+                load(&path),
+                Err(PreferencesError::UnsupportedVersion { .. })
+            ));
+            assert!(matches!(
+                reset(&path),
+                Err(PreferencesError::UnsupportedVersion { .. })
+            ));
+            assert_eq!(fs::read(candidate).unwrap(), future);
+        }
+    }
+
+    #[test]
+    fn corrupt_recovery_files_are_visible_and_reset_preserves_all_evidence() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        fs::write(crate::atomic_file::next_path(&path), b"broken next").unwrap();
+        fs::write(crate::atomic_file::previous_path(&path), b"broken previous").unwrap();
+        assert!(matches!(load(&path), Err(PreferencesError::Corrupt(_))));
+        reset(&path).unwrap();
+        let evidence: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|p| p.to_string_lossy().contains(".corrupt-"))
+            .map(|p| fs::read(p).unwrap())
+            .collect();
+        assert!(evidence.contains(&b"broken next".to_vec()));
+        assert!(evidence.contains(&b"broken previous".to_vec()));
+        assert_eq!(load(&path).unwrap(), AppPreferences::default());
+    }
+
+    #[test]
+    fn recovery_io_errors_never_become_defaults() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        fs::create_dir(crate::atomic_file::next_path(&path)).unwrap();
+        assert!(matches!(load(&path), Err(PreferencesError::Io(_))));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn valid_recovery_copy_never_downgrades_an_unsupported_sibling() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let next = crate::atomic_file::next_path(&path);
+        let previous = crate::atomic_file::previous_path(&path);
+        fs::write(
+            &next,
+            serde_json::to_vec(&AppPreferences::default()).unwrap(),
+        )
+        .unwrap();
+        fs::write(&previous, br#"{"schema_version":99}"#).unwrap();
+        assert!(matches!(
+            load(&path),
+            Err(PreferencesError::UnsupportedVersion { .. })
+        ));
+        assert!(!path.exists());
+        assert!(next.is_file() && previous.is_file());
+    }
+
+    #[test]
+    fn directories_must_be_absolute_and_outside_packages() {
+        assert!(validate_directory(Path::new(".")).is_err());
+        let dir = tempdir().unwrap();
+        for package in ["Example.wcproj", "Example.WCBACKUP"] {
+            let nested = dir.path().join(package).join("assets");
+            fs::create_dir_all(&nested).unwrap();
+            assert!(validate_directory(&nested).is_err());
+            assert!(validate_directory(nested.parent().unwrap()).is_err());
+        }
+        assert!(validate_directory(dir.path()).is_ok());
+    }
 
     #[test]
     fn missing_file_loads_as_defaults() {

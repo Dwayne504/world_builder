@@ -159,7 +159,7 @@ export function setDefaultBackupsDir(directory: string | null): Promise<Preferen
   return call("set_default_backups_dir", { directory });
 }
 
-/** Explicit, user-initiated recovery from a corrupt/unsupported-version preferences file. */
+/** Explicit recovery from corrupt preferences; unsupported versions remain protected. */
 export function resetPreferences(): Promise<Preferences> {
   return call("reset_preferences", {});
 }

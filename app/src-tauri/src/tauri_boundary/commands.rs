@@ -62,6 +62,7 @@ pub fn create_project(
     base_dir: String,
     working_name: String,
 ) -> Result<ProjectSummaryDto, AppErrorDto> {
+    preferences::validate_directory(std::path::Path::new(&base_dir))?;
     ProjectService::create_project(&state, &PathBuf::from(base_dir), &working_name)
         .map(Into::into)
         .map_err(Into::into)
@@ -119,6 +120,7 @@ pub fn create_backup(
     backup_dir: String,
 ) -> Result<String, AppErrorDto> {
     let id = parse_project_id(&project_id)?;
+    preferences::validate_directory(std::path::Path::new(&backup_dir))?;
     ProjectService::create_backup(&state, id, &PathBuf::from(backup_dir))
         .map(|p| p.display().to_string())
         .map_err(Into::into)
@@ -131,6 +133,7 @@ pub fn restore_backup_as_copy(
     destination_dir: String,
     new_working_name: Option<String>,
 ) -> Result<ProjectSummaryDto, AppErrorDto> {
+    preferences::validate_directory(std::path::Path::new(&destination_dir))?;
     ProjectService::restore_backup_as_copy(
         &state,
         &PathBuf::from(backup_path),
@@ -325,8 +328,7 @@ pub fn set_default_backups_dir(
     Ok(prefs.into())
 }
 
-/// Explicit, user-initiated recovery from a corrupt or
-/// unsupported-schema-version preferences file. Never invoked
+/// Explicit, user-initiated recovery from a corrupt preferences file. Never invoked
 /// automatically; the prior file is preserved under a diagnostic filename
 /// by `preferences::reset` before defaults are written.
 #[tauri::command]
@@ -351,13 +353,20 @@ pub fn preview_package_path(base_dir: String, working_name: String) -> String {
 /// Returns `None` when the user cancels the dialog; this is never treated
 /// as an error.
 #[tauri::command]
-pub fn pick_directory(app: AppHandle, default_path: Option<String>) -> Option<String> {
-    let mut builder = app.dialog().file();
-    if let Some(path) = default_path.filter(|p| !p.is_empty()) {
-        builder = builder.set_directory(path);
-    }
-    builder
-        .blocking_pick_folder()
-        .and_then(|picked| picked.into_path().ok())
-        .map(|p| p.display().to_string())
+pub async fn pick_directory(
+    app: AppHandle,
+    default_path: Option<String>,
+) -> Result<Option<String>, AppErrorDto> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut builder = app.dialog().file();
+        if let Some(path) = default_path.filter(|p| !p.is_empty()) {
+            builder = builder.set_directory(path);
+        }
+        builder
+            .blocking_pick_folder()
+            .and_then(|picked| picked.into_path().ok())
+            .map(|p| p.display().to_string())
+    })
+    .await
+    .map_err(|error| invalid_input(error.to_string()))
 }

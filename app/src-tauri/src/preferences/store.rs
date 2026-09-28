@@ -3,6 +3,7 @@
 //! Backups directories at nearly the same time) are serialized into a
 //! read-modify-write instead of racing and silently losing one change.
 
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -14,6 +15,21 @@ pub struct PreferencesStore {
 }
 
 impl PreferencesStore {
+    // Keep the lock inode/file in place. Closing the handle releases the OS
+    // lock, including after a crash. Separate app processes share this lock.
+    fn file_lock(&self) -> Result<File, PreferencesError> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.path.with_extension("json.lock"))?;
+        file.lock()?;
+        Ok(file)
+    }
     pub fn new(path: impl Into<PathBuf>) -> Self {
         PreferencesStore {
             path: path.into(),
@@ -30,6 +46,7 @@ impl PreferencesStore {
             .lock
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _file = self.file_lock()?;
         load(&self.path)
     }
 
@@ -46,6 +63,7 @@ impl PreferencesStore {
             .lock
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _file = self.file_lock()?;
         let mut prefs = load(&self.path)?;
         mutate(&mut prefs);
         save(&self.path, &prefs)?;
@@ -57,6 +75,7 @@ impl PreferencesStore {
             .lock
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _file = self.file_lock()?;
         reset(&self.path)
     }
 }
@@ -85,7 +104,7 @@ mod tests {
                 .unwrap();
         });
 
-        let store_b = store.clone();
+        let store_b = Arc::new(PreferencesStore::new(store.path()));
         let barrier_b = barrier.clone();
         let backups_dir = dir.path().join("Backups");
         fs_create(&backups_dir);
@@ -112,5 +131,18 @@ mod tests {
 
     fn fs_create(path: &Path) {
         std::fs::create_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn updates_preserve_corrupt_and_newer_files() {
+        let dir = tempdir().unwrap();
+        let store = PreferencesStore::new(dir.path().join("preferences.json"));
+        for bytes in [b"broken".as_slice(), br#"{"schema_version":99}"#.as_slice()] {
+            std::fs::write(store.path(), bytes).unwrap();
+            assert!(store
+                .update(|prefs| prefs.default_backups_dir = Some(dir.path().into()))
+                .is_err());
+            assert_eq!(std::fs::read(store.path()).unwrap(), bytes);
+        }
     }
 }

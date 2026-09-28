@@ -12,6 +12,6 @@ pub enum PreferencesError {
     UnsupportedVersion { found: i64, supported: i64 },
     #[error("could not determine the application configuration directory: {0}")]
     NoConfigDir(String),
-    #[error("'{0}' does not exist or is not a directory")]
+    #[error("'{0}' must be an absolute, accessible existing directory outside Project and backup packages")]
     InvalidDirectory(String),
 }
