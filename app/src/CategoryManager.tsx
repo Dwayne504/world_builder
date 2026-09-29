@@ -1,3 +1,6 @@
+import { FieldSuggestions } from "./FieldSuggestions";
+import { FieldMergeReview } from "./FieldMergeReview";
+import { fieldLabel } from "./fieldLabels";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyTemplateFields,
@@ -57,7 +60,8 @@ export function CategoryManager({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState<"category" | "type" | "field" | "reuse" | null>(null);
+  const [form, setForm] = useState<"category" | "type" | "field" | "reuse" | "merge" | null>(null);
+  const [mergeBackup, setMergeBackup] = useState<string | null>(null);
   const pending = useRef<Promise<SubmitOutcome> | null>(null);
   const generation = useRef(0);
   const changedRef = useRef(onChanged);
@@ -207,6 +211,14 @@ export function CategoryManager({
           Organize your world. Choose a Category to manage its Types and the optional Fields that
           appear on its Entries.
         </p>
+        <button disabled={busy || dirty || loading || !catalog} onClick={() => setForm("merge")}>
+          Combine duplicate fields
+        </button>
+        {mergeBackup && (
+          <p role="status">
+            Fields combined. Recovery backup: <span className="package-preview">{mergeBackup}</span>
+          </p>
+        )}
         {!form && formFeedback}
         {!form && dirty && (
           <p className="field-note">
@@ -483,6 +495,11 @@ export function CategoryManager({
               />
             </label>
           )}
+          <FieldSuggestions
+            definitions={definitions}
+            name={fieldName}
+            onReuse={(d) => apply({ kind: "bind", fieldId: d.id, provider })}
+          />
           <button
             disabled={!fieldName.trim()}
             onClick={() =>
@@ -505,6 +522,30 @@ export function CategoryManager({
         </fieldset>
         {cancelButton}
       </Dialog>
+      <Dialog
+        open={open && form === "merge"}
+        title="Combine duplicate fields"
+        onClose={dismissForm}
+        className="category-dialog"
+      >
+        {form === "merge" && (
+          <>
+            {formFeedback}
+            <FieldMergeReview
+              projectId={projectId}
+              definitions={definitions}
+              disabled={busy || loading || dirty}
+              onCommit={(action) =>
+                perform(async () => {
+                  const result = await action();
+                  setMergeBackup(result.backupPath);
+                  return result;
+                })
+              }
+            />
+          </>
+        )}
+      </Dialog>
       <Dialog open={open && form === "reuse"} title="Reuse field" onClose={dismissForm}>
         <p>Use the same Field definition for {targetLabel} Entries.</p>
         {form === "reuse" && formFeedback}
@@ -521,11 +562,7 @@ export function CategoryManager({
               .filter((d) => !d.retired && !supplied.some((s) => s.id === d.id))
               .map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.name}
-                  {d.unit ? ` (${d.unit})` : ""} · {kinds[d.kind]}
-                  {definitions.filter((other) => other.name === d.name).length > 1
-                    ? ` · ${d.id.slice(-8)}`
-                    : ""}
+                  {fieldLabel(d, definitions)}
                 </option>
               ))}
           </select>

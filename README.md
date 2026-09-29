@@ -400,3 +400,28 @@ under unique diagnostic names before publishing defaults.
 
 For the PR #10 handoff audit, verification and manual checks, see
 [`docs/PR10_VERIFICATION.md`](docs/PR10_VERIFICATION.md).
+
+
+### Appearance and duplicate Fields
+
+**Appearance** on the opening screen or Project toolbar switches between
+**Storybook** (parchment and leather) and **Starship** (dark panels and brushed
+metal). This choice stays in app preferences across restarts. Custom colors
+remain deferred.
+
+Click anywhere in a numeric Field's outlined quantity control to edit the
+number; its unit stays alongside it. **Close Project** is now in **Project
+settings**.
+
+When adding a Field/default, reuse a same-name definition when it represents the
+same fact. To repair existing duplicates, open **Categories → Combine duplicate
+fields**, choose the definition to keep, review the values and combined defaults,
+and choose a recovery-backup folder. Conflicting values or different units block
+the merge. Restore the generated backup as a copy to undo a merge. Choice-option
+mapping is deferred, so Choice and Multi-choice duplicates cannot yet be merged.
+
+**Manage fields → Remove field from new use** exposes the existing reversible
+retirement operation. It keeps filled-in values; the definition can be restored.
+Type removal remains pending a product decision.
+
+See [the implementation and verification notes](docs/milestones/MILESTONE_01_APPEARANCE_AND_FIELD_MERGE.md).

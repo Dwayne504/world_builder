@@ -499,3 +499,121 @@ fn set_value(
     }
     Ok(())
 }
+
+/// Preview includes empty Entries whose available definitions will change, as
+/// well as authored values retained after template detachment/retirement.
+pub(super) fn preview_merge(
+    conn: &Connection,
+    source: FieldId,
+    target: FieldId,
+) -> Result<FieldMergePreview, PersistenceError> {
+    if source == target {
+        return Err(invalid("Choose two different Fields"));
+    }
+    let snapshot = read_snapshot(conn, None)?;
+    let source = definition(&snapshot, source)?.clone();
+    let target = definition(&snapshot, target)?.clone();
+    let mut blockers = Vec::new();
+    if source.name.trim().to_lowercase() != target.name.trim().to_lowercase() {
+        blockers.push("Only same-name duplicates can be merged. Rename deliberately before reviewing a merge.".into());
+    }
+    if source.kind != target.kind || source.unit != target.unit {
+        blockers.push(
+            "The Field kinds and units must match exactly. No conversion is performed.".into(),
+        );
+    }
+    if matches!(source.kind, FieldKind::Choice | FieldKind::MultiChoice)
+        || matches!(target.kind, FieldKind::Choice | FieldKind::MultiChoice)
+    {
+        blockers.push(
+            "Choice Fields need an option-mapping review, which is not available yet.".into(),
+        );
+    }
+    if source.retired || target.retired {
+        blockers.push("Restore both Fields before merging them.".into());
+    }
+    let mut statement = conn.prepare("SELECT id, COALESCE(authored_name,'[Unnamed Entry]') FROM entry ORDER BY authored_name COLLATE NOCASE, id")?;
+    let rows = statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut entries = Vec::new();
+    for row in rows {
+        let (id, name) = row?;
+        let entry = EntryId::parse(&id).map_err(invalid)?;
+        let fields = read_snapshot(conn, Some(entry))?;
+        let src = fields.fields.iter().find(|f| f.definition.id == source.id);
+        let dst = fields.fields.iter().find(|f| f.definition.id == target.id);
+        if src.is_none() && dst.is_none() {
+            continue;
+        }
+        let source_value = src.and_then(|f| f.value.clone());
+        let target_value = dst.and_then(|f| f.value.clone());
+        let conflict =
+            source_value.is_some() && target_value.is_some() && source_value != target_value;
+        entries.push(FieldMergeEntry {
+            entry_id: entry,
+            name,
+            source_value,
+            target_value,
+            conflict,
+        });
+    }
+    if entries.iter().any(|e| e.conflict) {
+        blockers.push("Some Entries have different values. Review and resolve them before merging; neither value will be chosen automatically.".into());
+    }
+    Ok(FieldMergePreview {
+        global_revision: snapshot.global_revision,
+        source,
+        target,
+        entries,
+        blockers,
+    })
+}
+
+pub(super) fn merge(
+    conn: &mut Connection,
+    source: FieldId,
+    target: FieldId,
+    expected: i64,
+) -> Result<i64, PersistenceError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let preview = preview_merge(&tx, source, target)?;
+    if preview.global_revision != expected {
+        return Err(PersistenceError::StaleRevision {
+            expected,
+            current: preview.global_revision,
+        });
+    }
+    if !preview.blockers.is_empty() {
+        return Err(invalid(preview.blockers.join(" ")));
+    }
+    let now = Utc::now().to_rfc3339();
+    // Equal overlaps collapse only after explicit review and the service's
+    // recovery backup. Non-overlapping value IDs and creation dates survive.
+    for entry in &preview.entries {
+        if entry.source_value.is_none() {
+            continue;
+        }
+        if entry.target_value.is_some() {
+            tx.execute(
+                "DELETE FROM field_value WHERE entry_id=?1 AND field_id=?2",
+                params![entry.entry_id.to_string(), source.to_string()],
+            )?;
+        } else {
+            tx.execute("UPDATE field_value SET field_id=?1, updated_at=?2, revision=revision+1 WHERE entry_id=?3 AND field_id=?4", params![target.to_string(), now, entry.entry_id.to_string(), source.to_string()])?;
+        }
+    }
+    for binding in &preview.source.bindings {
+        bind(&tx, target, &binding.provider)?;
+    }
+    tx.execute(
+        "DELETE FROM field_availability WHERE field_id=?1",
+        [source.to_string()],
+    )?;
+    tx.execute(
+        "DELETE FROM field_definition WHERE id=?1",
+        [source.to_string()],
+    )?;
+    touch(&tx, target, &now)?;
+    tx.execute("UPDATE project_meta SET last_committed_revision=last_committed_revision+1, updated_at=?1 WHERE id=1", [now])?;
+    tx.commit()?;
+    Ok(expected + 1)
+}

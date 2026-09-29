@@ -165,3 +165,21 @@ export interface FieldCatalog {
   globalRevision: number;
   definitions: FieldDefinition[];
 }
+
+export interface FieldMergePreview {
+  globalRevision: number;
+  source: FieldDefinition;
+  target: FieldDefinition;
+  entries: {
+    entryId: string;
+    name: string;
+    sourceValue: FieldValue | null;
+    targetValue: FieldValue | null;
+    conflict: boolean;
+  }[];
+  blockers: string[];
+}
+export interface FieldMergeOutcome {
+  globalRevision: number;
+  backupPath: string;
+}

@@ -1,3 +1,5 @@
+import { FieldSuggestions } from "./FieldSuggestions";
+import { fieldLabel } from "./fieldLabels";
 import { useCallback, useEffect, useId, useState } from "react";
 import type { Entry, EntryField, FieldCommand, FieldKind, FieldProvider, SaveState } from "./types";
 import type { SubmitOutcome } from "./useProjectRename";
@@ -86,14 +88,14 @@ function ValueInput({
     />
   );
   return numeric ? (
-    <div className="number-value">
+    <label className="number-value">
       {input}
       {field.definition.unit && (
         <span id={unitId} className="field-unit">
           {field.definition.unit}
         </span>
       )}
-    </div>
+    </label>
   ) : (
     input
   );
@@ -414,6 +416,23 @@ export function EntryFieldsPanel({
               )}
             </label>
           )}
+          <FieldSuggestions
+            definitions={fields.snapshot?.definitions ?? []}
+            name={newName}
+            disabled={!!String(newValue) || !!newOptions}
+            onReuse={(d) =>
+              void configure(
+                { kind: "bind", fieldId: d.id, provider: provider(newScope) },
+                cancelNew,
+              )
+            }
+          />
+          {!!String(newValue) && (
+            <p className="field-note">
+              To reuse an existing Field, clear the initial value first, then fill it in on this
+              Entry.
+            </p>
+          )}
           <div className="row">
             <button
               disabled={!newName.trim() || (newScope === "type" && !entry.typeId)}
@@ -428,7 +447,7 @@ export function EntryFieldsPanel({
       <Dialog open={manageOpen} title="Manage fields" onClose={() => setManageOpen(false)}>
         <p>
           Definition changes affect every Entry using that field. Detaching or retiring preserves
-          existing values.
+          existing values. To combine duplicates, open Categories → Combine duplicate fields.
         </p>
         {manageOpen && (fields.error || formError) && (
           <p role="alert" className="error-banner">
@@ -450,14 +469,21 @@ export function EntryFieldsPanel({
           }}
         >
           <option value="">Choose a definition</option>
-          {fields.snapshot?.definitions.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-              {d.retired ? " (retired)" : ""}
-              {fields.snapshot!.definitions.filter((other) => other.name === d.name).length > 1
-                ? ` · ${kinds[d.kind]} · ${d.id.slice(-8)}`
-                : ""}
-            </option>
+          {[true, false].map((onEntry) => (
+            <optgroup
+              key={String(onEntry)}
+              label={onEntry ? "Fields on this Entry" : "Other project fields"}
+            >
+              {fields.snapshot?.definitions
+                .filter(
+                  (d) => fields.snapshot!.fields.some((f) => f.definition.id === d.id) === onEntry,
+                )
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {fieldLabel(d, fields.snapshot!.definitions)}
+                  </option>
+                ))}
+            </optgroup>
           ))}
         </select>
         {selected && (
@@ -491,6 +517,10 @@ export function EntryFieldsPanel({
             >
               Cancel definition edits
             </button>
+            <p className="field-note">
+              Removing a Field from new use retires it across this Project. Filled-in values stay
+              visible and editable; you can restore the Field here.
+            </p>
             <div className="row">
               <button
                 disabled={!!renamed || !!optionLabel}
@@ -502,7 +532,7 @@ export function EntryFieldsPanel({
                   })
                 }
               >
-                {selected.retired ? "Restore field definition" : "Retire field definition"}
+                {selected.retired ? "Restore field definition" : "Remove field from new use"}
               </button>
               {(["entry", "category", "type"] as const)
                 .filter((kind) => kind !== "type" || entry.typeId)

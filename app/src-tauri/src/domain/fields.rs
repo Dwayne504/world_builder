@@ -184,3 +184,30 @@ impl From<EntryFields> for FieldCatalog {
         }
     }
 }
+
+/// A reviewed, project-wide merge. Values and availability are assessed by IDs,
+/// never silently coalesced because two visible names happen to match.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldMergeEntry {
+    pub entry_id: super::structure::EntryId,
+    pub name: String,
+    pub source_value: Option<FieldValue>,
+    pub target_value: Option<FieldValue>,
+    pub conflict: bool,
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldMergePreview {
+    pub global_revision: i64,
+    pub source: FieldDefinition,
+    pub target: FieldDefinition,
+    pub entries: Vec<FieldMergeEntry>,
+    pub blockers: Vec<String>,
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldMergeOutcome {
+    pub global_revision: i64,
+    pub backup_path: String,
+}

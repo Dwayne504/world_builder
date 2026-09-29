@@ -38,6 +38,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             tauri_boundary::read_relationships,
             tauri_boundary::apply_relationships,
+            tauri_boundary::preview_field_merge,
+            tauri_boundary::merge_fields,
             tauri_boundary::read_field_catalog,
             tauri_boundary::apply_template_fields,
             tauri_boundary::read_fields,
@@ -58,6 +60,8 @@ pub fn run() {
             tauri_boundary::get_entry,
             tauri_boundary::update_entry_name,
             tauri_boundary::change_entry_structure,
+            tauri_boundary::get_appearance,
+            tauri_boundary::set_appearance,
             tauri_boundary::get_preferences,
             tauri_boundary::set_default_projects_dir,
             tauri_boundary::set_default_backups_dir,

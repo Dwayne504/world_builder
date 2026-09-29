@@ -214,3 +214,28 @@ export function applyTemplateFields(
 ): Promise<FieldCatalog> {
   return call("apply_template_fields", { projectId, expectedRevision, command });
 }
+
+export type Appearance = "storybook" | "starship";
+export function getAppearance(): Promise<Appearance> {
+  return call("get_appearance", {});
+}
+export function setAppearance(appearance: Appearance): Promise<Appearance> {
+  return call("set_appearance", { appearance });
+}
+
+export function previewFieldMerge(
+  projectId: string,
+  sourceId: string,
+  targetId: string,
+): Promise<import("./types").FieldMergePreview> {
+  return call("preview_field_merge", { projectId, sourceId, targetId });
+}
+export function mergeFields(
+  projectId: string,
+  sourceId: string,
+  targetId: string,
+  expectedRevision: number,
+  backupDir: string,
+): Promise<import("./types").FieldMergeOutcome> {
+  return call("merge_fields", { projectId, sourceId, targetId, expectedRevision, backupDir });
+}
