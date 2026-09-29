@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import type { Entry, EntryField, FieldCommand, FieldKind, FieldProvider, SaveState } from "./types";
 import type { SubmitOutcome } from "./useProjectRename";
 import { parseFieldDraft, useEntryFields, valueDraft, type FieldDraft } from "./useEntryFields";
@@ -31,6 +31,7 @@ function ValueInput({
   onBlur?: () => void;
 }) {
   const label = `Value: ${field.definition.name}`;
+  const unitId = useId();
   const selected = Array.isArray(draft) ? draft : draft ? [draft] : [];
   if (field.definition.kind === "boolean")
     return (
@@ -71,15 +72,30 @@ function ValueInput({
         ))}
       </select>
     );
-  return (
+  const numeric = field.definition.kind === "number";
+  const input = (
     <input
       aria-label={label}
+      aria-describedby={field.definition.unit ? unitId : undefined}
       disabled={disabled}
       value={String(draft)}
-      inputMode={field.definition.kind === "number" ? "decimal" : "text"}
+      inputMode={numeric ? "decimal" : "text"}
+      style={numeric ? { width: `${Math.max(2, String(draft).length + 1)}ch` } : undefined}
       onChange={(e) => onChange(e.target.value)}
       onBlur={onBlur}
     />
+  );
+  return numeric ? (
+    <div className="number-value">
+      {input}
+      {field.definition.unit && (
+        <span id={unitId} className="field-unit">
+          {field.definition.unit}
+        </span>
+      )}
+    </div>
+  ) : (
+    input
   );
 }
 
@@ -108,6 +124,7 @@ export function EntryFieldsPanel({
     getRevision,
   );
   const [manageOpen, setManageOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const { submit: submitValues } = fields;
   const [newName, setNewName] = useState("");
   const [newUnit, setNewUnit] = useState("");
@@ -160,6 +177,7 @@ export function EntryFieldsPanel({
     if (result.kind === "committed") onSaved?.();
   }
   function cancelNew() {
+    setCreateOpen(false);
     setNewName("");
     setNewUnit("");
     setNewValue("");
@@ -211,15 +229,27 @@ export function EntryFieldsPanel({
           <h3>Fields</h3>
           <p className="muted">Add only what helps tell this Entry's story.</p>
         </div>
-        <button className="quiet-button" onClick={() => setManageOpen(true)}>
-          Manage fields
-        </button>
+        <div className="row">
+          <button
+            disabled={configDisabled || !!renamed || !!optionLabel}
+            onClick={() => setCreateOpen(true)}
+          >
+            Add field
+          </button>
+          <button
+            className="quiet-button"
+            disabled={!!newName || !!String(newValue) || !!newOptions || !!newUnit}
+            onClick={() => setManageOpen(true)}
+          >
+            Manage fields
+          </button>
+        </div>
       </div>
       {!fields.snapshot && !fields.error && <p role="status">Loading fields…</p>}
-      {!manageOpen && (fields.error || formError) && (
+      {!manageOpen && !createOpen && (fields.error || formError) && (
         <p role="alert">{fields.error || formError}</p>
       )}
-      {!manageOpen && fields.error && (
+      {!manageOpen && !createOpen && fields.error && (
         <button disabled={busy} onClick={() => void fields.reload()}>
           Reload fields (keep drafts)
         </button>
@@ -240,47 +270,59 @@ export function EntryFieldsPanel({
           </button>
         </p>
       )}
-      {fields.snapshot?.fields.map((field) => (
-        <div className="field-value" key={field.definition.id}>
-          <label>
-            {field.definition.name} <small>({kinds[field.definition.kind]})</small>
-          </label>
-          {!field.available && (
-            <p className="field-note">
-              {field.definition.retired
-                ? "Retired field — authored value retained."
-                : "Detached from the current templates — authored value retained."}
-            </p>
-          )}
-          <ValueInput
-            field={field}
-            draft={fields.drafts[field.definition.id] ?? valueDraft(field.value)}
-            disabled={disabled || formDirty}
-            onChange={(draft) => fields.change(field.definition.id, draft)}
-            onBlur={() => void fields.submit()}
-          />
-          {field.definition.unit && <p className="field-unit">Unit: {field.definition.unit}</p>}
-          {(field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
-            <button
-              className="quiet-button clear-field"
-              aria-label={`Clear value: ${field.definition.name}`}
+      {!createOpen && (newName || String(newValue) || newOptions || newUnit) && (
+        <p className="field-note">
+          You have an unfinished Field.{" "}
+          <button className="quiet-button" onClick={() => setCreateOpen(true)}>
+            Continue Field draft
+          </button>
+        </p>
+      )}
+      <div className="field-grid">
+        {fields.snapshot?.fields.map((field) => (
+          <div className="field-value" key={field.definition.id}>
+            <label>{field.definition.name}</label>
+            {!field.available && (
+              <p className="field-note">
+                {field.definition.retired
+                  ? "Retired field — authored value retained."
+                  : "Detached from the current templates — authored value retained."}
+              </p>
+            )}
+            <ValueInput
+              field={field}
+              draft={fields.drafts[field.definition.id] ?? valueDraft(field.value)}
               disabled={disabled || formDirty}
-              onClick={() => fields.change(field.definition.id, "")}
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      ))}
-      <details className="disclosure add-field">
-        <summary>
-          Add a field{newName || String(newValue) || newOptions ? " · unfinished" : ""}
-        </summary>
+              onChange={(draft) => fields.change(field.definition.id, draft)}
+              onBlur={() => void fields.submit()}
+            />
+            {(field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
+              <button
+                className="quiet-button clear-field"
+                aria-label={`Clear value: ${field.definition.name}`}
+                disabled={disabled || formDirty}
+                onClick={() => fields.change(field.definition.id, "")}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <Dialog open={createOpen} title="Add field" onClose={() => setCreateOpen(false)}>
+        <p>Create an optional Field for this Entry, or share it with its Category or Type.</p>
+        {createOpen && (fields.error || formError) && (
+          <p role="alert">{fields.error || formError}</p>
+        )}
+        {createOpen && fields.error && (
+          <button disabled={busy} onClick={() => void fields.reload()}>
+            Reload fields (keep drafts)
+          </button>
+        )}
         <fieldset
           disabled={configDisabled || !!renamed || !!optionLabel}
           className="inline-creator"
         >
-          <legend>Add a field</legend>
           <label>
             Field name
             <input
@@ -377,12 +419,12 @@ export function EntryFieldsPanel({
               disabled={!newName.trim() || (newScope === "type" && !entry.typeId)}
               onClick={() => void create()}
             >
-              Add field
+              Create field
             </button>
             <button onClick={cancelNew}>Cancel new field</button>
           </div>
         </fieldset>
-      </details>
+      </Dialog>
       <Dialog open={manageOpen} title="Manage fields" onClose={() => setManageOpen(false)}>
         <p>
           Definition changes affect every Entry using that field. Detaching or retiring preserves

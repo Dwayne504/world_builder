@@ -1,5 +1,9 @@
 # Milestone 01 — Workspace UI cleanup
 
+This records the PR #12 layout. PR #15's [sketchbook UI pass](MILESTONE_01_SKETCHBOOK_UI.md)
+supersedes the visual theme, Entry title row, and creation disclosures while
+retaining the save/draft protections described here.
+
 This follows merged PR #11 and the user's request to reduce clutter. It applies
 Concept V0.02's simple authoring path and the Home/editor/configuration separation
 in Milestone 01 §§24–25. It reorganizes existing functionality without changing

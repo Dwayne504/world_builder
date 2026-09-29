@@ -332,6 +332,14 @@ Relationship notes and Field value controls remain usable during their own
 autosaves. See the [Category defaults and units note](docs/milestones/MILESTONE_01_CATEGORY_TEMPLATES_AND_UNITS.md)
 for preservation rules, verification, remaining work, and the Windows checklist.
 
+The workspace now uses the window width and a light sketchbook palette with
+subtle browned edges. Edit an Entry's title directly at the top; its Category
+and optional Type provide context. Numeric units follow their values, and
+**Add Entry**, **Add field**, and the Category manager's creation buttons open
+consistent dialogs that retain unfinished drafts. See the
+[sketchbook UI note](docs/milestones/MILESTONE_01_SKETCHBOOK_UI.md) for scope,
+accessibility checks, and the Windows review checklist.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
 Capabilities, relationship-backed Fields and advanced relationship constraints,

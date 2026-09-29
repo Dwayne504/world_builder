@@ -141,6 +141,10 @@ async function openTheProjectScreen() {
 }
 
 function visibleInput(label: string) {
+  if (label.startsWith("new-field-") && !screen.queryByRole("dialog", { name: "Add field" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+  if (label.startsWith("new-entry-") && !screen.queryByRole("dialog", { name: "Add Entry" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
   if (label === "entry-category" || label === "entry-type")
     fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
   if (label === "project-working-name")
@@ -263,6 +267,102 @@ describe("Project screen Saved contract", () => {
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
+  it("edits the title in place with committed Category and Type context", async () => {
+    const entry = mockEditableEntry();
+    const pending = deferred<typeof entry>();
+    updateEntryNameMock.mockReturnValueOnce(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    const title = screen.getByLabelText("entry-name");
+    expect(title.closest("h2")).toBe(screen.getByRole("heading", { name: "Thron" }));
+    expect(screen.queryByText("Name (optional)")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Characters", { selector: ".entry-title-block .eyebrow" }),
+    ).toBeVisible();
+    expect(await screen.findByText("Human", { selector: ".entry-type" })).toBeVisible();
+    title.focus();
+    fireEvent.change(title, { target: { value: "Thron II" } });
+    fireEvent.keyDown(title, { key: "Enter" });
+    await waitFor(() =>
+      expect(updateEntryNameMock).toHaveBeenCalledWith(project.projectId, "entry", "Thron II", 1),
+    );
+    expect(title).toBeEnabled();
+    expect(title).toHaveFocus();
+    fireEvent.change(title, { target: { value: "Thron III" } });
+    await act(async () =>
+      pending.resolve({
+        ...entry,
+        authoredName: "Thron II",
+        displayName: "Thron II",
+        revision: 2,
+        globalRevision: 2,
+      }),
+    );
+    expect(title).toHaveValue("Thron III");
+    expect(title).toHaveFocus();
+    updateEntryNameMock.mockResolvedValueOnce({
+      ...entry,
+      authoredName: "Thron III",
+      displayName: "Thron III",
+      revision: 3,
+      globalRevision: 3,
+    });
+    fireEvent.keyDown(title, { key: "Enter" });
+    await waitFor(() => expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saved"));
+    fireEvent.change(visibleInput("entry-category"), { target: { value: "places" } });
+    expect(
+      screen.getByText("Characters", { selector: ".entry-title-block .eyebrow" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Human", { selector: ".entry-type" })).toBeInTheDocument();
+  });
+
+  it("preserves a failed title draft and supports an unnamed title without a second name row", async () => {
+    const entry = mockEditableEntry();
+    updateEntryNameMock.mockRejectedValueOnce(new Error("Title save failed"));
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    const title = screen.getByLabelText("entry-name");
+    fireEvent.change(title, { target: { value: "" } });
+    await act(async () => fireEvent.keyDown(title, { key: "Enter" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Title save failed");
+    expect(title).toHaveValue("");
+    expect(title).toHaveAttribute("placeholder", "[Unnamed Entry]");
+    updateEntryNameMock.mockResolvedValueOnce({
+      ...entry,
+      authoredName: null,
+      displayName: "[Unnamed Entry]",
+      revision: 2,
+    });
+    fireEvent.keyDown(title, { key: "Enter" });
+    await waitFor(() => expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saved"));
+    expect(screen.getByRole("heading", { name: "[Unnamed Entry]" })).toContainElement(title);
+  });
+
+  it("retains a dismissed Entry creation draft and protects native close", async () => {
+    enableTauriWindow();
+    await openTheProjectScreen();
+    expect(screen.getByLabelText("new-entry-name")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
+    fireEvent.change(screen.getByLabelText("new-entry-name"), {
+      target: { value: "A new world idea" },
+    });
+    fireEvent(
+      screen.getByRole("dialog", { name: "Add Entry" }),
+      new Event("cancel", { cancelable: true }),
+    );
+    expect(screen.getByRole("button", { name: "Continue Entry draft" })).toBeVisible();
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Save and close" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Before you leave" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue Entry draft" }));
+    expect(screen.getByLabelText("new-entry-name")).toHaveValue("A new world idea");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel new Entry" }));
+    expect(screen.queryByRole("dialog", { name: "Add Entry" })).not.toBeInTheDocument();
+    expect(createEntryMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+  });
+
   it("groups Entries under Category headings without repeating Category names on rows", async () => {
     const entry = mockEditableEntry();
     listEntriesMock.mockResolvedValue([
@@ -345,7 +445,7 @@ describe("Project screen Saved contract", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Categories" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Categories" }));
-    fireEvent.click(await screen.findByText("Add a default field for Characters"));
+    fireEvent.click(await screen.findByRole("button", { name: "Add default field" }));
     fireEvent.change(screen.getByLabelText("Default field name"), { target: { value: "Mass" } });
     fireEvent.change(screen.getByLabelText("Default field kind"), { target: { value: "number" } });
     fireEvent.change(screen.getByLabelText("Default field unit"), { target: { value: "tons" } });
@@ -354,11 +454,11 @@ describe("Project screen Saved contract", () => {
       definitions: [def],
       fields: [{ definition: def, available: true, value: null }],
     });
-    fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create default field" }));
     await waitFor(() => expect(applyTemplateFields).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Close Categories and defaults" }));
     expect(await screen.findByLabelText("Value: Mass")).toBeVisible();
-    expect(screen.getByText("Unit: tons")).toBeVisible();
+    expect(screen.getByLabelText("Value: Mass")).toBeVisible();
   });
 
   it("native close waits for a Category default commit and blocks unfinished manager drafts", async () => {
@@ -369,18 +469,20 @@ describe("Project screen Saved contract", () => {
     closeProjectMock.mockResolvedValue(undefined);
     await openTheProjectScreen();
     fireEvent.click(screen.getByRole("button", { name: "Categories" }));
-    fireEvent.click(await screen.findByText("Add a default field for Characters"));
+    fireEvent.click(await screen.findByRole("button", { name: "Add default field" }));
     fireEvent.change(screen.getByLabelText("Default field name"), { target: { value: "Height" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Add default field" }));
     fireEvent.click(screen.getByRole("button", { name: "Close Categories and defaults" }));
     await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
     expect(closeProjectMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Save and close" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close Before you leave" }));
     fireEvent.click(screen.getByRole("button", { name: "Categories" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue manager draft" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Add default field" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Create default field" })).toBeEnabled(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create default field" }));
     await waitFor(() => expect(applyTemplateFields).toHaveBeenCalledOnce());
     await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
     expect(closeProjectMock).not.toHaveBeenCalled();
@@ -441,7 +543,7 @@ describe("Project screen Saved contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create definition" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.change(visibleInput("new-field-name"), { target: { value: "Color" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create field" }));
     await waitFor(() =>
       expect(applyFields).toHaveBeenCalledWith(
         project.projectId,
@@ -495,14 +597,14 @@ describe("Project screen Saved contract", () => {
     mockEditableEntry();
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Cancel new field" })).not.toBeDisabled(),
-    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add field" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
     fireEvent.change(visibleInput("new-field-name"), {
       target: { value: "Unsaved local field" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Close Add field" }));
     fireEvent.click(screen.getByRole("button", { name: "Back to Entries" }));
-    expect(visibleInput("new-field-name")).toHaveValue("Unsaved local field");
+    expect(screen.getByLabelText("new-field-name")).toHaveValue("Unsaved local field");
     fireEvent.click(screen.getByRole("button", { name: "Discard and continue" }));
     await waitFor(() => expect(screen.queryByLabelText("new-field-name")).not.toBeInTheDocument());
     expect(applyFields).not.toHaveBeenCalled();
@@ -534,6 +636,7 @@ describe("Project screen Saved contract", () => {
       globalRevision: 3,
     });
     await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     await waitFor(() => expect(visibleInput("new-entry-name")).toBeInTheDocument());
     fireEvent.change(visibleInput("new-entry-name"), { target: { value: "Thron" } });
 
@@ -576,6 +679,7 @@ describe("Project screen Saved contract", () => {
       globalRevision: 1,
     });
     await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     await waitFor(() => screen.getByRole("button", { name: "Create Entry" }));
     fireEvent.click(screen.getByRole("button", { name: "Create Entry" }));
     await waitFor(() =>
@@ -586,7 +690,7 @@ describe("Project screen Saved contract", () => {
         undefined,
       ),
     );
-    expect(await screen.findByText("[Unnamed Entry]")).toBeInTheDocument();
+    expect(await screen.findByPlaceholderText("[Unnamed Entry]")).toHaveValue("");
   });
 
   it("native close waits for submitted Category creation", async () => {
@@ -601,6 +705,7 @@ describe("Project screen Saved contract", () => {
     }>();
     createCategoryMock.mockReturnValue(categorySave.promise);
     await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     await waitFor(() => screen.getByRole("button", { name: "Create Category inline" }));
     fireEvent.click(screen.getByRole("button", { name: "Create Category inline" }));
     fireEvent.change(screen.getByLabelText("inline-category-name"), {
@@ -635,6 +740,7 @@ describe("Project screen Saved contract", () => {
     }>();
     createEntryMock.mockReturnValue(entrySave.promise);
     await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     await waitFor(() => screen.getByRole("button", { name: "Create Entry" }));
     fireEvent.click(screen.getByRole("button", { name: "Create Entry" }));
     fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
@@ -703,8 +809,10 @@ describe("Project screen Saved contract", () => {
   it("structural failure stays open, is visible, and cannot be described as discarded", async () => {
     createEntryMock.mockRejectedValue(new Error("disk full"));
     await openTheProjectScreen();
-    fireEvent.click(await screen.findByRole("button", { name: "Create Entry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create Entry" })));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("disk full"));
+    fireEvent.click(screen.getByRole("button", { name: "Close Add Entry" }));
     fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
     expect(closeProjectMock).not.toHaveBeenCalled();
     expect(
@@ -722,6 +830,7 @@ describe("Project screen Saved contract", () => {
     }>();
     createCategoryMock.mockReturnValue(categorySave.promise);
     await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create Category inline" }));
     fireEvent.change(screen.getByLabelText("inline-category-name"), { target: { value: "A" } });
     const addCategory = screen.getByRole("button", { name: "Add Category" });
@@ -833,6 +942,7 @@ describe("Project screen Saved contract", () => {
       categoryId === "characters" ? currentTypes.promise : oldTypes.promise,
     );
     await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     const categorySelect = await screen.findByLabelText("new-entry-category");
     await screen.findByRole("option", { name: "Characters" });
     fireEvent.change(categorySelect, { target: { value: "characters" } });
@@ -1811,6 +1921,7 @@ describe("Inline Category/Type creation forms", () => {
 
   it("shows a labelled container and lets Cancel discard the draft without submitting", async () => {
     await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     await waitFor(() => screen.getByText("Entries"));
     await act(async () => {});
 
@@ -1827,6 +1938,7 @@ describe("Inline Category/Type creation forms", () => {
 
   it("never submits an empty Category name", async () => {
     await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     await waitFor(() => screen.getByText("Entries"));
     await act(async () => {});
 

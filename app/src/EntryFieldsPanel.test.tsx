@@ -50,16 +50,55 @@ function show() {
   return onController;
 }
 describe("Field authoring", () => {
+  it("keeps a dismissed creation draft and any failed save visible until explicitly cancelled", async () => {
+    vi.mocked(applyFields).mockRejectedValueOnce(new Error("Disk full"));
+    const controller = show();
+    await screen.findByLabelText("Value: Eye colour");
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+    fireEvent.change(screen.getByLabelText("new-field-name"), { target: { value: "Age" } });
+    fireEvent(
+      screen.getByRole("dialog", { name: "Add field" }),
+      new Event("cancel", { cancelable: true }),
+    );
+    expect(screen.getByRole("button", { name: "Continue Field draft" })).toBeVisible();
+    expect(controller).toHaveBeenLastCalledWith(
+      expect.objectContaining({ state: "dirty", canSubmit: false }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue Field draft" }));
+    expect(screen.getByLabelText("new-field-name")).toHaveValue("Age");
+    fireEvent.click(screen.getByRole("button", { name: "Create field" }));
+    await screen.findByText("Disk full");
+    fireEvent.click(screen.getByRole("button", { name: "Close Add field" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Disk full");
+    fireEvent.click(screen.getByRole("button", { name: "Continue Field draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel new field" }));
+    expect(screen.getByLabelText("new-field-name")).toHaveValue("");
+  });
+  it("places a custom unit in the quantity control and describes the numeric input accessibly", async () => {
+    const numeric = { ...definition, kind: "number" as const, unit: "years", name: "Age" };
+    vi.mocked(readFields).mockResolvedValue({
+      ...snapshot,
+      definitions: [numeric],
+      fields: [{ definition: numeric, available: true, value: { kind: "number", value: 48 } }],
+    });
+    show();
+    const value = await screen.findByLabelText("Value: Age");
+    expect(value).toHaveValue("48");
+    expect(value).toHaveAccessibleDescription("years");
+    expect(value.parentElement).toContainElement(screen.getByText("years"));
+    expect(screen.queryByText("Unit: years")).not.toBeInTheDocument();
+    expect(screen.queryByText("(Number (optional unit))")).not.toBeInTheDocument();
+  });
   it("creates a Number and custom unit together and keeps the value numeric", async () => {
     show();
     await screen.findByLabelText("Value: Eye colour");
-    fireEvent.click(screen.getByText("Add a field", { selector: "summary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
     expect(screen.getByLabelText("new-field-kind")).toBeVisible();
     fireEvent.change(screen.getByLabelText("new-field-name"), { target: { value: "Mass" } });
     fireEvent.change(screen.getByLabelText("new-field-kind"), { target: { value: "number" } });
     fireEvent.change(screen.getByLabelText("new-field-unit"), { target: { value: "tons" } });
     fireEvent.change(screen.getByLabelText("new-field-value"), { target: { value: "8000000" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create field" }));
     await waitFor(() =>
       expect(applyFields).toHaveBeenCalledWith(
         "project",
@@ -173,20 +212,20 @@ describe("Field authoring", () => {
     expect(screen.getByLabelText("Value: Eye colour")).toHaveValue("green");
     expect(screen.getByRole("option", { name: "Green (retired)" })).toBeInTheDocument();
     expect(screen.getByLabelText("new-field-name")).not.toBeVisible();
-    fireEvent.click(screen.getByText("Add a field", { selector: "summary" }));
-    expect(screen.getByRole("button", { name: "Add field" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+    expect(screen.getByRole("button", { name: "Create field" })).toBeDisabled();
     expect(applyFields).not.toHaveBeenCalled();
   });
   it("creates a local field with its value atomically and clears the form only after success", async () => {
     show();
     await screen.findByLabelText("Value: Eye colour");
-    fireEvent.click(screen.getByText("Add a field", { selector: "summary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
     fireEvent.change(screen.getByLabelText("new-field-name"), {
       target: { value: "Shell diameter" },
     });
     fireEvent.change(screen.getByLabelText("new-field-kind"), { target: { value: "number" } });
     fireEvent.change(screen.getByLabelText("new-field-value"), { target: { value: "900" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create field" }));
     await waitFor(() =>
       expect(applyFields).toHaveBeenCalledWith("project", "entry", 2, {
         kind: "create",
@@ -203,12 +242,12 @@ describe("Field authoring", () => {
     vi.mocked(applyFields).mockRejectedValueOnce(new Error("Disk full"));
     const onController = show();
     await screen.findByLabelText("Value: Eye colour");
-    fireEvent.click(screen.getByText("Add a field", { selector: "summary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
     fireEvent.change(screen.getByLabelText("new-field-name"), { target: { value: "Age" } });
     expect(onController).toHaveBeenLastCalledWith(
       expect.objectContaining({ state: "dirty", canSubmit: false }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create field" }));
     await screen.findByText("Disk full");
     expect(screen.getByLabelText("new-field-name")).toHaveValue("Age");
     await waitFor(() =>
