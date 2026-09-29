@@ -52,8 +52,19 @@ pub struct ExistingProjectPreflight {
 
 type Reply<T> = Sender<Result<T, PersistenceError>>;
 use crate::domain::fields::{EntryFields, FieldCommand};
+use crate::domain::relationships::{EntryRelationships, RelationshipCommand};
 
 enum Job {
+    ReadRelationships {
+        entry: EntryId,
+        reply: Reply<EntryRelationships>,
+    },
+    ApplyRelationships {
+        entry: EntryId,
+        expected: i64,
+        command: RelationshipCommand,
+        reply: Reply<EntryRelationships>,
+    },
     ReadFields {
         entry: EntryId,
         reply: Reply<EntryFields>,
@@ -275,6 +286,19 @@ impl ProjectDbWorker {
         let mut conn = conn;
         for job in jobs {
             match job {
+                Job::ReadRelationships { entry, reply } => {
+                    let _ = reply.send(super::relationships::read(&conn, entry));
+                }
+                Job::ApplyRelationships {
+                    entry,
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::relationships::apply(
+                        &mut conn, entry, expected, command,
+                    ));
+                }
                 Job::ReadFields { entry, reply } => {
                     let _ = reply.send(super::fields::read(&conn, entry));
                 }
@@ -397,6 +421,26 @@ impl ProjectDbWorker {
 
     pub fn read_meta(&self) -> Result<ProjectMetaSnapshot, PersistenceError> {
         self.call(|reply| Job::ReadMeta { reply })
+    }
+
+    pub fn read_relationships(
+        &self,
+        entry: EntryId,
+    ) -> Result<EntryRelationships, PersistenceError> {
+        self.call(|reply| Job::ReadRelationships { entry, reply })
+    }
+    pub fn apply_relationships(
+        &self,
+        entry: EntryId,
+        expected: i64,
+        command: RelationshipCommand,
+    ) -> Result<EntryRelationships, PersistenceError> {
+        self.call(|reply| Job::ApplyRelationships {
+            entry,
+            expected,
+            command,
+            reply,
+        })
     }
 
     pub fn read_fields(&self, entry: EntryId) -> Result<EntryFields, PersistenceError> {
@@ -1187,6 +1231,9 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE relationship_participant;
+             DROP TABLE relationship_instance;
+             DROP TABLE relationship_definition;
              DROP TABLE field_choice_value;
              DROP TABLE field_value;
              DROP TABLE choice_option;

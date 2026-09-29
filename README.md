@@ -313,11 +313,21 @@ in the main editor, while optional creation and manual path controls expand on
 demand. See the [UI cleanup note](docs/milestones/MILESTONE_01_UI_CLEANUP.md) for
 control locations, draft protection, verification and Windows manual review.
 
+The Relationships foundation adds schema 4 and shared, stable connections between
+Entries. Directed definitions have forward/inverse labels; symmetric definitions
+use the same meaning on both sides. The Entry editor shows both views, notes,
+navigation, end/restore history, soft-cardinality warnings, explicit replacement,
+and atomic creation of a target Entry with its connection. Definition editing and
+retirement preserve existing relationships. See the [Relationships foundation
+note](docs/milestones/MILESTONE_01_RELATIONSHIPS_FOUNDATION.md) for scope,
+verification, remaining Ownership work, and the Windows checklist.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
-Capabilities, Relationships, Spatial, Chapters/Story Units, TipTap prose
+Capabilities, relationship-backed Fields and advanced relationship constraints,
+Spatial, Chapters/Story Units, TipTap prose
 editing and rich descriptions, search/FTS, Tags/Roles/Statuses, aliases,
-Archive/Trash, deletion/retirement, final Recent/Pinned navigation, and any
+Archive/Trash, permanent deletion, final Recent/Pinned navigation, and any
 final visual design system.
 
 ### Manual native-close verification

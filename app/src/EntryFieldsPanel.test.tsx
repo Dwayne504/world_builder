@@ -130,8 +130,10 @@ describe("Field authoring", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add field" }));
     await screen.findByText("Disk full");
     expect(screen.getByLabelText("new-field-name")).toHaveValue("Age");
-    expect(onController).toHaveBeenLastCalledWith(
-      expect.objectContaining({ state: "failed", canSubmit: false }),
+    await waitFor(() =>
+      expect(onController).toHaveBeenLastCalledWith(
+        expect.objectContaining({ state: "failed", canSubmit: false }),
+      ),
     );
   });
   it("promotes the same definition to the current Type without rewriting a value", async () => {

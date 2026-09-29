@@ -13,6 +13,7 @@ import {
   getPreferences,
   listCategories,
   listEntries,
+  getEntry,
   listTypes,
   openProject,
   pickDirectory,
@@ -29,6 +30,7 @@ import { useEntryName } from "./useEntryName";
 import { useMutationCoordinator } from "./useMutationCoordinator";
 import { decideClose, type CloseIntent } from "./closeDecision";
 import { EntryFieldsPanel, type FieldsController } from "./EntryFieldsPanel";
+import { EntryRelationshipsPanel } from "./EntryRelationshipsPanel";
 import { Dialog } from "./Dialog";
 
 function errorMessage(err: unknown): string {
@@ -728,6 +730,7 @@ function EntryEditor({
   categories,
   onChanged,
   onClose,
+  onNavigate,
   onController,
   mutations,
 }: {
@@ -736,12 +739,26 @@ function EntryEditor({
   categories: Category[];
   onChanged: (entry: Entry) => void;
   onClose: () => void;
+  onNavigate: (id: string) => void;
   onController: (controller: EntrySaveController) => void;
   mutations: MutationCoordinator;
 }) {
   const editor = useEntryName(projectId, initialEntry);
   const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
-  const { submit: submitName } = editor;
+  const { submit: submitName, currentEntry } = editor;
+  const { isPending: isStructurePending, waitForPending: waitForStructure } = mutations;
+  const committedRevision = useRef(initialEntry.globalRevision);
+  committedRevision.current = Math.max(committedRevision.current, editor.entry.globalRevision);
+  const getRevision = useCallback(() => committedRevision.current, []);
+  const relationshipsController = useRef<FieldsController | null>(null);
+  const [relationshipsState, setRelationshipsState] = useState<SaveState>("saved");
+  const [relationshipsCanSubmit, setRelationshipsCanSubmit] = useState(true);
+  const receiveRelationships = useCallback((controller: FieldsController) => {
+    relationshipsController.current = controller;
+    setRelationshipsState(controller.state);
+    setRelationshipsCanSubmit(controller.canSubmit);
+  }, []);
+  const structureDirtyRef = useRef(false);
   const fieldsController = useRef<FieldsController | null>(null);
   const [fieldsState, setFieldsState] = useState<SaveState>("saved");
   const [fieldsCanSubmit, setFieldsCanSubmit] = useState(true);
@@ -750,13 +767,23 @@ function EntryEditor({
     setFieldsState(controller.state);
     setFieldsCanSubmit(controller.canSubmit);
   }, []);
-  const submit = useCallback(async (): Promise<SubmitOutcome> => {
-    const fieldOutcome = await (fieldsController.current?.submit() ??
-      Promise.resolve({ kind: "no-op" } as SubmitOutcome));
-    if (fieldOutcome.kind === "failed" || fieldOutcome.kind === "committed-stale")
-      return fieldOutcome;
-    return submitName();
-  }, [submitName]);
+  const submit = useCallback(
+    async (applyingStructure = false): Promise<SubmitOutcome> => {
+      const relationshipOutcome = await (relationshipsController.current?.submit() ??
+        Promise.resolve({ kind: "no-op" } as SubmitOutcome));
+      if (relationshipOutcome.kind === "failed" || relationshipOutcome.kind === "committed-stale")
+        return relationshipOutcome;
+      const fieldOutcome = await (fieldsController.current?.submit() ??
+        Promise.resolve({ kind: "no-op" } as SubmitOutcome));
+      if (fieldOutcome.kind === "failed" || fieldOutcome.kind === "committed-stale")
+        return fieldOutcome;
+      if (!applyingStructure && isStructurePending() && !(await waitForStructure()))
+        return { kind: "failed" };
+      if (structureDirtyRef.current && !applyingStructure) return { kind: "failed" };
+      return submitName();
+    },
+    [submitName, isStructurePending, waitForStructure],
+  );
   const [types, setTypes] = useState<TypeDef[]>([]);
   const [categoryId, setCategoryId] = useState(editor.entry.categoryId);
   const [typeId, setTypeId] = useState(editor.entry.typeId ?? "");
@@ -764,14 +791,31 @@ function EntryEditor({
   const [structureTypeChosen, setStructureTypeChosen] = useState(true);
   const onChangedRef = useRef(onChanged);
   onChangedRef.current = onChanged;
+  const receiveRevision = useCallback(
+    (revision: number) => {
+      committedRevision.current = Math.max(committedRevision.current, revision);
+      onChangedRef.current({ ...currentEntry(), globalRevision: committedRevision.current });
+    },
+    [currentEntry],
+  );
   const structureDirty =
     categoryId !== editor.entry.categoryId || typeId !== (editor.entry.typeId ?? "");
+  structureDirtyRef.current = structureDirty;
   const combinedEntryState: SaveState =
-    editor.saveState === "saving" || mutations.state === "saving" || fieldsState === "saving"
+    editor.saveState === "saving" ||
+    mutations.state === "saving" ||
+    fieldsState === "saving" ||
+    relationshipsState === "saving"
       ? "saving"
-      : editor.saveState === "failed" || mutations.state === "failed" || fieldsState === "failed"
+      : editor.saveState === "failed" ||
+          mutations.state === "failed" ||
+          fieldsState === "failed" ||
+          relationshipsState === "failed"
         ? "failed"
-        : editor.saveState === "dirty" || structureDirty || fieldsState === "dirty"
+        : editor.saveState === "dirty" ||
+            structureDirty ||
+            fieldsState === "dirty" ||
+            relationshipsState === "dirty"
           ? "dirty"
           : "saved";
 
@@ -779,9 +823,16 @@ function EntryEditor({
     onController({
       state: combinedEntryState,
       submit,
-      canSubmit: !structureDirty && fieldsCanSubmit,
+      canSubmit: !structureDirty && fieldsCanSubmit && relationshipsCanSubmit,
     });
-  }, [combinedEntryState, onController, structureDirty, fieldsCanSubmit, submit]);
+  }, [
+    combinedEntryState,
+    onController,
+    structureDirty,
+    fieldsCanSubmit,
+    relationshipsCanSubmit,
+    submit,
+  ]);
 
   useEffect(() => {
     onChangedRef.current(editor.entry);
@@ -807,7 +858,7 @@ function EntryEditor({
     const submittedTypeId = typeId;
     const outcome = await mutations.run(
       async () => {
-        const nameOutcome = await submit();
+        const nameOutcome = await submit(true);
         if (nameOutcome.kind === "failed") {
           throw new Error("Entry name must save before applying Category / Type.");
         }
@@ -824,6 +875,7 @@ function EntryEditor({
         );
       },
       (updated) => {
+        structureDirtyRef.current = false;
         editor.replaceEntry(updated);
         setCategoryId(updated.categoryId);
         setTypeId(updated.typeId ?? "");
@@ -858,7 +910,7 @@ function EntryEditor({
         Name (optional)
         <input
           aria-label="entry-name"
-          disabled={mutations.state === "saving"}
+          disabled={mutations.state === "saving" || relationshipsState === "saving"}
           value={editor.draftName}
           onChange={(event) => editor.onChangeDraft(event.currentTarget.value)}
         />
@@ -893,7 +945,7 @@ function EntryEditor({
           Category
           <select
             aria-label="entry-category"
-            disabled={mutations.state === "saving"}
+            disabled={mutations.state === "saving" || relationshipsState === "saving"}
             value={categoryId}
             onChange={(event) => {
               setTypes([]);
@@ -914,7 +966,7 @@ function EntryEditor({
           Type (optional)
           <select
             aria-label="entry-type"
-            disabled={mutations.state === "saving"}
+            disabled={mutations.state === "saving" || relationshipsState === "saving"}
             value={typeId}
             onChange={(event) => {
               setTypeId(event.currentTarget.value);
@@ -938,6 +990,7 @@ function EntryEditor({
           <button
             disabled={
               mutations.state === "saving" ||
+              relationshipsState === "saving" ||
               !structureDirty ||
               (categoryId !== editor.entry.categoryId && !structureTypeChosen)
             }
@@ -955,11 +1008,29 @@ function EntryEditor({
       <EntryFieldsPanel
         projectId={projectId}
         entry={editor.entry}
-        disabled={mutations.state === "saving" || editor.saveState === "saving"}
-        onController={receiveFields}
-        onRevision={(revision) =>
-          onChangedRef.current({ ...editor.currentEntry(), globalRevision: revision })
+        disabled={
+          mutations.state === "saving" ||
+          editor.saveState === "saving" ||
+          relationshipsState === "saving"
         }
+        onController={receiveFields}
+        onRevision={receiveRevision}
+        getRevision={getRevision}
+      />
+      <EntryRelationshipsPanel
+        projectId={projectId}
+        entryId={editor.entry.id}
+        categories={categories}
+        disabled={
+          mutations.state === "saving" ||
+          editor.saveState !== "saved" ||
+          fieldsState !== "saved" ||
+          structureDirty
+        }
+        onController={receiveRelationships}
+        onRevision={receiveRevision}
+        getRevision={getRevision}
+        onNavigate={onNavigate}
       />
     </section>
   );
@@ -1205,7 +1276,15 @@ function EntryWorkflow({
           categories={categories}
           mutations={mutations}
           onController={receiveController}
-          onClose={closeEditor}
+          onClose={() => {
+            closeEditor();
+            void refresh();
+          }}
+          onNavigate={(id) => {
+            void getEntry(projectId, id)
+              .then(openEntry)
+              .catch((reason) => setError(errorMessage(reason)));
+          }}
           onChanged={(updated) => {
             onGlobalRevision(updated.globalRevision);
             setSelected(updated);
@@ -1517,10 +1596,6 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         waitForStructuralMutation(),
       ])
         .then(([renameOutcome, entryOutcome, structuralSuccessful]) => {
-          if (entryControllerRef.current?.canSubmit === false) {
-            setPendingCloseIntent(waitingCloseIntentRef.current ?? intent);
-            return undefined;
-          }
           if (
             structuralSuccessful &&
             [renameOutcome, entryOutcome].every(

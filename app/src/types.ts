@@ -107,3 +107,54 @@ export type FieldCommand =
   | { kind: "add_choice"; fieldId: string; label: string }
   | { kind: "rename_choice"; optionId: string; label: string }
   | { kind: "set_choice_retired"; optionId: string; retired: boolean };
+export interface RelationshipDraft {
+  name: string;
+  forwardLabel: string;
+  inverseLabel: string;
+  directed: boolean;
+  expectedTargetsPerSource: number | null;
+  expectedSourcesPerTarget: number | null;
+}
+export interface RelationshipDefinition extends RelationshipDraft {
+  id: string;
+  retired: boolean;
+  revision: number;
+}
+export interface RelationshipParticipant {
+  id: string | null;
+  label: string;
+  workspaceState: string;
+}
+export interface Relationship {
+  id: string;
+  definitionId: string;
+  source: RelationshipParticipant;
+  target: RelationshipParticipant;
+  note: string;
+  ended: boolean;
+  workspaceState: string;
+  revision: number;
+  warnings: string[];
+}
+export interface EntryRelationships {
+  globalRevision: number;
+  definitions: RelationshipDefinition[];
+  relationships: Relationship[];
+  entries: { id: string; label: string; categoryName: string }[];
+}
+export type RelationshipCommand =
+  | { kind: "create_definition"; draft: RelationshipDraft }
+  | { kind: "update_definition"; definitionId: string; draft: RelationshipDraft }
+  | { kind: "retire_definition"; definitionId: string; retired: boolean }
+  | {
+      kind: "connect";
+      definitionId: string;
+      perspective: "source" | "target";
+      other:
+        | { kind: "existing"; id: string }
+        | { kind: "create"; name: string | null; categoryId: string | null };
+      note: string;
+      replace: string[];
+    }
+  | { kind: "set_note"; id: string; note: string }
+  | { kind: "set_ended"; id: string; ended: boolean };

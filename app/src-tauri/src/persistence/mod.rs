@@ -10,6 +10,7 @@ mod fields;
 pub mod lock;
 pub mod migrations;
 pub mod pragmas;
+mod relationships;
 pub mod snapshot;
 pub mod worker;
 

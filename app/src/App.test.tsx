@@ -64,6 +64,10 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  readRelationships: vi
+    .fn()
+    .mockResolvedValue({ globalRevision: 1, relationships: [], definitions: [], entries: [] }),
+  applyRelationships: vi.fn(),
   readFields: vi.fn().mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] }),
   applyFields: vi.fn(),
   AppCommandError: class AppCommandError extends Error {
@@ -97,7 +101,15 @@ vi.mock("./api", () => ({
 }));
 
 import App from "./App";
-import { AppCommandError, createProject, readFields, applyFields, createBackup } from "./api";
+import {
+  AppCommandError,
+  createProject,
+  readFields,
+  applyFields,
+  createBackup,
+  readRelationships,
+  applyRelationships,
+} from "./api";
 
 function backendError(kind: string, message: string): AppCommandError {
   return new AppCommandError({ kind, message });
@@ -204,6 +216,10 @@ describe("Project screen Saved contract", () => {
       .mockReset()
       .mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] });
     vi.mocked(applyFields).mockReset();
+    vi.mocked(readRelationships)
+      .mockReset()
+      .mockResolvedValue({ globalRevision: 1, definitions: [], relationships: [], entries: [] });
+    vi.mocked(applyRelationships).mockReset();
     closeProjectMock.mockReset();
     renameProjectMock.mockReset();
     openProjectMock.mockReset();
@@ -237,6 +253,69 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("native close waits for relationship creation to commit before exiting", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    closeProjectMock.mockResolvedValue(undefined);
+    const updated = { globalRevision: 2, definitions: [], relationships: [], entries: [] };
+    const pending = deferred<typeof updated>();
+    vi.mocked(applyRelationships).mockReturnValueOnce(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Manage relationships" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Manage relationships" }));
+    for (const [label, value] of [
+      ["Definition name", "Ownership"],
+      ["Forward label", "owns"],
+      ["Inverse label", "is owned by"],
+    ])
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Create definition" }));
+    await waitFor(() => expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saving"));
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    await act(async () => pending.resolve(updated));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    expect(nativeWindowCloseMock).toHaveBeenCalled();
+  });
+
+  it("uses acknowledged relationship revisions for the next Field write", async () => {
+    mockEditableEntry();
+    vi.mocked(applyRelationships).mockResolvedValue({
+      globalRevision: 7,
+      definitions: [],
+      relationships: [],
+      entries: [],
+    });
+    vi.mocked(applyFields).mockResolvedValue({ globalRevision: 8, definitions: [], fields: [] });
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Manage relationships" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Manage relationships" }));
+    for (const [label, value] of [
+      ["Definition name", "Ownership"],
+      ["Forward label", "owns"],
+      ["Inverse label", "is owned by"],
+    ])
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Create definition" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.change(visibleInput("new-field-name"), { target: { value: "Color" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+    await waitFor(() =>
+      expect(applyFields).toHaveBeenCalledWith(
+        project.projectId,
+        "entry",
+        7,
+        expect.objectContaining({ kind: "create" }),
+      ),
+    );
   });
 
   it("native close waits for field-value acknowledgement and retains a failed draft", async () => {

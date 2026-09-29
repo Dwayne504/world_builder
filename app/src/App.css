@@ -503,3 +503,81 @@ dd {
     margin: 12px 0;
   }
 }
+
+.relationships-panel {
+  margin-top: 28px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 24px 0 0;
+}
+.relationship-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+  display: grid;
+  gap: 12px;
+}
+.relationship-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--input);
+}
+.relationship-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.relationship-heading small {
+  color: var(--muted);
+}
+.relationship-target {
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.relationship-details {
+  margin-top: 12px;
+}
+.relationship-details summary {
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.relationship-details label {
+  margin-top: 12px;
+}
+.relationship-warning {
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  background: var(--tint);
+  font-size: 13px;
+}
+textarea {
+  box-sizing: border-box;
+  min-height: 90px;
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--input);
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.checkbox-row input {
+  width: auto;
+}
