@@ -30,6 +30,27 @@ fn invalid_input(message: impl ToString) -> AppErrorDto {
 }
 
 #[tauri::command]
+pub fn delete_entry_field(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: String,
+    field_id: String,
+    expected_revision: i64,
+    backup_dir: String,
+) -> Result<crate::domain::fields::EntryFieldDeleteOutcome, AppErrorDto> {
+    preferences::validate_directory(&PathBuf::from(&backup_dir))?;
+    ProjectService::delete_entry_field(
+        &state,
+        parse_project_id(&project_id)?,
+        EntryId::parse(&entry_id).map_err(invalid_input)?,
+        crate::domain::structure::FieldId::parse(&field_id).map_err(invalid_input)?,
+        expected_revision,
+        &PathBuf::from(backup_dir),
+    )
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn preview_field_merge(
     state: State<'_, AppState>,
     project_id: String,

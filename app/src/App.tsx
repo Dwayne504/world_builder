@@ -1,3 +1,4 @@
+import { PointerLight } from "./PointerLight";
 import { AppearanceButton, AppearanceProvider } from "./AppearanceProvider";
 import { useAppearance } from "./appearanceContext";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -2096,6 +2097,7 @@ function Workspace() {
 function App() {
   return (
     <AppearanceProvider>
+      <PointerLight />
       <Workspace />
     </AppearanceProvider>
   );

@@ -56,6 +56,12 @@ use crate::domain::relationships::{EntryRelationships, RelationshipCommand};
 use crate::domain::structure::FieldId;
 
 enum Job {
+    DeleteEntryField {
+        entry: EntryId,
+        field: FieldId,
+        expected: i64,
+        reply: Reply<EntryFields>,
+    },
     PreviewFieldMerge {
         source: FieldId,
         target: FieldId,
@@ -345,6 +351,16 @@ impl ProjectDbWorker {
                 } => {
                     let _ = reply.send(super::fields::merge(&mut conn, source, target, expected));
                 }
+                Job::DeleteEntryField {
+                    entry,
+                    field,
+                    expected,
+                    reply,
+                } => {
+                    let _ = reply.send(super::fields::delete_local(
+                        &mut conn, entry, field, expected,
+                    ));
+                }
                 Job::ReadFields { entry, reply } => {
                     let _ = reply.send(super::fields::read(&conn, entry));
                 }
@@ -525,6 +541,19 @@ impl ProjectDbWorker {
         self.call(|reply| Job::ApplyTemplateFields {
             expected,
             command,
+            reply,
+        })
+    }
+    pub(crate) fn delete_entry_field(
+        &self,
+        entry: EntryId,
+        field: FieldId,
+        expected: i64,
+    ) -> Result<EntryFields, PersistenceError> {
+        self.call(|reply| Job::DeleteEntryField {
+            entry,
+            field,
+            expected,
             reply,
         })
     }
@@ -1316,6 +1345,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
              DROP TABLE relationship_definition;

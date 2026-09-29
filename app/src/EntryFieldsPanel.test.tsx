@@ -1,10 +1,16 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryFieldsPanel } from "./EntryFieldsPanel";
-import { applyFields, readFields } from "./api";
+import { applyFields, readFields, deleteEntryField, getPreferences, pickDirectory } from "./api";
 import type { Entry, EntryFields, FieldDefinition } from "./types";
-vi.mock("./api", () => ({ applyFields: vi.fn(), readFields: vi.fn() }));
+vi.mock("./api", () => ({
+  applyFields: vi.fn(),
+  readFields: vi.fn(),
+  deleteEntryField: vi.fn(),
+  getPreferences: vi.fn(),
+  pickDirectory: vi.fn(),
+}));
 const entry: Entry = {
   id: "entry",
   categoryId: "category",
@@ -178,13 +184,14 @@ describe("Field authoring", () => {
     const onController = show();
     await screen.findByLabelText("Value: Eye colour");
     fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
-    fireEvent.change(screen.getByLabelText("field-definition"), { target: { value: "field" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit definition: Eye colour" }));
     fireEvent.change(screen.getByLabelText("rename-field"), { target: { value: "Eyes" } });
     fireEvent(
-      screen.getByRole("dialog", { name: "Manage fields" }),
+      screen.getByRole("dialog", { name: "Edit field definition" }),
       new Event("cancel", { cancelable: true }),
     );
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Edit field definition" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Manage fields" }));
     expect(onController).toHaveBeenLastCalledWith(
       expect.objectContaining({ state: "dirty", canSubmit: false }),
     );
@@ -202,11 +209,11 @@ describe("Field authoring", () => {
     show();
     await screen.findByLabelText("Value: Eye colour");
     fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
-    fireEvent.change(screen.getByLabelText("field-definition"), { target: { value: "field" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit definition: Eye colour" }));
     fireEvent.change(screen.getByLabelText("rename-field"), { target: { value: "Eyes" } });
     fireEvent.click(screen.getByRole("button", { name: "Rename definition" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Disk full");
-    fireEvent.click(screen.getByRole("button", { name: "Close Manage fields" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Edit field definition" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Disk full");
     fireEvent.click(screen.getByRole("button", { name: "Continue definition edits" }));
     expect(screen.getByLabelText("rename-field")).toHaveValue("Eyes");
@@ -265,7 +272,7 @@ describe("Field authoring", () => {
     show();
     await screen.findByLabelText("Value: Eye colour");
     fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
-    fireEvent.change(screen.getByLabelText("field-definition"), { target: { value: "field" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit definition: Eye colour" }));
     await act(async () =>
       fireEvent.click(
         screen.getByRole("button", { name: "Make available to this Type", hidden: true }),
@@ -305,4 +312,156 @@ it("suggests reuse with readable provider context and preserves an initial value
       provider: { kind: "entry", id: "entry" },
     }),
   );
+});
+
+it("lists current Fields and reusable defaults in separate compact tables", async () => {
+  const other = {
+    ...definition,
+    id: "other",
+    name: "Height",
+    kind: "number" as const,
+    unit: "metres",
+  };
+  vi.mocked(readFields).mockResolvedValue({
+    ...snapshot,
+    definitions: [definition, other],
+    fields: [
+      {
+        ...snapshot.fields[0],
+        defaultSources: [{ provider: { kind: "type", id: "parent" }, label: "Ancestor type" }],
+      },
+    ],
+  });
+  show();
+  await screen.findByLabelText("Value: Eye colour");
+  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  const tables = within(screen.getByRole("dialog", { name: "Manage fields" })).getAllByRole(
+    "table",
+  );
+  expect(tables).toHaveLength(2);
+  expect(within(tables[0]).getByText("Type: Ancestor type")).toBeVisible();
+  expect(within(tables[0]).queryByText("Green")).not.toBeInTheDocument();
+  expect(within(tables[1]).getByRole("button", { name: "Add to Entry: Height" })).toBeEnabled();
+  expect(screen.queryByLabelText("field-definition")).not.toBeInTheDocument();
+  fireEvent.click(within(tables[1]).getByRole("button", { name: "Add to Entry: Height" }));
+  await waitFor(() =>
+    expect(applyFields).toHaveBeenCalledWith("project", "entry", 2, {
+      kind: "bind",
+      fieldId: "other",
+      provider: { kind: "entry", id: "entry" },
+    }),
+  );
+});
+
+it("hides locally, previews hidden values without writing, and unhides explicitly", async () => {
+  const hidden = {
+    ...snapshot,
+    globalRevision: 3,
+    fields: [{ ...snapshot.fields[0], hidden: true }],
+  };
+  vi.mocked(applyFields)
+    .mockResolvedValueOnce(hidden)
+    .mockResolvedValueOnce({ ...snapshot, globalRevision: 4 });
+  show();
+  await screen.findByLabelText("Value: Eye colour");
+  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(screen.getByRole("button", { name: "Hide field: Eye colour" }));
+  await screen.findByRole("button", { name: "Show field: Eye colour" });
+  expect(applyFields).toHaveBeenCalledWith("project", "entry", 2, {
+    kind: "set_hidden",
+    fieldId: "field",
+    hidden: true,
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Close Manage fields" }));
+  expect(screen.queryByLabelText("Value: Eye colour")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show hidden fields (1)" }));
+  expect(screen.getByLabelText("Value: Eye colour")).toHaveValue("green");
+  expect(applyFields).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Hide hidden fields" }));
+  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show field: Eye colour" }));
+  await waitFor(() =>
+    expect(applyFields).toHaveBeenLastCalledWith("project", "entry", 3, {
+      kind: "set_hidden",
+      fieldId: "field",
+      hidden: false,
+    }),
+  );
+  await screen.findByRole("button", { name: "Hide field: Eye colour" });
+});
+
+it("keeps values and exposes failures when hiding fails", async () => {
+  vi.mocked(applyFields).mockRejectedValueOnce(new Error("Disk full"));
+  show();
+  await screen.findByLabelText("Value: Eye colour");
+  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(screen.getByRole("button", { name: "Hide field: Eye colour" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Disk full");
+  expect(screen.getByRole("button", { name: "Hide field: Eye colour" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Close Manage fields" }));
+  expect(screen.getByLabelText("Value: Eye colour")).toHaveValue("green");
+});
+
+it("reviews local deletion, preserves the value on backup failure, and waits for acknowledgement", async () => {
+  vi.mocked(getPreferences).mockResolvedValue({
+    defaultProjectsDir: null,
+    defaultProjectsDirExists: false,
+    defaultBackupsDir: "/Backups",
+    defaultBackupsDirExists: true,
+  });
+  vi.mocked(deleteEntryField).mockRejectedValueOnce(new Error("Backup failed"));
+  const controller = show();
+  await screen.findByLabelText("Value: Eye colour");
+  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete from Entry: Eye colour" }));
+  expect(deleteEntryField).not.toHaveBeenCalled();
+  expect(screen.getByText("Current value: Green")).toBeVisible();
+  await waitFor(() =>
+    expect(screen.getByLabelText("Delete Field backup folder")).toHaveValue("/Backups"),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Back up and delete from Entry" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Backup failed");
+  expect(screen.getByLabelText("Value: Eye colour")).toHaveValue("green");
+  let finish!: (value: Awaited<ReturnType<typeof deleteEntryField>>) => void;
+  vi.mocked(deleteEntryField).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Back up and delete from Entry" }));
+  expect(screen.getByRole("button", { name: "Back up and delete from Entry" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Close Delete Eye colour from this Entry?" }));
+  expect(screen.getByLabelText("Value: Eye colour")).toBeDisabled();
+  expect(controller).toHaveBeenLastCalledWith(expect.objectContaining({ state: "saving" }));
+  expect(deleteEntryField).toHaveBeenLastCalledWith("project", "entry", "field", 2, "/Backups");
+  await act(async () =>
+    finish({
+      snapshot: { ...snapshot, fields: [], globalRevision: 3 },
+      backupPath: "/Backups/recovery",
+    }),
+  );
+  expect(
+    screen.queryByRole("dialog", { name: "Delete Eye colour from this Entry?" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add to Entry: Eye colour" })).toBeVisible();
+  expect(screen.queryByLabelText("Value: Eye colour")).not.toBeInTheDocument();
+  expect(controller).toHaveBeenLastCalledWith(expect.objectContaining({ state: "saved" }));
+});
+
+it("requires a backup destination even if preferences are unavailable and supports native selection", async () => {
+  vi.mocked(getPreferences).mockRejectedValueOnce(new Error("Corrupt preferences"));
+  vi.mocked(pickDirectory).mockResolvedValueOnce("/Chosen backups");
+  show();
+  await screen.findByLabelText("Value: Eye colour");
+  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete from Entry: Eye colour" }));
+  expect(screen.getByRole("button", { name: "Back up and delete from Entry" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Choose backup folder…" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Delete Field backup folder")).toHaveValue("/Chosen backups"),
+  );
+  expect(screen.getByRole("button", { name: "Back up and delete from Entry" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(deleteEntryField).not.toHaveBeenCalled();
 });

@@ -340,12 +340,20 @@ consistent dialogs that retain unfinished drafts. See the
 [sketchbook UI note](docs/milestones/MILESTONE_01_SKETCHBOOK_UI.md) for scope,
 accessibility checks, and the Windows review checklist.
 
+The focused Entry workspace adds schema 6 for local Field visibility/removal.
+**Manage fields** uses two compact tables; Hide preserves values, while reviewed
+**Delete** affects only this Entry after a recovery backup. **Show hidden fields**
+reveals hidden values without changing their saved visibility. Fields and
+Relationships use slimmer rows, and Starship has a gentle pointer light and
+background pattern. See the [focused workspace note](docs/milestones/MILESTONE_01_FOCUSED_ENTRY_WORKSPACE.md)
+for preservation rules, verification, and the Windows checklist.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
 Capabilities, relationship-backed Fields and advanced relationship constraints,
 Spatial, Chapters/Story Units, TipTap prose
 editing and rich descriptions, search/FTS, Tags/Roles/Statuses, aliases,
-Archive/Trash, permanent deletion, final Recent/Pinned navigation, and any
+Archive/Trash, shared-definition permanent deletion, final Recent/Pinned navigation, and any
 final visual design system.
 
 ### Manual native-close verification

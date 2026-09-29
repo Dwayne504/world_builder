@@ -1,9 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyFields, readFields } from "./api";
+import { applyFields, readFields, deleteEntryField } from "./api";
 import type { EntryFields } from "./types";
 import { parseFieldDraft, useEntryFields } from "./useEntryFields";
-vi.mock("./api", () => ({ applyFields: vi.fn(), readFields: vi.fn() }));
+vi.mock("./api", () => ({ applyFields: vi.fn(), readFields: vi.fn(), deleteEntryField: vi.fn() }));
 const snapshot: EntryFields = {
   globalRevision: 3,
   definitions: [],
@@ -125,4 +125,25 @@ describe("Field save contract", () => {
     expect(result.current.state).toBe("failed");
     expect(result.current.drafts.field).toBe("-");
   });
+});
+
+it("never rebases a deletion review and navigation waits for its pending acknowledgement", async () => {
+  const pending = deferred<Awaited<ReturnType<typeof deleteEntryField>>>();
+  vi.mocked(deleteEntryField).mockReturnValueOnce(pending.promise);
+  const onBackup = vi.fn();
+  const { result } = renderHook(() => useEntryFields("project", "entry", 1, vi.fn(), () => 9));
+  await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+  let saving!: ReturnType<typeof result.current.submit>;
+  act(() => {
+    saving = result.current.deleteLocal("field", 3, "/Backups", onBackup);
+  });
+  expect(deleteEntryField).toHaveBeenCalledWith("project", "entry", "field", 3, "/Backups");
+  expect(result.current.submit()).toBe(saving);
+  await act(async () => {
+    pending.reject(new Error("Revision conflict"));
+    await saving;
+  });
+  expect(result.current.snapshot).toEqual(snapshot);
+  expect(result.current.state).toBe("failed");
+  expect(onBackup).not.toHaveBeenCalled();
 });

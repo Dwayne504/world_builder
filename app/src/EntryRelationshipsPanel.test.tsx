@@ -74,12 +74,15 @@ function change(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 function openActions() {
-  fireEvent.click(screen.getByText("Note and actions · has note"));
+  fireEvent.click(screen.getByLabelText("Note and actions · has note"));
 }
 
 it("shows the inverse from the other Entry and navigates by stable ID", async () => {
   await mount("blade");
   expect(screen.getByText("is owned by")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Thron" }).closest("li")).not.toHaveTextContent(
+    "Ownership",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Thron" }));
   expect(navigate).toHaveBeenCalledWith("thron");
   expect(applyRelationships).not.toHaveBeenCalled();

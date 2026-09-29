@@ -42,6 +42,7 @@ pub fn run() {
             tauri_boundary::merge_fields,
             tauri_boundary::read_field_catalog,
             tauri_boundary::apply_template_fields,
+            tauri_boundary::delete_entry_field,
             tauri_boundary::read_fields,
             tauri_boundary::apply_fields,
             tauri_boundary::create_project,

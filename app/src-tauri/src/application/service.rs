@@ -21,6 +21,42 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn delete_entry_field(
+        state: &AppState,
+        project: ProjectId,
+        entry: EntryId,
+        field: crate::domain::structure::FieldId,
+        expected: i64,
+        backup_root: &Path,
+    ) -> Result<crate::domain::fields::EntryFieldDeleteOutcome, AppError> {
+        let open = state
+            .open_projects
+            .lock()
+            .expect("registry mutex poisoned")
+            .get(&project)
+            .cloned()
+            .ok_or(AppError::ProjectNotOpen(project))?;
+        let guard = open.worker.lock().expect("worker mutex poisoned");
+        let worker = guard.as_ref().ok_or(AppError::ProjectNotOpen(project))?;
+        let snapshot = worker.read_fields(entry)?;
+        if snapshot.global_revision != expected {
+            return Err(PersistenceError::StaleRevision {
+                expected,
+                current: snapshot.global_revision,
+            }
+            .into());
+        }
+        if !snapshot.fields.iter().any(|f| f.definition.id == field) {
+            return Err(PersistenceError::Other("Field is no longer on this Entry".into()).into());
+        }
+        let backup = crate::backup_recovery::create_backup(worker, &open.paths, backup_root)?;
+        let snapshot = worker.delete_entry_field(entry, field, expected)?;
+        Ok(crate::domain::fields::EntryFieldDeleteOutcome {
+            snapshot,
+            backup_path: backup.display().to_string(),
+        })
+    }
+
     pub fn preview_field_merge(
         state: &AppState,
         project: ProjectId,
@@ -743,6 +779,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
              DROP TABLE relationship_definition;
@@ -845,6 +882,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
              DROP TABLE relationship_definition;

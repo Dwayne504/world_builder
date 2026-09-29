@@ -148,7 +148,8 @@ export function FieldMergeReview({
           <p>
             Both Fields' Category, Type, and Entry defaults will use the kept definition. Missing
             values are filled from the duplicate; identical values become one. The duplicate
-            definition is removed.
+            definition is removed. Existing Hide or Delete choices on the kept Field take
+            precedence. Otherwise, the duplicate's local visibility choice is kept.
           </p>
           <p>
             {preview.entries.length} affected Entries, including empty Fields and retained

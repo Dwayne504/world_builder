@@ -180,12 +180,17 @@ export function EntryRelationshipsPanel({
             <span>{view.other.label}</span>
           )}
           {view.other.workspaceState !== "active" && <small>{view.other.workspaceState}</small>}
-          <small>
-            {view.definition?.name}
-            {view.definition?.retired ? " · retired definition" : ""}
-            {r.ended ? " · ended" : ""}
-            {r.workspaceState !== "active" ? ` · ${r.workspaceState}` : ""}
-          </small>
+          {(view.definition?.retired || r.ended || r.workspaceState !== "active") && (
+            <small>
+              {[
+                view.definition?.retired ? "Retired definition" : null,
+                r.ended ? "Ended" : null,
+                r.workspaceState !== "active" ? r.workspaceState : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </small>
+          )}
         </div>
         {r.warnings.map((warning) => (
           <p key={warning} className="relationship-warning" role="status">
@@ -193,7 +198,9 @@ export function EntryRelationshipsPanel({
           </p>
         ))}
         <details className="relationship-details">
-          <summary>Note and actions{r.note ? " · has note" : ""}</summary>
+          <summary aria-label={`Note and actions${r.note ? " · has note" : ""}`}>
+            {r.note ? "Note •" : "Details"}
+          </summary>
           <label>
             Relationship note
             <textarea

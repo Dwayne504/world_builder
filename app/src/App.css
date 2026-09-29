@@ -1015,3 +1015,301 @@ textarea {
   font-family: "Segoe UI", system-ui, sans-serif;
   font-style: normal;
 }
+
+/* Entry authoring is a compact reading surface; configuration lives in dialogs. */
+.entry-editor {
+  padding: clamp(20px, 2.3vw, 36px);
+}
+.entry-content {
+  gap: clamp(24px, 3vw, 48px);
+}
+.fields-panel,
+.relationships-panel {
+  margin-top: 18px;
+  padding-top: 18px;
+}
+.fields-panel .section-heading,
+.relationships-panel .section-heading {
+  margin-bottom: 14px;
+  gap: 8px;
+}
+.fields-panel .section-heading .row,
+.relationships-panel .section-heading .row {
+  margin: 0;
+  gap: 2px;
+}
+.fields-panel .section-heading button,
+.relationships-panel .section-heading button {
+  padding: 5px 9px;
+  min-height: 32px;
+  font-size: 13px;
+}
+.field-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+.field-value {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.35fr) minmax(0, 1fr) 30px;
+  gap: 10px;
+  align-items: center;
+  margin: 0;
+  padding: 7px 0;
+}
+.field-value-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.field-value-label label {
+  margin: 0;
+  font-size: 14px;
+}
+.field-value-label small {
+  display: block;
+  font-size: 11px;
+}
+.field-value :is(input, select, .number-value) {
+  margin: 0;
+  font-size: 14px;
+  min-height: 34px;
+}
+.field-value > :is(input, select, .number-value) {
+  padding: 5px 9px;
+}
+.field-value .number-value {
+  gap: 6px;
+}
+.field-value .number-value input {
+  min-height: 0;
+}
+.field-value .clear-field {
+  position: static;
+  margin: 0;
+  padding: 2px;
+  font-size: 10px;
+  opacity: 0;
+}
+.field-value:hover .clear-field,
+.field-value:focus-within .clear-field {
+  opacity: 1;
+}
+.hidden-field-preview {
+  border-left: 2px dashed var(--accent);
+  padding-left: 9px;
+}
+.relationship-list {
+  margin: 0;
+  display: grid;
+  gap: 0;
+}
+.relationship-card {
+  position: relative;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.relationship-heading {
+  min-height: 30px;
+  padding-right: 72px;
+  gap: 7px;
+}
+.relationship-heading :is(span, button) {
+  font-size: 14px;
+}
+.relationship-target {
+  min-height: 28px;
+  padding: 0;
+}
+.relationship-details {
+  margin: 0;
+}
+.relationship-details > summary {
+  position: absolute;
+  right: 0;
+  top: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.relationship-details[open] {
+  padding-top: 8px;
+}
+.relationship-details[open] > summary {
+  color: var(--accent);
+}
+.relationship-details label {
+  margin: 8px 0;
+}
+.relationship-details textarea {
+  min-height: 78px;
+  font-size: 14px;
+}
+.relationship-warning {
+  margin: 4px 0;
+  font-size: 12px;
+}
+.field-manager-dialog {
+  width: min(1200px, calc(100vw - 40px));
+}
+.field-manager-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 30px;
+  margin-top: 22px;
+}
+.field-manager-columns > div {
+  min-width: 0;
+}
+.field-manager-columns > div + div {
+  border-left: 1px solid var(--line);
+  padding-left: 25px;
+}
+.field-manager-columns h3 {
+  font-size: 16px;
+}
+.field-manager-columns h3 small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.manager-table-scroll {
+  overflow-x: auto;
+}
+.field-manager-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 12px;
+}
+.field-manager-table :is(th, td) {
+  padding: 8px 5px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+.field-manager-table thead th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.field-manager-table tbody th {
+  min-width: 80px;
+  font-weight: 500;
+}
+.field-manager-table small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.field-manager-table button {
+  min-height: 30px;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+.field-name-button {
+  background: transparent;
+  border-color: transparent;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text);
+  margin-left: -6px;
+}
+.field-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0;
+}
+.hidden-field-row th {
+  border-left: 2px dashed var(--accent);
+}
+.delete-value-preview {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 780px) {
+  .field-manager-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 25px;
+  }
+  .field-manager-columns > div + div {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
+@media (pointer: coarse) {
+  .field-value .clear-field {
+    opacity: 1;
+    min-height: 40px;
+  }
+  .field-manager-table button {
+    min-height: 40px;
+  }
+}
+/* A quiet light, not a cursor replacement. Native dialogs get their own
+   non-interactive layer because they sit above the document's stacking order. */
+.pointer-light,
+.ambient-pattern,
+dialog::after {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+}
+.pointer-light,
+dialog::after {
+  z-index: 20;
+  background: radial-gradient(
+    circle 210px at var(--pointer-x, -500px) var(--pointer-y, -500px),
+    #fff8d00b,
+    transparent 100%
+  );
+}
+.pointer-light {
+  transition: opacity 180ms ease-out;
+}
+:root[data-pointer-light="on"] .pointer-light,
+:root[data-pointer-light="on"] dialog::after {
+  opacity: 1;
+}
+dialog::after {
+  content: "";
+}
+:root[data-appearance="starship"] dialog::after {
+  background: radial-gradient(
+    circle 210px at var(--pointer-x, -500px) var(--pointer-y, -500px),
+    #b9edff0d,
+    transparent 100%
+  );
+}
+:root[data-appearance="starship"] .pointer-light {
+  background: radial-gradient(
+    circle 210px at var(--pointer-x, -500px) var(--pointer-y, -500px),
+    #b9edff0d,
+    transparent 100%
+  );
+}
+:root[data-appearance="starship"][data-pointer-light="on"] .ambient-pattern {
+  opacity: 1;
+  z-index: -1;
+  background: radial-gradient(circle at 50% 50%, transparent 17px, #9fc7db24 18px, transparent 19px)
+    0 0 / 48px 48px;
+  mask-image: radial-gradient(
+    circle 300px at var(--pointer-x, -500px) var(--pointer-y, -500px),
+    #000,
+    transparent
+  );
+}
+:root[data-appearance="starship"] body {
+  isolation: isolate;
+}
+@media (prefers-reduced-motion: reduce), (forced-colors: active), (hover: none) {
+  .pointer-light,
+  .ambient-pattern,
+  dialog::after {
+    display: none !important;
+  }
+}
