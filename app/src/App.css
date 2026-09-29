@@ -1264,7 +1264,7 @@ dialog::after {
   z-index: 20;
   background: radial-gradient(
     circle 210px at var(--pointer-x, -500px) var(--pointer-y, -500px),
-    #fff8d00b,
+    #fff8d014,
     transparent 100%
   );
 }
@@ -1281,21 +1281,21 @@ dialog::after {
 :root[data-appearance="starship"] dialog::after {
   background: radial-gradient(
     circle 210px at var(--pointer-x, -500px) var(--pointer-y, -500px),
-    #b9edff0d,
+    #b9edff18,
     transparent 100%
   );
 }
 :root[data-appearance="starship"] .pointer-light {
   background: radial-gradient(
     circle 210px at var(--pointer-x, -500px) var(--pointer-y, -500px),
-    #b9edff0d,
+    #b9edff18,
     transparent 100%
   );
 }
 :root[data-appearance="starship"][data-pointer-light="on"] .ambient-pattern {
   opacity: 1;
-  z-index: -1;
-  background: radial-gradient(circle at 50% 50%, transparent 17px, #9fc7db24 18px, transparent 19px)
+  z-index: 0;
+  background: radial-gradient(circle at 50% 50%, transparent 17px, #9fc7db38 18px, transparent 19px)
     0 0 / 48px 48px;
   mask-image: radial-gradient(
     circle 300px at var(--pointer-x, -500px) var(--pointer-y, -500px),
@@ -1306,10 +1306,16 @@ dialog::after {
 :root[data-appearance="starship"] body {
   isolation: isolate;
 }
-@media (prefers-reduced-motion: reduce), (forced-colors: active), (hover: none) {
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
   .pointer-light,
   .ambient-pattern,
   dialog::after {
     display: none !important;
   }
+}
+
+/* Keep the background motif above the canvas and behind the workspace in WebView2. */
+.container {
+  position: relative;
+  z-index: 1;
 }

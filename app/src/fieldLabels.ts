@@ -13,12 +13,7 @@ export function matchingFields(definitions: FieldDefinition[], name: string) {
   );
 }
 export function fieldContext(field: FieldDefinition) {
-  const scopes = field.bindings
-    .map(
-      (b) =>
-        `${b.provider.kind === "entry" ? "Entry" : b.provider.kind === "type" ? "Type" : "Category"}: ${b.label}`,
-    )
-    .join("; ");
+  const scopes = field.bindings.map((b) => b.label).join("; ");
   return `${fieldKinds[field.kind]}${field.unit ? ` · ${field.unit}` : ""} · ${scopes || "No current defaults"}${field.retired ? " · retired" : ""}`;
 }
 export function fieldLabel(field: FieldDefinition, definitions: FieldDefinition[]) {

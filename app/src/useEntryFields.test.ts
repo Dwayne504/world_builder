@@ -135,9 +135,9 @@ it("never rebases a deletion review and navigation waits for its pending acknowl
   await waitFor(() => expect(result.current.snapshot).not.toBeNull());
   let saving!: ReturnType<typeof result.current.submit>;
   act(() => {
-    saving = result.current.deleteLocal("field", 3, "/Backups", onBackup);
+    saving = result.current.deleteLocal("field", 3, onBackup);
   });
-  expect(deleteEntryField).toHaveBeenCalledWith("project", "entry", "field", 3, "/Backups");
+  expect(deleteEntryField).toHaveBeenCalledWith("project", "entry", "field", 3);
   expect(result.current.submit()).toBe(saving);
   await act(async () => {
     pending.reject(new Error("Revision conflict"));

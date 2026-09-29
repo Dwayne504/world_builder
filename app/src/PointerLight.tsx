@@ -4,7 +4,6 @@ import { useEffect } from "react";
 export function PointerLight() {
   useEffect(() => {
     if (!window.matchMedia) return;
-    const pointer = window.matchMedia("(hover: hover) and (pointer: fine)");
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     const contrast = window.matchMedia("(forced-colors: active)");
     const root = document.documentElement;
@@ -18,9 +17,10 @@ export function PointerLight() {
       delete root.dataset.pointerLight;
     };
     const mediaChanged = () => {
-      enabled = pointer.matches && !reduced.matches && !contrast.matches;
+      enabled = !reduced.matches && !contrast.matches;
       if (!enabled) clear();
     };
+    // Actual mouse events remain reliable when a hybrid device reports no hover.
     const move = (event: PointerEvent) => {
       if (!enabled || event.pointerType !== "mouse") {
         clear();
@@ -42,7 +42,7 @@ export function PointerLight() {
     const visibility = () => {
       if (document.hidden) clear();
     };
-    [pointer, reduced, contrast].forEach((media) => media.addEventListener("change", mediaChanged));
+    [reduced, contrast].forEach((media) => media.addEventListener("change", mediaChanged));
     mediaChanged();
     document.addEventListener("pointermove", move, { passive: true });
     document.addEventListener("pointerout", leave, { passive: true });
@@ -52,9 +52,7 @@ export function PointerLight() {
       clear();
       root.style.removeProperty("--pointer-x");
       root.style.removeProperty("--pointer-y");
-      [pointer, reduced, contrast].forEach((media) =>
-        media.removeEventListener("change", mediaChanged),
-      );
+      [reduced, contrast].forEach((media) => media.removeEventListener("change", mediaChanged));
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerout", leave);
       document.removeEventListener("visibilitychange", visibility);

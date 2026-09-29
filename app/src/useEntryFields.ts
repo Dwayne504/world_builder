@@ -130,12 +130,12 @@ export function useEntryFields(
     [run, projectId, entryId],
   );
   const deleteLocal = useCallback(
-    (fieldId: string, expected: number, backupDir: string, onBackup: (path: string) => void) =>
+    (fieldId: string, expected: number, onBackup?: (path: string) => void) =>
       run(
         async () => {
           // Use the reviewed revision, never silently rebase destructive intent.
-          const result = await deleteEntryField(projectId, entryId, fieldId, expected, backupDir);
-          onBackup(result.backupPath);
+          const result = await deleteEntryField(projectId, entryId, fieldId, expected);
+          onBackup?.(result.backupPath);
           return result.snapshot;
         },
         undefined,

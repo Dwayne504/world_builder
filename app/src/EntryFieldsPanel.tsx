@@ -110,6 +110,7 @@ export function EntryFieldsPanel({
   onRevision,
   getRevision,
   templateEpoch = 0,
+  onRecoveryBackup,
 }: {
   projectId: string;
   entry: Entry;
@@ -118,6 +119,7 @@ export function EntryFieldsPanel({
   onRevision: (revision: number) => void;
   getRevision?: () => number;
   templateEpoch?: number;
+  onRecoveryBackup?: (path: string) => void;
 }) {
   const fields = useEntryFields(
     projectId,
@@ -132,7 +134,6 @@ export function EntryFieldsPanel({
   const [deleteReview, setDeleteReview] = useState<{ field: EntryField; revision: number } | null>(
     null,
   );
-  const [deleteBackup, setDeleteBackup] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const { submit: submitValues } = fields;
   const [newName, setNewName] = useState("");
@@ -274,9 +275,9 @@ export function EntryFieldsPanel({
           Reload fields (keep drafts)
         </button>
       )}
-      {hasValueDraft && (
+      {hasValueDraft && fields.state === "failed" && (
         <button disabled={busy} onClick={() => void fields.submit()}>
-          Save field values
+          Retry saving fields
         </button>
       )}
       {fields.snapshot?.fields.length === 0 && (
@@ -492,12 +493,6 @@ export function EntryFieldsPanel({
             </button>
           </p>
         )}
-        {deleteBackup && (
-          <details className="technical-details">
-            <summary>Field deleted · recovery backup</summary>
-            <p>{deleteBackup}</p>
-          </details>
-        )}
         {(renamed || optionLabel) && (
           <button onClick={() => setDefinitionOpen(true)}>Continue definition edits</button>
         )}
@@ -539,13 +534,12 @@ export function EntryFieldsPanel({
           busy={busy}
           error={fields.error}
           onClose={() => setDeleteReview(null)}
-          onDelete={(backupDir) =>
+          onDelete={() =>
             void fields
               .deleteLocal(
                 deleteReview.field.definition.id,
                 deleteReview.revision,
-                backupDir,
-                setDeleteBackup,
+                onRecoveryBackup,
               )
               .then((result) => {
                 if (result.kind === "committed") setDeleteReview(null);
@@ -647,14 +641,14 @@ export function EntryFieldsPanel({
             <ul>
               {selected.bindings.map((b) => (
                 <li key={`${b.provider.kind}:${b.provider.id}`}>
-                  {b.provider.kind}: {b.label}{" "}
+                  {b.label}{" "}
                   <button
                     disabled={!!renamed || !!optionLabel}
                     onClick={() =>
                       void configure({ kind: "unbind", fieldId: selected.id, provider: b.provider })
                     }
                   >
-                    Detach from {b.provider.kind}: {b.label}
+                    Detach from {b.label}
                   </button>
                 </li>
               ))}

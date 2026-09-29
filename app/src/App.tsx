@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 import {
   AppCommandError,
+  automaticBackupDirectory,
   closeProject,
   createBackup,
   createCategory,
@@ -743,6 +744,7 @@ function EntryEditor({
   onController,
   mutations,
   templateEpoch,
+  onRecoveryBackup,
 }: {
   projectId: string;
   initialEntry: Entry;
@@ -753,6 +755,7 @@ function EntryEditor({
   onController: (controller: EntrySaveController) => void;
   mutations: MutationCoordinator;
   templateEpoch: number;
+  onRecoveryBackup: (path: string) => void;
 }) {
   const editor = useEntryName(projectId, initialEntry);
   const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
@@ -1120,6 +1123,7 @@ function EntryEditor({
           onRevision={receiveRevision}
           getRevision={getRevision}
           templateEpoch={templateEpoch}
+          onRecoveryBackup={onRecoveryBackup}
         />
         <EntryRelationshipsPanel
           projectId={projectId}
@@ -1147,12 +1151,14 @@ function EntryWorkflow({
   onGlobalRevision,
   mutations,
   templateEpoch,
+  onRecoveryBackup,
 }: {
   projectId: string;
   onController: (controller: EntrySaveController | null) => void;
   onGlobalRevision: (revision: number) => void;
   mutations: MutationCoordinator;
   templateEpoch: number;
+  onRecoveryBackup: (path: string) => void;
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -1415,6 +1421,7 @@ function EntryWorkflow({
           projectId={projectId}
           initialEntry={selected}
           templateEpoch={templateEpoch}
+          onRecoveryBackup={onRecoveryBackup}
           categories={categories}
           mutations={mutations}
           onController={receiveController}
@@ -1638,6 +1645,8 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const { submit: renameSubmit } = rename;
   const [backupDir, setBackupDir] = useState("");
   const backupDirTouched = useRef(false);
+  const [recoveryDirectory, setRecoveryDirectory] = useState("");
+  const [lastRecoveryBackup, setLastRecoveryBackup] = useState("");
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [pendingCloseIntent, setPendingCloseIntent] = useState<CloseIntent | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
@@ -1697,6 +1706,21 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
       current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (projectDialog !== "backup") return;
+    let current = true;
+    void automaticBackupDirectory()
+      .then((path) => {
+        if (current) setRecoveryDirectory(path);
+      })
+      .catch((error) => {
+        if (current) setBackupStatus(errorMessage(error));
+      });
+    return () => {
+      current = false;
+    };
+  }, [projectDialog]);
 
   async function handleChooseBackupDir() {
     try {
@@ -2013,6 +2037,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         projectId={project.projectId}
         onController={receiveEntryController}
         onGlobalRevision={rename.updateRevision}
+        onRecoveryBackup={setLastRecoveryBackup}
         mutations={mutations}
       />
 
@@ -2042,6 +2067,19 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
             Create Manual Backup
           </button>
         </div>
+        {(recoveryDirectory || lastRecoveryBackup) && (
+          <details className="technical-details">
+            <summary>Automatic recovery copies</summary>
+            <p>
+              Field deletion saves a recovery copy automatically. Restore a copy from Home to
+              recover an earlier value.
+            </p>
+            {recoveryDirectory && <p className="package-preview">Folder: {recoveryDirectory}</p>}
+            {lastRecoveryBackup && (
+              <p className="package-preview">Latest copy this session: {lastRecoveryBackup}</p>
+            )}
+          </details>
+        )}
         {projectDialog === "backup" && backupStatus && (
           <p role="status" className="package-preview">
             {backupStatus}

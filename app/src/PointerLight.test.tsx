@@ -8,7 +8,8 @@ function setup() {
     "matchMedia",
     vi.fn((query: string) => {
       const media = {
-        matches: query.includes("pointer: fine"),
+        // A WebView/hybrid device may report no fine pointer or hover.
+        matches: false,
         change: () => {},
         addEventListener: (_event: string, change: () => void) => {
           media.change = change;
@@ -50,7 +51,7 @@ function move(pointerType = "mouse", x = 100) {
   document.dispatchEvent(event);
 }
 afterEach(() => vi.unstubAllGlobals());
-it("coalesces pointer updates, excludes touch, and cleans up on leave and unmount", () => {
+it("responds to a real mouse even without hover media, coalesces updates, excludes touch and cleans up", () => {
   const { frame } = setup();
   const view = render(<PointerLight />);
   move();

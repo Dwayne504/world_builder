@@ -70,6 +70,23 @@ impl PreferencesStore {
         Ok(prefs)
     }
 
+    /// Recovery is automatic during reviewed Entry-local deletion. Prefer a
+    /// usable configured location; otherwise use app-owned storage, never the
+    /// live package. Invalid/newer preferences still fail closed without rewriting.
+    pub fn automatic_backup_root(&self, app_data: &Path) -> Result<PathBuf, PreferencesError> {
+        let prefs = self.load()?;
+        if let Some(path) = prefs
+            .default_backups_dir
+            .filter(|p| super::directory_is_usable(p))
+        {
+            return Ok(path);
+        }
+        let root = app_data.join("Recovery Backups");
+        fs::create_dir_all(&root)?;
+        super::validate_directory(&root)?;
+        Ok(root)
+    }
+
     pub fn reset(&self) -> Result<AppPreferences, PreferencesError> {
         let _guard = self
             .lock
@@ -153,5 +170,65 @@ mod tests {
                 .is_err());
             assert_eq!(std::fs::read(store.path()).unwrap(), bytes);
         }
+    }
+
+    #[test]
+    fn automatic_recovery_uses_configured_directory_without_changing_preferences() {
+        let dir = tempdir().unwrap();
+        let configured = dir.path().join("Chosen Backups");
+        fs::create_dir(&configured).unwrap();
+        let store = PreferencesStore::new(dir.path().join("preferences.json"));
+        store
+            .update(|p| p.default_backups_dir = Some(configured.clone()))
+            .unwrap();
+        let before = fs::read(store.path()).unwrap();
+        let app_data = dir.path().join("App data");
+        assert_eq!(store.automatic_backup_root(&app_data).unwrap(), configured);
+        assert!(!app_data.exists());
+        assert_eq!(fs::read(store.path()).unwrap(), before);
+    }
+
+    #[test]
+    fn automatic_recovery_handles_absent_moved_and_invalid_defaults_without_rewriting_them() {
+        let dir = tempdir().unwrap();
+        let store = PreferencesStore::new(dir.path().join("preferences.json"));
+        let app_data = dir.path().join("App data");
+        let recovery = app_data.join("Recovery Backups");
+        assert_eq!(store.automatic_backup_root(&app_data).unwrap(), recovery);
+        assert!(recovery.is_dir());
+        assert!(!store.path().exists());
+        let nested = dir.path().join("evidence.wcproj").join("Backups");
+        fs::create_dir_all(&nested).unwrap();
+        for unusable in [dir.path().join("Moved Backups"), nested] {
+            store
+                .update(|p| p.default_backups_dir = Some(unusable.clone()))
+                .unwrap();
+            let before = fs::read(store.path()).unwrap();
+            assert_eq!(store.automatic_backup_root(&app_data).unwrap(), recovery);
+            assert_eq!(fs::read(store.path()).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn automatic_recovery_never_bypasses_corrupt_or_newer_preferences() {
+        let dir = tempdir().unwrap();
+        let store = PreferencesStore::new(dir.path().join("preferences.json"));
+        let app_data = dir.path().join("App data");
+        for bytes in [b"broken".as_slice(), br#"{"schema_version":99}"#.as_slice()] {
+            fs::write(store.path(), bytes).unwrap();
+            assert!(store.automatic_backup_root(&app_data).is_err());
+            assert_eq!(fs::read(store.path()).unwrap(), bytes);
+            assert!(!app_data.exists());
+        }
+    }
+
+    #[test]
+    fn unavailable_app_recovery_storage_fails_without_replacing_an_existing_file() {
+        let dir = tempdir().unwrap();
+        let store = PreferencesStore::new(dir.path().join("preferences.json"));
+        let app_data = dir.path().join("App data");
+        fs::write(&app_data, b"preserve").unwrap();
+        assert!(store.automatic_backup_root(&app_data).is_err());
+        assert_eq!(fs::read(&app_data).unwrap(), b"preserve");
     }
 }

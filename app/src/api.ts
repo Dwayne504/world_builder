@@ -245,7 +245,10 @@ export function deleteEntryField(
   entryId: string,
   fieldId: string,
   expectedRevision: number,
-  backupDir: string,
 ): Promise<import("./types").EntryFieldDeleteOutcome> {
-  return call("delete_entry_field", { projectId, entryId, fieldId, expectedRevision, backupDir });
+  return call("delete_entry_field", { projectId, entryId, fieldId, expectedRevision });
+}
+
+export function automaticBackupDirectory(): Promise<string> {
+  return call("automatic_backup_directory", {});
 }

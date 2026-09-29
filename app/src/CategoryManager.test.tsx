@@ -138,7 +138,7 @@ it("keeps hidden and failed drafts and blocks close until explicitly cancelled",
   change("Default field name", "Range");
   fireEvent.click(screen.getByRole("button", { name: "Create default field" }));
   await screen.findByText("Stale revision");
-  expect(controller.state).toBe("failed");
+  await waitFor(() => expect(controller.state).toBe("failed"));
   view.rerender(<CategoryManager {...props} open={false} />);
   expect(screen.getByText(/unfinished draft/)).toBeVisible();
   await act(async () => {

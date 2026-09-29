@@ -12,6 +12,7 @@ Tests create disposable Projects or use synthetic browser data.
 - **Manage fields** opens a wider dialog. Its left table lists current Fields,
   applicable Category/Type defaults (including ancestor Types), and Hide/Delete
   actions. Its right table lists other reusable definitions with an Add action.
+  Provider labels use plain names such as Human, without Type/Category prefixes.
   Values are omitted from these tables. Clicking a Field name opens a separate
   shared-definition editor; unfinished edits survive closing either dialog.
 - **Hide** saves an Entry-local visibility choice and preserves the Field value,
@@ -19,7 +20,8 @@ Tests create disposable Projects or use synthetic browser data.
   temporarily reveals hidden values for reading/editing; it does not change the
   saved choice. **Show** in Manage fields permanently unhides that Field.
 - **Delete** opens a review naming the current Entry, Field, and value. The explicit
-  confirmation first creates a verified recovery backup outside the package.
+  confirmation is simply **Delete / Cancel**, with no folder setup. The backend
+  first creates a verified recovery backup outside the package.
   Only then does one transaction delete this Entry's value/choice selections and
   local availability, and record a local opt-out of inherited defaults. Existing
   Category/Type bindings and other Entries are untouched. **Add** restores local
@@ -30,7 +32,9 @@ Tests create disposable Projects or use synthetic browser data.
   failed transactions roll back. The existing save controller waits for pending
   deletion during navigation/close. Dismissing a pending configuration dialog
   cannot enable value editing before its acknowledgement. Ordinary value and note
-  autosave still permit continuous typing and Tab navigation.
+  autosave still permit continuous typing and Tab navigation. No transient
+  Save field values button shifts the editor while typing; an explicit retry
+  appears only after a failed save, preserving the draft.
 - Field values use slender rows. A unit stays beside its number, and clicking any
   part of that control focuses the number. Relationship rows show the meaningful
   forward/inverse phrase and linked Entry, with expandable notes/actions. Technical
@@ -40,10 +44,23 @@ Tests create disposable Projects or use synthetic browser data.
 - A faint pointer light crosses the background, controls, and dialogs without
   intercepting clicks. Starship reveals a subtle circle pattern behind the main
   panels near the pointer. Updates are limited to one animation frame and do not
-  re-render React. Touch, reduced-motion, and forced-colors modes disable the
-  decoration; leaving the window clears it.
+  re-render React. Actual mouse events drive the light even when a mixed-input
+  device reports a coarse primary pointer or no hover. The circles sit above
+  the background canvas and behind the workspace, avoiding negative stacking.
+  Touch events, reduced-motion, and forced-colors modes disable the decoration;
+  leaving the window clears it.
 
 ## Storage and integration
+
+Automatic recovery uses the current configured Backups directory when usable.
+If no usable default exists, it uses `Recovery Backups` within the OS-local
+Worldcrafter app-data directory, still organized by Project ID. This never changes
+the saved folder preference. Corrupt or newer preferences fail closed; inability
+to create a valid backup still blocks deletion. **Backups → Automatic recovery
+copies** shows the folder and latest deletion receipt for this session, keeping
+paths and maintenance details out of Field authoring. This also works without a
+configured Backups directory; no preference or Project schema change is needed
+for this follow-up.
 
 Project schema moves from 5 to 6, adding `entry_field_presentation` with local
 `hidden` and `removed` flags keyed by Entry ID and Field ID. It creates no empty
@@ -70,21 +87,24 @@ versions, or machine-specific settings.
 - Schema-5 migration failure rolls back; retry preserves authored values. Duplicate
   merging keeps local presentation choices without orphaned references.
 - UI tests cover two tables, ancestor-default context, hidden-field preview,
-  explicit unhide/re-add, failed hiding, backup destination selection, deletion
-  review/acknowledgement, exact reviewed revisions, and pending-save navigation.
+  explicit unhide/re-add, failed hiding, automatic recovery receipts, deletion
+  review/acknowledgement, exact reviewed revisions, pending-save navigation, and
+  a calm autosave surface with a retry only on failure.
 - Pointer tests cover frame coalescing, touch exclusion, leave/unmount cleanup,
   reduced motion, and forced colors. Existing draft and autosave tests remain.
 
-Passed locally on Windows: `npm run typecheck`, `npm test -- --run` (139 tests,
+Passed locally on Windows: `npm run typecheck`, `npm test -- --run` (141 tests,
 no React act warnings), `npm run lint`,
-`npm run format:check`, `npm run build`, `cargo fmt --check`, `cargo test` (144 tests),
+`npm run format:check`, `npm run build`, `cargo fmt --check`, `cargo test` (148 tests),
 `cargo clippy --all-targets -- -D warnings`, `cargo check`, and `git diff --check`.
 The exact file list and PR status are recorded in the PR description.
 
 Headless Edge uses synthetic Tauri responses and delayed writes. It checks both
 styles at 1600px and 390px, compact row geometry, numeric whitespace/unit clicks,
-manager columns/reflow, nested-dialog focus, Hide/peek/Show, reviewed Delete/Add,
-continued title/value/note typing, and disabled motion in accessibility modes.
+manager columns/reflow, nested-dialog focus, Hide/peek/Show, simple Delete/Add,
+continued title/value/note typing without a transient save button, recovery
+receipts in Backups, and disabled motion in accessibility modes. The mouse-light
+check also emulates a coarse primary pointer/no hover.
 Screenshots are inspected and remain outside the repository. Packaged WebView2,
 screen-reader announcements, and actual Windows display scaling are not covered
 by those browser checks.
@@ -105,7 +125,8 @@ Use a new disposable Project or a disposable copy.
    Fields, then unhide it. Confirm the value and other Entries are unchanged.
 3. Delete a Field only from one Entry. Confirm the inherited default stays absent
    after reopening and another Entry keeps its value. Add it back empty, then
-   restore the recovery backup as a copy and verify the original value.
+   find its recovery copy under Backups, restore it as a copy, and verify the
+  original value. Repeat once without a configured Backups directory.
 4. Click blank space beside a number; type, pause, continue and Tab. Do the same
    with a relationship note. Check title-bar close while deletion is pending.
 5. Switch Storybook/Starship; resize, use 125–200% scaling, test long labels/units,

@@ -30,15 +30,31 @@ fn invalid_input(message: impl ToString) -> AppErrorDto {
 }
 
 #[tauri::command]
+pub fn automatic_backup_directory(
+    app: AppHandle,
+    preferences: State<'_, PreferencesStore>,
+) -> Result<String, AppErrorDto> {
+    let app_data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| invalid_input(e.to_string()))?;
+    Ok(preferences
+        .automatic_backup_root(&app_data)?
+        .display()
+        .to_string())
+}
+
+#[tauri::command]
 pub fn delete_entry_field(
+    app: AppHandle,
     state: State<'_, AppState>,
+    preferences: State<'_, PreferencesStore>,
     project_id: String,
     entry_id: String,
     field_id: String,
     expected_revision: i64,
-    backup_dir: String,
 ) -> Result<crate::domain::fields::EntryFieldDeleteOutcome, AppErrorDto> {
-    preferences::validate_directory(&PathBuf::from(&backup_dir))?;
+    let backup_dir = automatic_backup_directory(app, preferences)?;
     ProjectService::delete_entry_field(
         &state,
         parse_project_id(&project_id)?,

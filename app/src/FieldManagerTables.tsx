@@ -30,11 +30,7 @@ export function FieldManagerTables({
           (b.provider.kind === "category" && b.provider.id === entry.categoryId) ||
           (b.provider.kind === "type" && b.provider.id === entry.typeId),
       );
-    return (
-      sources
-        .map((b) => `${b.provider.kind === "type" ? "Type" : "Category"}: ${b.label}`)
-        .join(", ") || "—"
-    );
+    return sources.map((b) => b.label).join(", ") || "—";
   }
   return (
     <div className="field-manager-columns">
