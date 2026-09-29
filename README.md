@@ -348,6 +348,14 @@ Relationships use slimmer rows, and Starship has a gentle pointer light and
 background pattern. See the [focused workspace note](docs/milestones/MILESTONE_01_FOCUSED_ENTRY_WORKSPACE.md)
 for preservation rules, verification, and the Windows checklist.
 
+The desktop navigation foundation adds the last three **Recent Projects** to
+Home, a collapsible **Category sidebar**, and an exact **Type / No Type** filter.
+Use **Back / Forward** (Alt+Left / Alt+Right) to revisit Entries and filtered
+lists with their scroll position. Maintenance actions are under **Project menu**.
+This is session navigation; full tabs, pins, search, and restart restoration are
+still deferred. See the [desktop navigation note](docs/milestones/MILESTONE_01_DESKTOP_NAVIGATION.md)
+for storage rules, verification, and the Windows checklist.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
 Capabilities, relationship-backed Fields and advanced relationship constraints,
@@ -412,7 +420,7 @@ For the PR #10 handoff audit, verification and manual checks, see
 
 ### Appearance and duplicate Fields
 
-**Appearance** on the opening screen or Project toolbar switches between
+**Appearance** on the opening screen or under **Project menu** switches between
 **Storybook** (parchment and leather) and **Starship** (dark panels and brushed
 metal). This choice stays in app preferences across restarts. Custom colors
 remain deferred.

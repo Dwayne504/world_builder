@@ -3,6 +3,7 @@ import { renameProject } from "./api";
 import type { ProjectSummary, SaveState } from "./types";
 
 export interface UseProjectRenameResult {
+  recentProjectsWarning: string | null;
   draftName: string;
   saveState: SaveState;
   errorMessage: string | null;
@@ -37,6 +38,9 @@ export type SubmitOutcome =
  *    stays out of "saved" until a successful retry.
  */
 export function useProjectRename(project: ProjectSummary): UseProjectRenameResult {
+  const [recentProjectsWarning, setRecentProjectsWarning] = useState(
+    project.recentProjectsWarning ?? null,
+  );
   const [draftName, setDraftName] = useState(project.workingName);
   const [committedName, setCommittedName] = useState(project.workingName);
   const [revision, setRevision] = useState(project.revision);
@@ -67,6 +71,7 @@ export function useProjectRename(project: ProjectSummary): UseProjectRenameResul
     setErrorMessage(null);
     const request = renameProject(project.projectId, submittedName, submittedRevision)
       .then((updated): SubmitOutcome => {
+        setRecentProjectsWarning(updated.recentProjectsWarning ?? null);
         committedNameRef.current = updated.workingName;
         revisionRef.current = updated.revision;
         setCommittedName(updated.workingName);
@@ -102,6 +107,7 @@ export function useProjectRename(project: ProjectSummary): UseProjectRenameResul
   }, []);
 
   return {
+    recentProjectsWarning,
     draftName,
     saveState,
     errorMessage,

@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::application::{AppState, ProjectService};
+use crate::application::{AppState, ProjectService, ProjectSummary};
+use crate::application_home::{RecentError, RecentProject, RecentProjectsStore};
 use crate::domain::{CategoryId, EntryId, ProjectId, TypeId};
 use crate::package::layout;
 use crate::preferences::{self, PreferencesError, PreferencesStore};
@@ -214,21 +215,74 @@ pub(crate) fn preferences_path(app: &AppHandle) -> Result<PathBuf, AppErrorDto> 
     Ok(dir.join(preferences::PREFERENCES_FILE))
 }
 
+impl From<RecentError> for AppErrorDto {
+    fn from(error: RecentError) -> Self {
+        Self {
+            kind: "recent_projects_unavailable".into(),
+            message: error.to_string(),
+        }
+    }
+}
+
+// A convenience-list failure must not turn a successful Project commit/open into
+// an apparent failure. Return its separate warning with the acknowledged result.
+fn remember_project(store: &RecentProjectsStore, summary: ProjectSummary) -> ProjectSummaryDto {
+    let warning = store.remember(&summary).err().map(|e| e.to_string());
+    let mut dto: ProjectSummaryDto = summary.into();
+    dto.recent_projects_warning = warning;
+    dto
+}
+
+#[tauri::command]
+pub fn list_recent_projects(
+    recent: State<'_, RecentProjectsStore>,
+) -> Result<Vec<RecentProject>, AppErrorDto> {
+    recent.list().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn forget_recent_project(
+    recent: State<'_, RecentProjectsStore>,
+    project_id: String,
+) -> Result<(), AppErrorDto> {
+    recent
+        .forget(parse_project_id(&project_id)?)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn open_recent_project(
+    state: State<'_, AppState>,
+    recent: State<'_, RecentProjectsStore>,
+    project_id: String,
+    relocated_path: Option<String>,
+    force_stale_lock_recovery: bool,
+) -> Result<ProjectSummaryDto, AppErrorDto> {
+    let id = parse_project_id(&project_id)?;
+    let saved_path = recent.path_for(id)?;
+    let path = relocated_path.map(PathBuf::from).unwrap_or(saved_path);
+    ProjectService::open_expected_project(&state, &path, force_stale_lock_recovery, Some(id))
+        .map(|summary| remember_project(&recent, summary))
+        .map_err(Into::into)
+}
+
 #[tauri::command]
 pub fn create_project(
     state: State<'_, AppState>,
+    recent: State<'_, RecentProjectsStore>,
     base_dir: String,
     working_name: String,
 ) -> Result<ProjectSummaryDto, AppErrorDto> {
     preferences::validate_directory(std::path::Path::new(&base_dir))?;
     ProjectService::create_project(&state, &PathBuf::from(base_dir), &working_name)
-        .map(Into::into)
+        .map(|summary| remember_project(&recent, summary))
         .map_err(Into::into)
 }
 
 #[tauri::command]
 pub fn open_project(
     state: State<'_, AppState>,
+    recent: State<'_, RecentProjectsStore>,
     package_path: String,
     force_stale_lock_recovery: bool,
 ) -> Result<ProjectSummaryDto, AppErrorDto> {
@@ -237,20 +291,21 @@ pub fn open_project(
         &PathBuf::from(package_path),
         force_stale_lock_recovery,
     )
-    .map(Into::into)
+    .map(|summary| remember_project(&recent, summary))
     .map_err(Into::into)
 }
 
 #[tauri::command]
 pub fn rename_project(
     state: State<'_, AppState>,
+    recent: State<'_, RecentProjectsStore>,
     project_id: String,
     new_name: String,
     expected_revision: i64,
 ) -> Result<ProjectSummaryDto, AppErrorDto> {
     let id = parse_project_id(&project_id)?;
     ProjectService::rename_project(&state, id, &new_name, expected_revision)
-        .map(Into::into)
+        .map(|summary| remember_project(&recent, summary))
         .map_err(Into::into)
 }
 
@@ -287,6 +342,7 @@ pub fn create_backup(
 #[tauri::command]
 pub fn restore_backup_as_copy(
     state: State<'_, AppState>,
+    recent: State<'_, RecentProjectsStore>,
     backup_path: String,
     destination_dir: String,
     new_working_name: Option<String>,
@@ -298,7 +354,7 @@ pub fn restore_backup_as_copy(
         &PathBuf::from(destination_dir),
         new_working_name.as_deref(),
     )
-    .map(Into::into)
+    .map(|summary| remember_project(&recent, summary))
     .map_err(Into::into)
 }
 

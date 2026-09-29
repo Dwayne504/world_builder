@@ -1,7 +1,17 @@
+import { RecentProjects } from "./RecentProjects";
+import { WorkspaceFrame } from "./WorkspaceFrame";
+import {
+  capture,
+  initialLocation,
+  visit,
+  type NavigationIntent,
+  type WorkspaceHistory,
+  type WorkspaceLocation,
+} from "./workspaceHistory";
 import { PointerLight } from "./PointerLight";
 import { AppearanceButton, AppearanceProvider } from "./AppearanceProvider";
 import { useAppearance } from "./appearanceContext";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 import {
@@ -137,7 +147,13 @@ function canResetPreferences(kind: string | null): boolean {
   return kind === "preferences_corrupt";
 }
 
-function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void }) {
+function HomeScreen({
+  onOpened,
+  notice,
+}: {
+  onOpened: (project: ProjectSummary) => void;
+  notice?: string | null;
+}) {
   const { reload: reloadAppearance } = useAppearance();
   const [homeDialog, setHomeDialog] = useState<"settings" | "restore" | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -425,6 +441,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
 
   return (
     <main className="container home-screen">
+      {notice && <p role="alert">{notice}</p>}
       <header className="app-header">
         <div>
           <p className="eyebrow">YOUR WORLDS, AT YOUR PACE</p>
@@ -604,6 +621,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
         <section>
           <p className="eyebrow">PICK UP WHERE YOU LEFT OFF</p>
           <h2>Open Project</h2>
+          <RecentProjects busy={busy} onBusy={setBusy} onOpened={onOpened} />
           <p className="muted">Choose a Worldcrafter Project folder to continue.</p>
           <div className="row">
             <button disabled={busy} onClick={() => void handleChooseOpenPath()}>
@@ -759,7 +777,7 @@ function EntryEditor({
 }) {
   const editor = useEntryName(projectId, initialEntry);
   const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
-  const { submit: submitName, currentEntry } = editor;
+  const { submit: submitName, currentEntry, waitForPending: waitForName } = editor;
   const { isPending: isStructurePending, waitForPending: waitForStructure } = mutations;
   const committedRevision = useRef(initialEntry.globalRevision);
   committedRevision.current = Math.max(committedRevision.current, editor.entry.globalRevision);
@@ -783,10 +801,19 @@ function EntryEditor({
   }, []);
   const submit = useCallback(
     async (applyingStructure = false): Promise<SubmitOutcome> => {
+      // Capture pending writes before awaiting another editor. A failure must
+      // remain a failure rather than turn into an accidental automatic retry.
+      const pendingName = waitForName();
+      const pendingFields = fieldsController.current?.waitForPending?.();
       const relationshipOutcome = await (relationshipsController.current?.submit() ??
         Promise.resolve({ kind: "no-op" } as SubmitOutcome));
       if (relationshipOutcome.kind === "failed" || relationshipOutcome.kind === "committed-stale")
         return relationshipOutcome;
+      const pending = await Promise.all([pendingName, pendingFields]);
+      const blocked = pending.find(
+        (outcome) => outcome?.kind === "failed" || outcome?.kind === "committed-stale",
+      );
+      if (blocked) return blocked;
       const fieldOutcome = await (fieldsController.current?.submit() ??
         Promise.resolve({ kind: "no-op" } as SubmitOutcome));
       if (fieldOutcome.kind === "failed" || fieldOutcome.kind === "committed-stale")
@@ -796,7 +823,7 @@ function EntryEditor({
       if (structureDirtyRef.current && !applyingStructure) return { kind: "failed" };
       return submitName();
     },
-    [submitName, isStructurePending, waitForStructure],
+    [submitName, waitForName, isStructurePending, waitForStructure],
   );
   const [types, setTypes] = useState<TypeDef[]>([]);
   const [categoryId, setCategoryId] = useState(editor.entry.categoryId);
@@ -1175,8 +1202,82 @@ function EntryWorkflow({
   const [showTypeCreator, setShowTypeCreator] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const controllerRef = useRef<EntrySaveController | null>(null);
-  const [pendingEntry, setPendingEntry] = useState<Entry | null>(null);
-  const [pendingBack, setPendingBack] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<NavigationIntent | null>(null);
+  const [history, setHistory] = useState<WorkspaceHistory>({
+    locations: [initialLocation],
+    index: 0,
+  });
+  const historyRef = useRef(history);
+  const location = history.locations[history.index];
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [browseTypes, setBrowseTypes] = useState<TypeDef[]>([]);
+  const [typesLoading, setTypesLoading] = useState(false);
+  const [navigating, setNavigating] = useState(false);
+  const navigatingRef = useRef(false);
+  const navigationRequestRef = useRef(false);
+  const restorePosition = useRef<WorkspaceLocation | null>(null);
+  useLayoutEffect(() => {
+    const restore = restorePosition.current;
+    if (!restore) return;
+    restorePosition.current = null;
+    let observer: ResizeObserver | undefined;
+    let focused = false;
+    let frame = 0;
+    function applyPosition() {
+      if (!focused) {
+        Array.from(document.querySelectorAll<HTMLElement>("[data-navigation-focus]"))
+          .find((element) => element.dataset.navigationFocus === restore!.focusKey)
+          ?.focus({ preventScroll: true });
+        focused = true;
+      }
+      window.scrollTo({ top: restore!.scrollY, behavior: "instant" });
+      if (Math.abs(window.scrollY - restore!.scrollY) < 2) observer?.disconnect();
+    }
+    function schedule() {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(applyPosition);
+    }
+    function stop() {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    }
+    const content = document.querySelector(".workspace-content");
+    if (content && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(schedule);
+      observer.observe(content);
+    }
+    schedule();
+    const deadline = setTimeout(stop, 2000);
+    for (const event of ["pointerdown", "wheel", "keydown"])
+      window.addEventListener(event, stop, { once: true });
+    return () => {
+      stop();
+      clearTimeout(deadline);
+      for (const event of ["pointerdown", "wheel", "keydown"])
+        window.removeEventListener(event, stop);
+    };
+  }, [history]);
+
+  useEffect(() => {
+    let current = true;
+    setBrowseTypes([]);
+    setTypesLoading(!!location.categoryId);
+    if (location.categoryId)
+      void listTypes(projectId, location.categoryId)
+        .then((items) => {
+          if (current) setBrowseTypes(items);
+        })
+        .catch((reason) => {
+          if (current) setError(errorMessage(reason));
+        })
+        .finally(() => {
+          if (current) setTypesLoading(false);
+        });
+    return () => {
+      current = false;
+    };
+  }, [location.categoryId, projectId, templateEpoch]);
   const [controllerState, setControllerState] = useState<SaveState>("saved");
   const [controllerCanSubmit, setControllerCanSubmit] = useState(true);
   const creationDirty = !!(draftName || newCategoryName || newTypeName || creationTouched);
@@ -1253,82 +1354,119 @@ function EntryWorkflow({
     [onController],
   );
 
-  function closeEditor() {
-    if (mutations.isPending()) {
-      setPendingEntry(null);
-      setPendingBack(true);
-      void mutations.waitForPending().then((successful) => {
-        if (successful) {
-          controllerRef.current = null;
-          onController(null);
-          setSelected(null);
-        } else {
-          setError(mutations.currentError() ?? "Structural save failed.");
-        }
-      });
-      return;
-    }
-    if (controllerRef.current?.state !== "saved") {
-      setPendingEntry(null);
-      setPendingBack(true);
-      setError("This Entry has unsaved changes. Save or discard them before navigating.");
-      return;
-    }
-    controllerRef.current = null;
-    onController(null);
-    setSelected(null);
+  function destination(
+    entryId: string | null,
+    category = location.categoryId,
+    type = location.typeId,
+  ): WorkspaceLocation {
+    return { ...initialLocation, entryId, categoryId: category, typeId: type };
   }
 
-  function openEntry(entry: Entry) {
-    if (mutations.isPending()) {
-      setPendingEntry(entry);
-      setPendingBack(false);
-      void mutations.waitForPending().then((successful) => {
-        if (successful) {
-          setPendingEntry(null);
-          setSelected(entry);
-        } else {
-          setError(mutations.currentError() ?? "Structural save failed.");
-        }
-      });
+  async function commitNavigation(intent: NavigationIntent, knownEntry?: Entry) {
+    if (navigatingRef.current) return;
+    navigatingRef.current = true;
+    setNavigating(true);
+    try {
+      // Fetch committed content on every visit: history must not replay stale revisions.
+      const entry = intent.location.entryId
+        ? (knownEntry ?? (await getEntry(projectId, intent.location.entryId)))
+        : null;
+      const current = capture(
+        historyRef.current,
+        window.scrollY,
+        collapsedGroups,
+        (document.activeElement as HTMLElement | null)?.dataset.navigationFocus ?? null,
+      );
+      const next =
+        intent.index === undefined
+          ? visit(current, intent.location)
+          : { ...current, index: intent.index };
+      historyRef.current = next;
+      restorePosition.current = next.locations[next.index];
+      setHistory(next);
+      setCollapsedGroups(next.locations[next.index].collapsedGroups);
+      controllerRef.current = null;
+      onController(null);
+      setSelected(entry);
+      setPendingNavigation(null);
+      setError(null);
+      if (!entry) void refresh().catch((reason) => setError(errorMessage(reason)));
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      navigatingRef.current = false;
+      setNavigating(false);
+    }
+  }
+
+  async function requestNavigation(intent: NavigationIntent, knownEntry?: Entry) {
+    if (navigatingRef.current || navigationRequestRef.current || creationDirty) return;
+    if (mutations.isPending() || controllerRef.current?.state === "saving") {
+      navigationRequestRef.current = true;
+      setNavigating(true);
+      setPendingNavigation(intent);
+      try {
+        const entrySave = selected
+          ? controllerRef.current?.submit()
+          : Promise.resolve({ kind: "no-op" });
+        const structureSaved = await mutations.waitForPending();
+        const outcome = await entrySave;
+        if (structureSaved && (outcome?.kind === "committed" || outcome?.kind === "no-op")) {
+          await commitNavigation(intent, knownEntry);
+        } else setError("This Entry has unsaved changes. Save or discard them before navigating.");
+      } catch (reason) {
+        setError(errorMessage(reason));
+      } finally {
+        navigationRequestRef.current = false;
+        setNavigating(false);
+      }
       return;
     }
     if (selected && controllerRef.current?.state !== "saved") {
-      setPendingEntry(entry);
-      setPendingBack(false);
+      setPendingNavigation(intent);
       setError("This Entry has unsaved changes. Save or discard them before navigating.");
       return;
     }
-    setSelected(entry);
+    await commitNavigation(intent, knownEntry);
   }
 
+  function openEntry(entry: Entry) {
+    void requestNavigation({ location: destination(entry.id) }, entry);
+  }
+  function closeEditor() {
+    void requestNavigation({ location: destination(null) });
+  }
   async function saveAndNavigate() {
+    if (!pendingNavigation) return;
     const outcome = await controllerRef.current?.submit();
-    if (outcome?.kind === "committed" || outcome?.kind === "no-op") {
-      const destination = pendingEntry;
-      const goBack = pendingBack;
-      setPendingEntry(null);
-      setPendingBack(false);
-      setError(null);
-      if (destination) setSelected(destination);
-      else if (goBack) {
-        controllerRef.current = null;
-        onController(null);
-        setSelected(null);
-      }
+    if ((outcome?.kind === "committed" || outcome?.kind === "no-op") && !mutations.isPending()) {
+      await commitNavigation(pendingNavigation);
     }
   }
-
   function discardAndNavigate() {
-    const destination = pendingEntry;
-    const goBack = pendingBack;
-    setPendingEntry(null);
-    setPendingBack(false);
-    setError(null);
-    controllerRef.current = null;
-    onController(null);
-    setSelected(goBack ? null : destination);
+    if (pendingNavigation && controllerState !== "saving" && !mutations.isPending())
+      void commitNavigation(pendingNavigation);
   }
+  function traverse(index: number) {
+    const target = historyRef.current.locations[index];
+    if (target) void requestNavigation({ location: target, index });
+  }
+  const navigationProps = {
+    categories,
+    categoryId: location.categoryId,
+    collapsed: sidebarCollapsed,
+    onToggle: () => setSidebarCollapsed((value) => !value),
+    onBrowse: (id: string) => {
+      if (!selected && location.categoryId === id && !location.typeId) return;
+      void requestNavigation({ location: destination(null, id, "") });
+    },
+    onBack: () => traverse(history.index - 1),
+    onForward: () => traverse(history.index + 1),
+    canBack: history.index > 0,
+    canForward: history.index + 1 < history.locations.length,
+    busy: navigating,
+    browsingDisabled: creationDirty,
+  };
 
   async function addCategory() {
     const outcome = await mutations.run(
@@ -1381,7 +1519,7 @@ function EntryWorkflow({
         setCreationTouched(false);
         creationDirtyRef.current = false;
         setCreateOpen(false);
-        setSelected(entry);
+        void commitNavigation({ location: destination(entry.id) }, entry);
       },
     );
     if (outcome.kind === "failed") {
@@ -1391,22 +1529,24 @@ function EntryWorkflow({
 
   if (selected) {
     return (
-      <>
+      <WorkspaceFrame {...navigationProps}>
         {error && (
           <div role="alert">
             <p>{error}</p>
-            {(pendingEntry || pendingBack) && (
+            {pendingNavigation && (
               <div className="row">
                 {controllerCanSubmit && (
                   <button onClick={() => void saveAndNavigate()}>Save and continue</button>
                 )}
-                <button disabled={controllerState === "saving"} onClick={discardAndNavigate}>
+                <button
+                  disabled={controllerState === "saving" || mutations.isPending() || navigating}
+                  onClick={discardAndNavigate}
+                >
                   Discard and continue
                 </button>
                 <button
                   onClick={() => {
-                    setPendingEntry(null);
-                    setPendingBack(false);
+                    setPendingNavigation(null);
                     setError(null);
                   }}
                 >
@@ -1425,215 +1565,283 @@ function EntryWorkflow({
           categories={categories}
           mutations={mutations}
           onController={receiveController}
-          onClose={() => {
-            closeEditor();
-            void refresh();
-          }}
-          onNavigate={(id) => {
-            void getEntry(projectId, id)
-              .then(openEntry)
-              .catch((reason) => setError(errorMessage(reason)));
-          }}
+          onClose={closeEditor}
+          onNavigate={(id) => void requestNavigation({ location: destination(id) })}
           onChanged={(updated) => {
             onGlobalRevision(updated.globalRevision);
             setSelected(updated);
             setEntries((items) => items.map((item) => (item.id === updated.id ? updated : item)));
           }}
         />
-      </>
+      </WorkspaceFrame>
     );
   }
 
+  const shownEntries = entries.filter(
+    (entry) =>
+      (!location.categoryId || entry.categoryId === location.categoryId) &&
+      (!location.typeId ||
+        (location.typeId === "__untyped" ? !entry.typeId : entry.typeId === location.typeId)),
+  );
   return (
-    <section className="entries-panel">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">WORLD MATERIAL</p>
-          <h2>Entries</h2>
-        </div>
-        <button disabled={mutations.state === "saving"} onClick={() => setCreateOpen(true)}>
-          Add Entry
-        </button>
-      </div>
-      <p className="muted">Characters, places, objects, or an idea without a name yet.</p>
-      {entries.length === 0 && (
-        <p className="empty-state">Your world starts with one idea. Add your first Entry.</p>
-      )}
-      {!createOpen && error && <p role="alert">{error}</p>}
-      {!createOpen && creationDirty && (
-        <p className="field-note">
-          You have an unfinished Entry.{" "}
-          <button className="quiet-button" onClick={() => setCreateOpen(true)}>
-            Continue Entry draft
-          </button>
-        </p>
-      )}
-      <div className="entry-groups">
-        {categories.map((category) => {
-          const members = entries.filter((entry) => entry.categoryId === category.id);
-          if (!members.length) return null;
-          return (
-            <details key={category.id} className="entry-group" open>
-              <summary>
-                <h3>{category.name}</h3>
-                <span className="muted">{members.length}</span>
-              </summary>
-              <ul className="entry-list">
-                {members.map((entry) => (
-                  <li key={entry.id}>
-                    <button
-                      disabled={mutations.state === "saving" || creationDirty}
-                      onClick={() => openEntry(entry)}
-                    >
-                      {entry.displayName}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          );
-        })}
-      </div>
-      <Dialog open={createOpen} title="Add Entry" onClose={() => setCreateOpen(false)}>
-        <p>A name is enough to start. Category and Type can be changed later.</p>
-        {error && <p role="alert">{error}</p>}
-        <fieldset disabled={mutations.state === "saving"} className="creation-form">
-          <label>
-            Name (optional)
-            <input
-              aria-label="new-entry-name"
-              value={draftName}
-              onChange={(event) => setDraftName(event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Category
-            <select
-              aria-label="new-entry-category"
-              disabled={mutations.state === "saving"}
-              value={categoryId}
-              onChange={(event) => {
-                setTypes([]);
-                setCategoryId(event.currentTarget.value);
-                setTypeId("");
-                setCreationTouched(true);
-              }}
-            >
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </label>
+    <WorkspaceFrame {...navigationProps}>
+      <section className="entries-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">WORLD MATERIAL</p>
+            <h2>
+              {categories.find((category) => category.id === location.categoryId)?.name ??
+                "Entries"}
+            </h2>
+          </div>
           <button
             disabled={mutations.state === "saving"}
-            onClick={() => setShowCategoryCreator(true)}
+            onClick={() => {
+              if (!creationDirty && location.categoryId) {
+                setCategoryId(location.categoryId);
+                setTypeId(location.typeId === "__untyped" ? "" : location.typeId);
+              }
+              setCreateOpen(true);
+            }}
           >
-            Create Category inline
+            Add Entry
           </button>
-          {showCategoryCreator && (
-            <fieldset className="inline-creator">
-              <legend>New Category</legend>
-              <label>
-                Category name
-                <input
-                  aria-label="inline-category-name"
-                  value={newCategoryName}
-                  onChange={(event) => setNewCategoryName(event.currentTarget.value)}
-                />
-              </label>
-              <div className="row">
-                <button
-                  disabled={!newCategoryName.trim() || mutations.state === "saving"}
-                  onClick={() => void addCategory()}
-                >
-                  Add Category
-                </button>
-                <button
-                  disabled={mutations.state === "saving"}
-                  onClick={() => {
-                    setNewCategoryName("");
-                    setShowCategoryCreator(false);
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </fieldset>
-          )}
-          <label>
-            Type (optional)
+        </div>
+        {location.categoryId && (
+          <label className="browse-filter">
+            Type
             <select
-              aria-label="new-entry-type"
-              disabled={mutations.state === "saving"}
-              value={typeId}
-              onChange={(event) => {
-                setTypeId(event.currentTarget.value);
-                setCreationTouched(true);
-              }}
+              aria-label="Filter by Type"
+              value={location.typeId}
+              disabled={typesLoading || navigating || creationDirty}
+              onChange={(event) =>
+                void requestNavigation({
+                  location: destination(null, location.categoryId, event.currentTarget.value),
+                })
+              }
             >
-              <option value="">No Type</option>
-              {types.map((type) => (
-                <option key={type.id} value={type.id}>
+              <option value="">All Types</option>
+              <option value="__untyped">No Type</option>
+              {browseTypes.map((type) => (
+                <option value={type.id} key={type.id}>
                   {type.name}
                 </option>
               ))}
             </select>
           </label>
-          <button
-            disabled={!categoryId || mutations.state === "saving"}
-            onClick={() => setShowTypeCreator(true)}
-          >
-            Create Type inline
-          </button>
-          {showTypeCreator && (
-            <fieldset className="inline-creator">
-              <legend>New Type</legend>
-              <label>
-                Type name
-                <input
-                  aria-label="inline-type-name"
-                  value={newTypeName}
-                  onChange={(event) => setNewTypeName(event.currentTarget.value)}
-                />
-              </label>
-              <div className="row">
-                <button
-                  disabled={!newTypeName.trim() || mutations.state === "saving"}
-                  onClick={() => void addType()}
-                >
-                  Add Type
-                </button>
-                <button
-                  disabled={mutations.state === "saving"}
-                  onClick={() => {
-                    setNewTypeName("");
-                    setShowTypeCreator(false);
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </fieldset>
-          )}
-          <button
-            disabled={mutations.state === "saving" || !!newCategoryName || !!newTypeName}
-            onClick={() => void addEntry()}
-          >
-            Create Entry
-          </button>
-          <button onClick={cancelCreation}>Cancel new Entry</button>
-        </fieldset>
-      </Dialog>
-    </section>
+        )}
+        {entries.length > 0 && shownEntries.length === 0 && (
+          <p className="empty-state">No Entries match this view.</p>
+        )}
+        {entries.length === 0 && (
+          <p className="empty-state">Your world starts with one idea. Add your first Entry.</p>
+        )}
+        {!createOpen && error && <p role="alert">{error}</p>}
+        {!createOpen && creationDirty && (
+          <p className="field-note">
+            You have an unfinished Entry.{" "}
+            <button className="quiet-button" onClick={() => setCreateOpen(true)}>
+              Continue Entry draft
+            </button>
+          </p>
+        )}
+        <div className="entry-groups">
+          {categories.map((category) => {
+            const members = shownEntries.filter((entry) => entry.categoryId === category.id);
+            if (!members.length) return null;
+            return (
+              <details
+                key={category.id}
+                className="entry-group"
+                open={!collapsedGroups.includes(category.id)}
+                onToggle={(event) => {
+                  const open = event.currentTarget.open;
+                  if (collapsedGroups.includes(category.id) === !open) return;
+                  setCollapsedGroups((groups) =>
+                    open
+                      ? groups.filter((id) => id !== category.id)
+                      : groups.includes(category.id)
+                        ? groups
+                        : [...groups, category.id],
+                  );
+                }}
+              >
+                <summary>
+                  <h3>{category.name}</h3>
+                  <span className="muted">{members.length}</span>
+                </summary>
+                <ul className="entry-list">
+                  {members.map((entry) => (
+                    <li key={entry.id}>
+                      <button
+                        disabled={mutations.state === "saving" || creationDirty}
+                        data-navigation-focus={entry.id}
+                        onClick={() => openEntry(entry)}
+                      >
+                        {entry.displayName}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            );
+          })}
+        </div>
+        <Dialog open={createOpen} title="Add Entry" onClose={() => setCreateOpen(false)}>
+          <p>A name is enough to start. Category and Type can be changed later.</p>
+          {error && <p role="alert">{error}</p>}
+          <fieldset disabled={mutations.state === "saving"} className="creation-form">
+            <label>
+              Name (optional)
+              <input
+                aria-label="new-entry-name"
+                value={draftName}
+                onChange={(event) => setDraftName(event.currentTarget.value)}
+              />
+            </label>
+            <label>
+              Category
+              <select
+                aria-label="new-entry-category"
+                disabled={mutations.state === "saving"}
+                value={categoryId}
+                onChange={(event) => {
+                  setTypes([]);
+                  setCategoryId(event.currentTarget.value);
+                  setTypeId("");
+                  setCreationTouched(true);
+                }}
+              >
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              disabled={mutations.state === "saving"}
+              onClick={() => setShowCategoryCreator(true)}
+            >
+              Create Category inline
+            </button>
+            {showCategoryCreator && (
+              <fieldset className="inline-creator">
+                <legend>New Category</legend>
+                <label>
+                  Category name
+                  <input
+                    aria-label="inline-category-name"
+                    value={newCategoryName}
+                    onChange={(event) => setNewCategoryName(event.currentTarget.value)}
+                  />
+                </label>
+                <div className="row">
+                  <button
+                    disabled={!newCategoryName.trim() || mutations.state === "saving"}
+                    onClick={() => void addCategory()}
+                  >
+                    Add Category
+                  </button>
+                  <button
+                    disabled={mutations.state === "saving"}
+                    onClick={() => {
+                      setNewCategoryName("");
+                      setShowCategoryCreator(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </fieldset>
+            )}
+            <label>
+              Type (optional)
+              <select
+                aria-label="new-entry-type"
+                disabled={mutations.state === "saving"}
+                value={typeId}
+                onChange={(event) => {
+                  setTypeId(event.currentTarget.value);
+                  setCreationTouched(true);
+                }}
+              >
+                <option value="">No Type</option>
+                {types.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              disabled={!categoryId || mutations.state === "saving"}
+              onClick={() => setShowTypeCreator(true)}
+            >
+              Create Type inline
+            </button>
+            {showTypeCreator && (
+              <fieldset className="inline-creator">
+                <legend>New Type</legend>
+                <label>
+                  Type name
+                  <input
+                    aria-label="inline-type-name"
+                    value={newTypeName}
+                    onChange={(event) => setNewTypeName(event.currentTarget.value)}
+                  />
+                </label>
+                <div className="row">
+                  <button
+                    disabled={!newTypeName.trim() || mutations.state === "saving"}
+                    onClick={() => void addType()}
+                  >
+                    Add Type
+                  </button>
+                  <button
+                    disabled={mutations.state === "saving"}
+                    onClick={() => {
+                      setNewTypeName("");
+                      setShowTypeCreator(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </fieldset>
+            )}
+            <button
+              disabled={mutations.state === "saving" || !!newCategoryName || !!newTypeName}
+              onClick={() => void addEntry()}
+            >
+              Create Entry
+            </button>
+            <button onClick={cancelCreation}>Cancel new Entry</button>
+          </fieldset>
+        </Dialog>
+      </section>
+    </WorkspaceFrame>
   );
 }
 
-function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClosed: () => void }) {
+function ProjectScreen({
+  project,
+  onClosed,
+}: {
+  project: ProjectSummary;
+  onClosed: (notice?: string) => void;
+}) {
   const [projectDialog, setProjectDialog] = useState<"settings" | "backup" | "categories" | null>(
     null,
   );
+  const projectMenuRef = useRef<HTMLDetailsElement>(null);
+  function openProjectDialog(dialog: "settings" | "backup" | "categories") {
+    if (projectMenuRef.current) {
+      projectMenuRef.current.open = false;
+      projectMenuRef.current.querySelector("summary")?.focus();
+    }
+    setProjectDialog(dialog);
+  }
   const rename = useProjectRename(project);
   const mutations = useMutationCoordinator();
   const {
@@ -1651,7 +1859,6 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const [pendingCloseIntent, setPendingCloseIntent] = useState<CloseIntent | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const approvedNativeClose = useRef(false);
   const [templateEpoch, setTemplateEpoch] = useState(0);
   const managerControllerRef = useRef<FieldsController | null>(null);
   const [managerState, setManagerState] = useState<SaveState>("saved");
@@ -1763,11 +1970,20 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           await closeProject(project.projectId);
           const shouldExitWindow = nativeWindowCloseRequested.current;
           closed = true;
-          onClosed();
           if (shouldExitWindow && isTauriWindow()) {
-            approvedNativeClose.current = true;
-            await getCurrentWindow().close();
+            try {
+              // The save/close guard and backend shutdown have already finished.
+              // Close directly instead of queuing a second closeRequested event
+              // whose listener could disappear when we return to Home.
+              await getCurrentWindow().destroy();
+            } catch (err) {
+              onClosed(
+                `Your Project is closed, but the app window could not close. ${errorMessage(err)}`,
+              );
+              return;
+            }
           }
+          onClosed();
         } catch (err) {
           setCloseError(errorMessage(err));
         } finally {
@@ -1903,9 +2119,6 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
     let unlisten: (() => void) | undefined;
     void window
       .onCloseRequested((event) => {
-        if (approvedNativeClose.current) {
-          return;
-        }
         event.preventDefault();
         requestCloseRef.current("native-window");
       })
@@ -1937,22 +2150,33 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           >
             {saveStateLabel(combinedSaveState)}
           </span>
-          <button
-            className="quiet-button"
-            disabled={entrySaveState !== "saved" || mutationState === "saving"}
-            onClick={() => setProjectDialog("categories")}
-          >
-            Categories
-          </button>
-          <button className="quiet-button" onClick={() => setProjectDialog("backup")}>
-            Backups
-          </button>
-          <button className="quiet-button" onClick={() => setProjectDialog("settings")}>
-            Project settings
-          </button>
-          <AppearanceButton />
+          <details className="project-menu" ref={projectMenuRef}>
+            <summary>Project menu</summary>
+            <div className="project-menu-panel">
+              <button
+                className="quiet-button"
+                disabled={entrySaveState !== "saved" || mutationState === "saving"}
+                onClick={() => openProjectDialog("categories")}
+              >
+                Categories
+              </button>
+              <button className="quiet-button" onClick={() => openProjectDialog("backup")}>
+                Backups
+              </button>
+              <button className="quiet-button" onClick={() => openProjectDialog("settings")}>
+                Project settings
+              </button>
+              <AppearanceButton />
+            </div>
+          </details>
         </nav>
       </header>
+      {rename.recentProjectsWarning && (
+        <p role="alert">
+          The Recent Projects shortcut could not be updated. This does not affect saving your
+          Project. {rename.recentProjectsWarning}
+        </p>
+      )}
       {backupStatus && projectDialog !== "backup" && (
         <div role="status" className="backup-notice">
           <p>{backupStatus.startsWith("Backup created at ") ? "Backup created." : backupStatus}</p>
@@ -2125,11 +2349,28 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
 
 function Workspace() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   if (!project) {
-    return <HomeScreen onOpened={setProject} />;
+    return (
+      <HomeScreen
+        notice={notice}
+        onOpened={(opened) => {
+          setNotice(null);
+          setProject(opened);
+        }}
+      />
+    );
   }
-  return <ProjectScreen project={project} onClosed={() => setProject(null)} />;
+  return (
+    <ProjectScreen
+      project={project}
+      onClosed={(message) => {
+        setNotice(message ?? null);
+        setProject(null);
+      }}
+    />
+  );
 }
 
 function App() {

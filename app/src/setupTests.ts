@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { vi } from "vitest";
 
 // jsdom does not implement the native dialog lifecycle. Browser focus/modal
 // behavior is checked separately; tests still exercise open and cancel events.
@@ -8,3 +9,5 @@ HTMLDialogElement.prototype.showModal = function () {
 HTMLDialogElement.prototype.close = function () {
   this.removeAttribute("open");
 };
+
+Object.defineProperty(window, "scrollTo", { value: vi.fn(), writable: true });

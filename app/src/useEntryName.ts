@@ -99,6 +99,10 @@ export function useEntryName(projectId: string, initialEntry: Entry) {
   );
 
   const currentEntry = useCallback(() => entryRef.current, []);
+  const waitForPending = useCallback(
+    () => inFlightRef.current ?? Promise.resolve({ kind: "no-op" } as SubmitOutcome),
+    [],
+  );
 
   return {
     entry,
@@ -109,5 +113,6 @@ export function useEntryName(projectId: string, initialEntry: Entry) {
     submit,
     replaceEntry,
     currentEntry,
+    waitForPending,
   };
 }

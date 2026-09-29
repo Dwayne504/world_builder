@@ -49,6 +49,127 @@ body::before {
   min-height: 100vh;
   padding: 32px clamp(20px, 3vw, 64px) 64px;
 }
+
+/* Desktop navigation remains separate from authoring and configuration. */
+.navigation-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 18px;
+  border-block: 1px solid var(--line);
+  padding: 6px 0;
+}
+.workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(150px, 200px) minmax(0, 1fr);
+  gap: clamp(16px, 2vw, 32px);
+  align-items: start;
+}
+.workspace-layout.sidebar-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+.project-sidebar {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.project-sidebar nav {
+  display: grid;
+  gap: 4px;
+}
+.project-sidebar button {
+  text-align: left;
+  border-color: transparent;
+  overflow-wrap: anywhere;
+}
+.project-sidebar button[aria-current] {
+  background: var(--tint);
+  border-color: var(--line);
+}
+.project-sidebar .eyebrow {
+  margin: 20px 12px 4px;
+}
+.navigation-guard {
+  container-type: inline-size;
+  container-name: workspace;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.browse-filter {
+  max-width: 300px;
+  margin-block: 18px;
+}
+.recent-projects ul {
+  padding: 0;
+  list-style: none;
+  margin: 0 0 20px;
+}
+.recent-projects li {
+  border-bottom: 1px solid var(--line);
+  padding-block: 8px;
+}
+.recent-project-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.recent-project-name {
+  flex: 1;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.recent-project-line details {
+  margin: 0;
+}
+.recent-project-line details[open] {
+  width: 100%;
+}
+.project-menu {
+  margin: 0;
+  position: relative;
+}
+.project-menu > summary {
+  padding: 8px 12px;
+}
+.project-menu-panel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 10;
+  min-width: 205px;
+  display: grid;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0003;
+}
+.project-menu-panel button {
+  text-align: left;
+}
+@media (max-width: 800px) {
+  .workspace-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .project-sidebar {
+    position: static;
+    max-height: 180px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 12px;
+  }
+  .project-sidebar nav {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .project-sidebar .eyebrow {
+    display: none;
+  }
+}
 .app-header,
 .section-heading,
 .home-footer,
@@ -765,7 +886,7 @@ textarea {
   padding: 0;
   margin: 0;
 }
-@media (min-width: 1200px) {
+@container workspace (min-width: 1060px) {
   .entry-content {
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
     column-gap: clamp(32px, 4vw, 72px);

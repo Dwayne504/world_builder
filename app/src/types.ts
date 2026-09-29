@@ -4,7 +4,16 @@
  * the Milestone 01 Trust Foundation slice, not the full domain model.
  */
 
+export interface RecentProject {
+  projectId: string;
+  workingName: string;
+  packagePath: string;
+  lastAccessedAt: string;
+  available: boolean;
+}
+
 export interface ProjectSummary {
+  recentProjectsWarning?: string | null;
   projectId: string;
   workingName: string;
   revision: number;
