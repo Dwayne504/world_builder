@@ -322,6 +322,16 @@ retirement preserve existing relationships. See the [Relationships foundation
 note](docs/milestones/MILESTONE_01_RELATIONSHIPS_FOUNDATION.md) for scope,
 verification, remaining Ownership work, and the Windows checklist.
 
+Category defaults and Number units add schema 5. Use **Categories** to create
+Categories and Types and configure their optional default Fields before creating
+Entries. Number Fields accept a custom unit label such as `tons`, `km`, or
+`gold crowns`; enter the number separately, without thousands separators.
+Project Home groups Entries under collapsible Category headings. Existing Entries
+can create and select a Type in **Entry settings**, then apply the assignment.
+Relationship notes and Field value controls remain usable during their own
+autosaves. See the [Category defaults and units note](docs/milestones/MILESTONE_01_CATEGORY_TEMPLATES_AND_UNITS.md)
+for preservation rules, verification, remaining work, and the Windows checklist.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
 Capabilities, relationship-backed Fields and advanced relationship constraints,

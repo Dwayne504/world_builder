@@ -581,3 +581,43 @@ textarea {
 .checkbox-row input {
   width: auto;
 }
+
+.entry-group {
+  margin: 20px 0;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.entry-group > summary {
+  cursor: pointer;
+}
+.entry-group > summary h3 {
+  display: inline;
+  margin: 0 12px 0 4px;
+}
+.entry-group .entry-list {
+  margin-top: 12px;
+}
+.manager-types,
+.template-fields {
+  list-style: none;
+  padding: 0;
+}
+.manager-types li,
+.template-fields li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.manager-types small,
+.template-fields small {
+  color: var(--muted);
+}
+.field-unit {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}

@@ -21,6 +21,23 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn read_field_catalog(
+        state: &AppState,
+        project_id: ProjectId,
+    ) -> Result<crate::domain::fields::FieldCatalog, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.read_field_catalog())
+    }
+    pub fn apply_template_fields(
+        state: &AppState,
+        project_id: ProjectId,
+        expected: i64,
+        command: crate::domain::fields::FieldCommand,
+    ) -> Result<crate::domain::fields::FieldCatalog, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.apply_template_fields(expected, command)
+        })
+    }
+
     pub fn read_relationships(
         state: &AppState,
         project_id: ProjectId,

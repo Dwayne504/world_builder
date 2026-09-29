@@ -86,6 +86,8 @@ pub enum FieldCommand {
     Create {
         name: String,
         field_kind: FieldKind,
+        #[serde(default)]
+        unit: Option<String>,
         provider: FieldProvider,
         options: Vec<String>,
         value: Option<FieldValue>,
@@ -144,6 +146,7 @@ pub struct FieldDefinition {
     pub id: FieldId,
     pub name: String,
     pub kind: FieldKind,
+    pub unit: Option<String>,
     pub retired: bool,
     pub revision: i64,
     pub options: Vec<ChoiceOption>,
@@ -164,4 +167,20 @@ pub struct EntryFields {
     pub global_revision: i64,
     pub fields: Vec<EntryField>,
     pub definitions: Vec<FieldDefinition>,
+}
+
+/// Shared definitions can be managed before the first Entry exists.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldCatalog {
+    pub global_revision: i64,
+    pub definitions: Vec<FieldDefinition>,
+}
+impl From<EntryFields> for FieldCatalog {
+    fn from(snapshot: EntryFields) -> Self {
+        Self {
+            global_revision: snapshot.global_revision,
+            definitions: snapshot.definitions,
+        }
+    }
 }

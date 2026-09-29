@@ -31,7 +31,7 @@ export function parseFieldDraft(field: EntryField, draft: FieldDraft): FieldValu
 export function useEntryFields(
   projectId: string,
   entryId: string,
-  entryRevision: number,
+  entryRevision: number | string,
   onRevision: (revision: number) => void,
   getRevision?: () => number,
 ) {
@@ -140,7 +140,8 @@ export function useEntryFields(
       setError((err as Error).message);
       return Promise.resolve({ kind: "failed" });
     }
-    // Inputs are disabled during publication. Drafts are cleared only after ack.
+    // Keep typing and Tab navigation available during autosave. Only drafts
+    // matching this acknowledgement are cleared; newer edits get their own save.
     return command({ kind: "set_values", edits }, () => {
       const remaining = Object.fromEntries(
         Object.entries(draftsRef.current).filter(

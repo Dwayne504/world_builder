@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryFieldsPanel } from "./EntryFieldsPanel";
 import { applyFields, readFields } from "./api";
@@ -49,6 +50,86 @@ function show() {
   return onController;
 }
 describe("Field authoring", () => {
+  it("creates a Number and custom unit together and keeps the value numeric", async () => {
+    show();
+    await screen.findByLabelText("Value: Eye colour");
+    fireEvent.click(screen.getByText("Add a field", { selector: "summary" }));
+    expect(screen.getByLabelText("new-field-kind")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("new-field-name"), { target: { value: "Mass" } });
+    fireEvent.change(screen.getByLabelText("new-field-kind"), { target: { value: "number" } });
+    fireEvent.change(screen.getByLabelText("new-field-unit"), { target: { value: "tons" } });
+    fireEvent.change(screen.getByLabelText("new-field-value"), { target: { value: "8000000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+    await waitFor(() =>
+      expect(applyFields).toHaveBeenCalledWith(
+        "project",
+        "entry",
+        2,
+        expect.objectContaining({
+          fieldKind: "number",
+          unit: "tons",
+          value: { kind: "number", value: 8000000 },
+        }),
+      ),
+    );
+  });
+  it("keeps default field inputs editable and focused while values save", async () => {
+    const user = userEvent.setup();
+    const a = { ...definition, id: "mass", name: "Mass", kind: "number" as const, unit: "tons" };
+    const b = { ...definition, id: "range", name: "Range", kind: "number" as const, unit: "km" };
+    const values = {
+      globalRevision: 2,
+      definitions: [a, b],
+      fields: [a, b].map((d) => ({ definition: d, available: true, value: null })),
+    };
+    vi.mocked(readFields).mockResolvedValue(values);
+    let resolve!: (value: EntryFields) => void;
+    vi.mocked(applyFields).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    show();
+    const mass = await screen.findByLabelText("Value: Mass");
+    const range = screen.getByLabelText("Value: Range");
+    mass.focus();
+    fireEvent.change(mass, { target: { value: "8000000" } });
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Clear value: Mass" })).toHaveFocus();
+    await user.tab();
+    await waitFor(() => expect(applyFields).toHaveBeenCalled());
+    expect(range).toBeEnabled();
+    expect(range).toHaveFocus();
+    fireEvent.change(range, { target: { value: "10" } });
+    await act(async () =>
+      resolve({
+        ...values,
+        globalRevision: 3,
+        fields: [
+          { definition: a, available: true, value: { kind: "number", value: 8000000 } },
+          values.fields[1],
+        ],
+      }),
+    );
+    expect(range).toHaveValue("10");
+    expect(range).toHaveFocus();
+    vi.mocked(applyFields).mockResolvedValueOnce({
+      ...values,
+      globalRevision: 4,
+      fields: [
+        { definition: a, available: true, value: { kind: "number", value: 8000000 } },
+        { definition: b, available: true, value: { kind: "number", value: 10 } },
+      ],
+    });
+    await waitFor(() => expect(applyFields).toHaveBeenCalledTimes(2));
+    expect(applyFields).toHaveBeenLastCalledWith("project", "entry", 3, {
+      kind: "set_values",
+      edits: [{ fieldId: "range", value: { kind: "number", value: 10 } }],
+    });
+    expect(range).toHaveValue("10");
+    expect(range).toHaveFocus();
+  });
   it("keeps a shared-definition draft when its dialog closes with Escape", async () => {
     const onController = show();
     await screen.findByLabelText("Value: Eye colour");

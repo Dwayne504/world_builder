@@ -51,10 +51,18 @@ pub struct ExistingProjectPreflight {
 }
 
 type Reply<T> = Sender<Result<T, PersistenceError>>;
-use crate::domain::fields::{EntryFields, FieldCommand};
+use crate::domain::fields::{EntryFields, FieldCatalog, FieldCommand};
 use crate::domain::relationships::{EntryRelationships, RelationshipCommand};
 
 enum Job {
+    ReadFieldCatalog {
+        reply: Reply<FieldCatalog>,
+    },
+    ApplyTemplateFields {
+        expected: i64,
+        command: FieldCommand,
+        reply: Reply<FieldCatalog>,
+    },
     ReadRelationships {
         entry: EntryId,
         reply: Reply<EntryRelationships>,
@@ -286,6 +294,17 @@ impl ProjectDbWorker {
         let mut conn = conn;
         for job in jobs {
             match job {
+                Job::ReadFieldCatalog { reply } => {
+                    let _ = reply.send(super::fields::read_catalog(&conn));
+                }
+                Job::ApplyTemplateFields {
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::fields::apply_template(&mut conn, expected, command));
+                }
+
                 Job::ReadRelationships { entry, reply } => {
                     let _ = reply.send(super::relationships::read(&conn, entry));
                 }
@@ -443,6 +462,20 @@ impl ProjectDbWorker {
         })
     }
 
+    pub fn read_field_catalog(&self) -> Result<FieldCatalog, PersistenceError> {
+        self.call(|reply| Job::ReadFieldCatalog { reply })
+    }
+    pub fn apply_template_fields(
+        &self,
+        expected: i64,
+        command: FieldCommand,
+    ) -> Result<FieldCatalog, PersistenceError> {
+        self.call(|reply| Job::ApplyTemplateFields {
+            expected,
+            command,
+            reply,
+        })
+    }
     pub fn read_fields(&self, entry: EntryId) -> Result<EntryFields, PersistenceError> {
         self.call(|reply| Job::ReadFields { entry, reply })
     }

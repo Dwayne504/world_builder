@@ -21,11 +21,24 @@ fn parse_kind(raw: String) -> Result<FieldKind, PersistenceError> {
 }
 
 pub(super) fn read(conn: &Connection, entry: EntryId) -> Result<EntryFields, PersistenceError> {
-    let (category, type_id): (String, Option<String>) = conn.query_row(
-        "SELECT category_id, type_id FROM entry WHERE id = ?1",
-        [entry.to_string()],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
+    read_snapshot(conn, Some(entry))
+}
+pub(super) fn read_catalog(conn: &Connection) -> Result<FieldCatalog, PersistenceError> {
+    Ok(read_snapshot(conn, None)?.into())
+}
+fn read_snapshot(
+    conn: &Connection,
+    entry: Option<EntryId>,
+) -> Result<EntryFields, PersistenceError> {
+    let (category, type_id): (String, Option<String>) = if let Some(entry) = entry {
+        conn.query_row(
+            "SELECT category_id, type_id FROM entry WHERE id = ?1",
+            [entry.to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?
+    } else {
+        (String::new(), None)
+    };
     let mut types = conn.prepare(
         "WITH RECURSIVE ancestors(id, parent) AS (
         SELECT id, parent_type_id FROM type_def WHERE id = ?1 UNION
@@ -41,7 +54,7 @@ pub(super) fn read(conn: &Connection, entry: EntryId) -> Result<EntryFields, Per
         |r| r.get(0),
     )?;
     let mut statement = conn.prepare(
-        "SELECT id, name, value_kind, retired_at IS NOT NULL, revision
+        "SELECT id, name, value_kind, retired_at IS NOT NULL, revision, unit
         FROM field_definition ORDER BY name COLLATE NOCASE, id",
     )?;
     let rows = statement.query_map([], |r| {
@@ -51,12 +64,13 @@ pub(super) fn read(conn: &Connection, entry: EntryId) -> Result<EntryFields, Per
             r.get::<_, String>(2)?,
             r.get::<_, bool>(3)?,
             r.get::<_, i64>(4)?,
+            r.get::<_, Option<String>>(5)?,
         ))
     })?;
     let mut definitions = Vec::new();
     let mut fields = Vec::new();
     for row in rows {
-        let (id, name, kind, retired, revision) = row?;
+        let (id, name, kind, retired, revision, unit) = row?;
         let field_id = FieldId::parse(&id).map_err(invalid)?;
         let mut options = conn.prepare("SELECT id, label, retired_at IS NOT NULL FROM choice_option WHERE field_id = ?1 ORDER BY created_at, id")?;
         let options = options
@@ -106,24 +120,27 @@ pub(super) fn read(conn: &Connection, entry: EntryId) -> Result<EntryFields, Per
             id: field_id,
             name,
             kind: parse_kind(kind)?,
+            unit,
             retired,
             revision,
             options,
             bindings,
         };
-        let available = !retired
-            && definition.bindings.iter().any(|b| match b.provider.kind {
-                ProviderKind::Category => b.provider.id == category,
-                ProviderKind::Type => ancestor_ids.contains(&b.provider.id),
-                ProviderKind::Entry => b.provider.id == entry.to_string(),
-            });
-        let value = read_value(conn, entry, &definition)?;
-        if available || value.is_some() {
-            fields.push(EntryField {
-                definition: definition.clone(),
-                available,
-                value,
-            });
+        if let Some(entry) = entry {
+            let available = !retired
+                && definition.bindings.iter().any(|b| match b.provider.kind {
+                    ProviderKind::Category => b.provider.id == category,
+                    ProviderKind::Type => ancestor_ids.contains(&b.provider.id),
+                    ProviderKind::Entry => b.provider.id == entry.to_string(),
+                });
+            let value = read_value(conn, entry, &definition)?;
+            if available || value.is_some() {
+                fields.push(EntryField {
+                    definition: definition.clone(),
+                    available,
+                    value,
+                });
+            }
         }
         definitions.push(definition);
     }
@@ -178,8 +195,54 @@ pub(super) fn apply(
     expected: i64,
     command: FieldCommand,
 ) -> Result<EntryFields, PersistenceError> {
+    apply_operation(conn, Some(entry), expected, command)
+}
+
+pub(super) fn apply_template(
+    conn: &mut Connection,
+    expected: i64,
+    command: FieldCommand,
+) -> Result<FieldCatalog, PersistenceError> {
+    let provider =
+        match &command {
+            FieldCommand::Create {
+                provider,
+                value: None,
+                ..
+            }
+            | FieldCommand::Bind { provider, .. }
+            | FieldCommand::Unbind { provider, .. } => provider,
+            _ => return Err(invalid(
+                "Template commands only configure default fields; they cannot write Entry values",
+            )),
+        };
+    if provider.kind == ProviderKind::Entry {
+        return Err(invalid("Select a Category or Type template"));
+    }
+    let table = if provider.kind == ProviderKind::Category {
+        "category"
+    } else {
+        "type_def"
+    };
+    let exists: bool = conn.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?1)"),
+        [&provider.id],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Err(invalid("Template provider does not exist in this Project"));
+    }
+    Ok(apply_operation(conn, None, expected, command)?.into())
+}
+
+fn apply_operation(
+    conn: &mut Connection,
+    entry: Option<EntryId>,
+    expected: i64,
+    command: FieldCommand,
+) -> Result<EntryFields, PersistenceError> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let snapshot = read(&tx, entry)?;
+    let snapshot = read_snapshot(&tx, entry)?;
     if snapshot.global_revision != expected {
         return Err(PersistenceError::StaleRevision {
             expected,
@@ -191,19 +254,27 @@ pub(super) fn apply(
         FieldCommand::Create {
             name: raw,
             field_kind,
+            unit,
             provider,
             options,
             value,
         } => {
             let field = FieldId::new();
             let label = name(&raw)?;
+            let unit = unit
+                .filter(|u| !u.trim().is_empty())
+                .map(|u| name(&u))
+                .transpose()?;
+            if unit.is_some() && field_kind != FieldKind::Number {
+                return Err(invalid("Only Number fields have units"));
+            }
             if !matches!(field_kind, FieldKind::Choice | FieldKind::MultiChoice)
                 && !options.is_empty()
             {
                 return Err(invalid("Only choice fields have options"));
             }
-            tx.execute("INSERT INTO field_definition (id,name,value_kind,created_at,updated_at,revision) VALUES (?1,?2,?3,?4,?4,1)",
-                params![field.to_string(),label,field_kind.as_str(),now])?;
+            tx.execute("INSERT INTO field_definition (id,name,value_kind,created_at,updated_at,revision,unit) VALUES (?1,?2,?3,?4,?4,1,?5)",
+                params![field.to_string(),label,field_kind.as_str(),now,unit])?;
             bind(&tx, field, &provider)?;
             for label in options {
                 add_option(&tx, field, &label, &now)?;
@@ -211,7 +282,7 @@ pub(super) fn apply(
             if let Some(value) = value {
                 set_value(
                     &tx,
-                    entry,
+                    entry.ok_or_else(|| invalid("An Entry is required for authored values"))?,
                     FieldEdit {
                         field_id: field,
                         value: Some(value),
@@ -226,7 +297,12 @@ pub(super) fn apply(
                 if !seen.insert(edit.field_id) {
                     return Err(invalid("Duplicate field edit"));
                 }
-                set_value(&tx, entry, edit, &now)?;
+                set_value(
+                    &tx,
+                    entry.ok_or_else(|| invalid("An Entry is required for authored values"))?,
+                    edit,
+                    &now,
+                )?;
             }
         }
         FieldCommand::Rename {
@@ -285,7 +361,7 @@ pub(super) fn apply(
         }
     }
     tx.execute("UPDATE project_meta SET last_committed_revision = last_committed_revision + 1, updated_at = ?1 WHERE id = 1",[now])?;
-    let updated = read(&tx, entry)?;
+    let updated = read_snapshot(&tx, entry)?;
     tx.commit()?;
     Ok(updated)
 }
