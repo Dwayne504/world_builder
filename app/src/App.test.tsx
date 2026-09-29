@@ -64,6 +64,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  readFields: vi.fn().mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] }),
+  applyFields: vi.fn(),
   AppCommandError: class AppCommandError extends Error {
     kind: string;
     constructor(dto: { kind: string; message: string }) {
@@ -95,7 +97,7 @@ vi.mock("./api", () => ({
 }));
 
 import App from "./App";
-import { AppCommandError, createProject } from "./api";
+import { AppCommandError, createProject, readFields, applyFields } from "./api";
 
 function backendError(kind: string, message: string): AppCommandError {
   return new AppCommandError({ kind, message });
@@ -185,6 +187,10 @@ function mockEditableEntry() {
 
 describe("Project screen Saved contract", () => {
   beforeEach(() => {
+    vi.mocked(readFields)
+      .mockReset()
+      .mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] });
+    vi.mocked(applyFields).mockReset();
     closeProjectMock.mockReset();
     renameProjectMock.mockReset();
     openProjectMock.mockReset();
@@ -218,6 +224,62 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("native close waits for field-value acknowledgement and retains a failed draft", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    const snapshot = {
+      globalRevision: 1,
+      definitions: [],
+      fields: [
+        {
+          definition: {
+            id: "field",
+            name: "Age",
+            kind: "number" as const,
+            revision: 1,
+            retired: false,
+            options: [],
+            bindings: [],
+          },
+          available: true,
+          value: null,
+        },
+      ],
+    };
+    vi.mocked(readFields).mockResolvedValue(snapshot);
+    const pending = deferred<typeof snapshot>();
+    vi.mocked(applyFields).mockReturnValueOnce(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.change(await screen.findByLabelText("Value: Age"), { target: { value: "43" } });
+    fireEvent.blur(screen.getByLabelText("Value: Age"));
+    await waitFor(() => expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saving"));
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    await act(async () => pending.reject(new Error("Disk full")));
+    expect(screen.getByLabelText("Value: Age")).toHaveValue("43");
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Failed");
+  });
+
+  it("guards navigation with an unfinished field definition until explicit discard", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancel new field" })).not.toBeDisabled(),
+    );
+    fireEvent.change(screen.getByLabelText("new-field-name"), {
+      target: { value: "Unsaved local field" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back to Entries" }));
+    expect(screen.getByLabelText("new-field-name")).toHaveValue("Unsaved local field");
+    fireEvent.click(screen.getByRole("button", { name: "Discard and continue" }));
+    await waitFor(() => expect(screen.queryByLabelText("new-field-name")).not.toBeInTheDocument());
+    expect(applyFields).not.toHaveBeenCalled();
   });
 
   it("creates a missing Category and Type inline without losing the Entry draft", async () => {
@@ -546,6 +608,7 @@ describe("Project screen Saved contract", () => {
     );
     await openTheProjectScreen();
     const categorySelect = await screen.findByLabelText("new-entry-category");
+    await screen.findByRole("option", { name: "Characters" });
     fireEvent.change(categorySelect, { target: { value: "characters" } });
     currentTypes.resolve([
       {

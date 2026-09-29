@@ -29,6 +29,37 @@ fn invalid_input(message: impl ToString) -> AppErrorDto {
     }
 }
 
+#[tauri::command]
+pub fn read_fields(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: String,
+) -> Result<crate::domain::fields::EntryFields, AppErrorDto> {
+    ProjectService::read_fields(
+        &state,
+        parse_project_id(&project_id)?,
+        EntryId::parse(&entry_id).map_err(invalid_input)?,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_fields(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: String,
+    expected_revision: i64,
+    command: crate::domain::fields::FieldCommand,
+) -> Result<crate::domain::fields::EntryFields, AppErrorDto> {
+    ProjectService::apply_fields(
+        &state,
+        parse_project_id(&project_id)?,
+        EntryId::parse(&entry_id).map_err(invalid_input)?,
+        expected_revision,
+        command,
+    )
+    .map_err(Into::into)
+}
+
 impl From<PreferencesError> for AppErrorDto {
     fn from(error: PreferencesError) -> Self {
         let kind = match &error {

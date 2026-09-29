@@ -269,7 +269,7 @@ cargo tauri build                 # full desktop bundle; requires a display/wind
                                    # not expected to succeed in a headless CI/sandbox
 ```
 
-### Current implemented slice: Project Structure Backbone (Milestone 01, Task 02A)
+### Current implemented slice: Fields Foundation (Milestone 01, Task 02B)
 
 This slice proves the desktop stack starts, a real self-contained `.wcproj`
 package can be created/opened/renamed/closed, Project identity (UUIDv7) is
@@ -292,7 +292,23 @@ Uncategorized Category; unnamed Entries remain valid and display an unstored
 Categories, Types, and Entries, inline Category/Type creation during Entry
 creation, and revision-checked continuous saving of Entry names.
 
-**Current non-goals** (deliberately out of scope for this slice): Fields,
+Task 02B adds schema 3 and optional Short Text, Number, Boolean, Choice, and
+Multi-choice Fields. Stable definitions and option identities are separate from
+Entry-owned typed values and Category, Type/ancestor, or Entry-local availability.
+The Entry editor supports local name-and-value creation, continuous value saving,
+promotion, shared rename, detachment, retirement, and restoration. Empty inherited
+fields create no value rows; template changes preserve populated values. Shared
+definition controls are separate from ordinary Entry value editing.
+
+All field operations check the current Project revision and commit atomically on
+the existing database worker. Save failures preserve drafts, and field work
+participates in navigation and native-close protection. Schema-1/2 upgrades use
+the existing external pre-migration recovery snapshot and manifest publication.
+See [`docs/milestones/MILESTONE_01_FIELDS_FOUNDATION.md`](docs/milestones/MILESTONE_01_FIELDS_FOUNDATION.md)
+for the scope, remaining Fields work, acceptance tests, and manual checklist.
+
+**Current non-goals** (deliberately out of scope for this slice): Rich Text and
+Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
 Capabilities, Relationships, Spatial, Chapters/Story Units, TipTap prose
 editing and rich descriptions, search/FTS, Tags/Roles/Statuses, aliases,
 Archive/Trash, deletion/retirement, final Recent/Pinned navigation, and any

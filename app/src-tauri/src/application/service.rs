@@ -21,6 +21,24 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn read_fields(
+        state: &AppState,
+        project_id: ProjectId,
+        entry: EntryId,
+    ) -> Result<crate::domain::fields::EntryFields, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.read_fields(entry))
+    }
+    pub fn apply_fields(
+        state: &AppState,
+        project_id: ProjectId,
+        entry: EntryId,
+        expected: i64,
+        command: crate::domain::fields::FieldCommand,
+    ) -> Result<crate::domain::fields::EntryFields, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.apply_fields(entry, expected, command)
+        })
+    }
     /// Creates a brand-new Project package under `base_dir`, opens it, and
     /// registers it in `state`. The candidate package path is always
     /// `<working name>.wcproj`; a collision is never silently side-stepped
@@ -639,7 +657,15 @@ mod tests {
 
         let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
         conn.execute_batch(
-            "DROP TRIGGER entry_type_category_update;
+            "DROP TRIGGER field_category_restrict;
+             DROP TRIGGER field_type_restrict;
+             DROP TRIGGER field_entry_restrict;
+             DROP TABLE field_choice_value;
+             DROP TABLE field_value;
+             DROP TABLE choice_option;
+             DROP TABLE field_availability;
+             DROP TABLE field_definition;
+             DROP TRIGGER entry_type_category_update;
              DROP TRIGGER entry_type_category_insert;
              DROP TABLE entry;
              DROP TABLE record_identity;
@@ -730,7 +756,15 @@ mod tests {
         manifest.write(&paths.manifest_path()).unwrap();
         let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
         conn.execute_batch(
-            "DROP TRIGGER entry_type_category_update;
+            "DROP TRIGGER field_category_restrict;
+             DROP TRIGGER field_type_restrict;
+             DROP TRIGGER field_entry_restrict;
+             DROP TABLE field_choice_value;
+             DROP TABLE field_value;
+             DROP TABLE choice_option;
+             DROP TABLE field_availability;
+             DROP TABLE field_definition;
+             DROP TRIGGER entry_type_category_update;
              DROP TRIGGER entry_type_category_insert;
              DROP TABLE entry;
              DROP TABLE record_identity;
