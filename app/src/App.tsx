@@ -29,6 +29,7 @@ import { useEntryName } from "./useEntryName";
 import { useMutationCoordinator } from "./useMutationCoordinator";
 import { decideClose, type CloseIntent } from "./closeDecision";
 import { EntryFieldsPanel, type FieldsController } from "./EntryFieldsPanel";
+import { Dialog } from "./Dialog";
 
 function errorMessage(err: unknown): string {
   if (err instanceof AppCommandError) {
@@ -130,6 +131,7 @@ function canResetPreferences(kind: string | null): boolean {
 }
 
 function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void }) {
+  const [homeDialog, setHomeDialog] = useState<"settings" | "restore" | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const [preferencesErrorKind, setPreferencesErrorKind] = useState<string | null>(null);
@@ -315,6 +317,22 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
     }
   }
 
+  async function handleChooseRestoreFolder(kind: "backup" | "destination") {
+    try {
+      const picked = await pickDirectory(
+        kind === "backup"
+          ? backupPath || preferences?.defaultBackupsDir
+          : restoreDestination || preferences?.defaultProjectsDir,
+      );
+      if (picked) {
+        if (kind === "backup") setBackupPath(picked);
+        else setRestoreDestination(picked);
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   async function handleChooseDefaultProjectsDir() {
     setPreferencesBusy(true);
     setPreferencesActionError(null);
@@ -397,8 +415,36 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
   }
 
   return (
-    <main className="container">
-      <h1>Worldcrafter</h1>
+    <main className="container home-screen">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">YOUR WORLDS, AT YOUR PACE</p>
+          <h1>Worldcrafter</h1>
+        </div>
+        <button className="quiet-button" onClick={() => setHomeDialog("settings")}>
+          Settings
+        </button>
+      </header>
+      <p className="intro">
+        A place for your characters, places, and ideas. Start small and build as you go.
+      </p>
+      {preferencesActionError && homeDialog !== "settings" && (
+        <div role="alert" className="error-banner">
+          <p>{preferencesActionError}</p>
+          <button onClick={() => setHomeDialog("settings")}>Review settings</button>
+        </div>
+      )}
+      {(preferencesError ||
+        (preferences?.defaultProjectsDir && !preferences.defaultProjectsDirExists) ||
+        (preferences?.defaultBackupsDir && !preferences.defaultBackupsDirExists)) && (
+        <div role="alert" className="error-banner">
+          <p>
+            {preferencesError ??
+              "A default folder is missing or inaccessible. Choose a location manually or update Settings."}
+          </p>
+          <button onClick={() => setHomeDialog("settings")}>Review settings</button>
+        </div>
+      )}
       {error && (
         <div role="alert" className="error-banner">
           <p>{error}</p>
@@ -411,11 +457,17 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
         </div>
       )}
 
-      <section>
-        <h2>Preferences</h2>
+      <Dialog
+        open={homeDialog === "settings"}
+        title="Application settings"
+        onClose={() => setHomeDialog(null)}
+      >
+        <p className="muted">
+          Choose where new Projects and backups are stored. Existing files stay where they are.
+        </p>
         {preferencesError && (
           <div role="alert" className="error-banner">
-            <p>{preferencesError}</p>
+            <p>Preferences need attention. Manual folder selection remains available.</p>
             {canResetPreferences(preferencesErrorKind) && (
               <>
                 <p>
@@ -432,7 +484,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
             )}
           </div>
         )}
-        {preferencesActionError && (
+        {homeDialog === "settings" && preferencesActionError && (
           <p role="alert" className="error-banner">
             {preferencesActionError}
           </p>
@@ -487,101 +539,136 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
             )}
           </div>
         </div>
-      </section>
+      </Dialog>
 
-      <section>
-        <h2>New Project</h2>
-        <label>
-          Working name
-          <input
-            aria-label="new-project-name"
-            value={newName}
-            onChange={(e) => setNewName(e.currentTarget.value)}
-            placeholder="Tortuga"
-          />
-        </label>
-        <div className="preference-row">
-          <span className="preference-label">Location</span>
-          <span className="preference-value">{baseDir || "Choose a location"}</span>
-          <button onClick={() => void handleChooseProjectsLocation()}>Choose location…</button>
-        </div>
-        {packagePreview && <p className="package-preview">Will be created as: {packagePreview}</p>}
-        <div className="manual-path-diagnostics">
-          <p className="diagnostics-label">Enter location manually (diagnostics)</p>
+      <div className="home-grid">
+        <section>
+          <p className="eyebrow">START SOMETHING</p>
+          <h2>New Project</h2>
           <label>
-            Location
+            Working name
             <input
-              aria-label="new-project-location"
-              value={baseDir}
-              onChange={(e) => {
-                baseDirTouched.current = true;
-                setBaseDir(e.currentTarget.value);
-              }}
-              placeholder="/path/to/projects"
+              aria-label="new-project-name"
+              value={newName}
+              onChange={(e) => setNewName(e.currentTarget.value)}
+              placeholder="Tortuga"
             />
           </label>
-        </div>
-        <button disabled={busy || !baseDir || !newName} onClick={() => void handleCreate()}>
-          Create Project
-        </button>
-        {createdSummary && (
-          <p className="package-preview">Created at: {createdSummary.packagePath}</p>
-        )}
-      </section>
-
-      <section>
-        <h2>Open Project</h2>
-        <div className="row">
-          <button disabled={busy} onClick={() => void handleChooseOpenPath()}>
-            Browse for Project…
+          <div className="preference-row">
+            <span className="preference-label">Location</span>
+            <span className="preference-value">{baseDir || "Choose a location"}</span>
+            <button onClick={() => void handleChooseProjectsLocation()}>Choose location…</button>
+          </div>
+          {packagePreview && (
+            <p className="package-preview">Will be created as: {packagePreview}</p>
+          )}
+          <details className="manual-path-diagnostics">
+            <summary>Enter location manually</summary>
+            <label>
+              Location
+              <input
+                aria-label="new-project-location"
+                value={baseDir}
+                onChange={(e) => {
+                  baseDirTouched.current = true;
+                  setBaseDir(e.currentTarget.value);
+                }}
+                placeholder="Paste a folder path"
+              />
+            </label>
+          </details>
+          <button
+            className="primary-button"
+            disabled={busy || !baseDir || !newName}
+            onClick={() => void handleCreate()}
+          >
+            Create Project
           </button>
-        </div>
-        <div className="manual-path-diagnostics">
-          <p className="diagnostics-label">Enter package path manually (diagnostics)</p>
-          <label>
-            Package path
-            <input
-              aria-label="open-project-path"
-              value={openPath}
-              onChange={(e) => {
-                const path = e.currentTarget.value;
-                openPathRef.current = path;
-                openPathRevisionRef.current += 1;
-                setOpenPath(path);
-                setRecoveryPath(null);
-              }}
-              placeholder="/path/to/Tortuga.wcproj"
-            />
-          </label>
-        </div>
-        <button disabled={busy || !openPath} onClick={() => void handleOpen()}>
-          Open Project
-        </button>
-        {recoveryPath !== null && recoveryPath === openPath && (
-          <div role="alert" className="error-banner">
-            <p>
-              Recovering removes only the leftover lock record; the Project's content is not
-              modified. Use this only when you are sure no other Worldcrafter instance currently has
-              this Project open.
-            </p>
-            <button disabled={busy} onClick={() => void handleRecoverLock()}>
-              Recover lock and open Project
+          {createdSummary && (
+            <p className="package-preview">Created at: {createdSummary.packagePath}</p>
+          )}
+        </section>
+
+        <section>
+          <p className="eyebrow">PICK UP WHERE YOU LEFT OFF</p>
+          <h2>Open Project</h2>
+          <p className="muted">Choose a Worldcrafter Project folder to continue.</p>
+          <div className="row">
+            <button disabled={busy} onClick={() => void handleChooseOpenPath()}>
+              Browse for Project…
             </button>
           </div>
+          {openPath && <p className="package-preview">{openPath}</p>}
+          <details className="manual-path-diagnostics">
+            <summary>Enter package path manually</summary>
+            <label>
+              Package path
+              <input
+                aria-label="open-project-path"
+                value={openPath}
+                onChange={(e) => {
+                  const path = e.currentTarget.value;
+                  openPathRef.current = path;
+                  openPathRevisionRef.current += 1;
+                  setOpenPath(path);
+                  setRecoveryPath(null);
+                }}
+                placeholder="Paste a .wcproj folder path"
+              />
+            </label>
+          </details>
+          <button
+            className="primary-button"
+            disabled={busy || !openPath}
+            onClick={() => void handleOpen()}
+          >
+            Open Project
+          </button>
+          {recoveryPath !== null && recoveryPath === openPath && (
+            <div role="alert" className="error-banner">
+              <p>
+                Recovering removes only the leftover lock record; the Project's content is not
+                modified. Use this only when you are sure no other Worldcrafter instance currently
+                has this Project open.
+              </p>
+              <button disabled={busy} onClick={() => void handleRecoverLock()}>
+                Recover lock and open Project
+              </button>
+            </div>
+          )}
+        </section>
+      </div>
+      <footer className="home-footer">
+        <span className="muted">Your work stays on your computer.</span>
+        <button className="quiet-button" onClick={() => setHomeDialog("restore")}>
+          Restore a backup…
+        </button>
+      </footer>
+      <Dialog
+        open={homeDialog === "restore"}
+        title="Restore Backup as Copy"
+        onClose={() => setHomeDialog(null)}
+      >
+        <p className="muted">
+          Create an independent Project from a backup. The original stays untouched.
+        </p>
+        {homeDialog === "restore" && error && (
+          <p role="alert" className="error-banner">
+            {error}
+          </p>
         )}
-      </section>
-
-      <section>
-        <h2>Restore Backup as Copy</h2>
         <label>
           Backup path
           <input
             aria-label="restore-backup-path"
             value={backupPath}
             onChange={(e) => setBackupPath(e.currentTarget.value)}
-            placeholder="/path/to/backup.wcbackup"
+            placeholder="Choose a backup folder"
           />
         </label>
+        <button disabled={busy} onClick={() => void handleChooseRestoreFolder("backup")}>
+          Choose backup…
+        </button>
         <label>
           Destination folder
           <input
@@ -590,6 +677,9 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
             onChange={(e) => setRestoreDestination(e.currentTarget.value)}
           />
         </label>
+        <button disabled={busy} onClick={() => void handleChooseRestoreFolder("destination")}>
+          Choose destination…
+        </button>
         <label>
           New working name (optional)
           <input
@@ -604,7 +694,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
         >
           Restore as Copy
         </button>
-      </section>
+      </Dialog>
     </main>
   );
 }
@@ -650,6 +740,7 @@ function EntryEditor({
   mutations: MutationCoordinator;
 }) {
   const editor = useEntryName(projectId, initialEntry);
+  const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
   const { submit: submitName } = editor;
   const fieldsController = useRef<FieldsController | null>(null);
   const [fieldsState, setFieldsState] = useState<SaveState>("saved");
@@ -748,9 +839,21 @@ function EntryEditor({
   }
 
   return (
-    <section>
-      <h2>{editor.entry.displayName}</h2>
-      <p>Entry ID: {editor.entry.id}</p>
+    <section className="entry-editor">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">ENTRY</p>
+          <h2>{editor.entry.displayName}</h2>
+        </div>
+        <div className="row">
+          <button className="quiet-button" onClick={() => setEntrySettingsOpen(true)}>
+            Entry settings
+          </button>
+          <button className="quiet-button" onClick={onClose}>
+            Back to Entries
+          </button>
+        </div>
+      </div>
       <label>
         Name (optional)
         <input
@@ -760,67 +863,95 @@ function EntryEditor({
           onChange={(event) => editor.onChangeDraft(event.currentTarget.value)}
         />
       </label>
-      <span data-testid="entry-save-state">{saveStateLabel(combinedEntryState)}</span>
+      <span data-testid="entry-save-state" className="sr-only">
+        {saveStateLabel(combinedEntryState)}
+      </span>
       {editor.errorMessage && <p role="alert">{editor.errorMessage}</p>}
-      <label>
-        Category
-        <select
-          aria-label="entry-category"
-          disabled={mutations.state === "saving"}
-          value={categoryId}
-          onChange={(event) => {
-            setTypes([]);
-            setCategoryId(event.currentTarget.value);
-            setStructureTypeChosen(
-              event.currentTarget.value === editor.entry.categoryId || !typeId,
-            );
-          }}
-        >
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Type (optional)
-        <select
-          aria-label="entry-type"
-          disabled={mutations.state === "saving"}
-          value={typeId}
-          onChange={(event) => {
-            setTypeId(event.currentTarget.value);
-            setStructureTypeChosen(true);
-          }}
-        >
-          <option value="">No Type</option>
-          {typeId && !types.some((type) => type.id === typeId) && (
-            <option value={typeId} disabled>
-              Incompatible current Type — choose explicitly
-            </option>
-          )}
-          {types.map((type) => (
-            <option key={type.id} value={type.id}>
-              {type.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="row">
-        <button
-          disabled={
-            mutations.state === "saving" ||
-            !structureDirty ||
-            (categoryId !== editor.entry.categoryId && !structureTypeChosen)
-          }
-          onClick={() => void saveStructure()}
-        >
-          Apply Category / Type
-        </button>
-        <button onClick={onClose}>Back to Entries</button>
-      </div>
-      {structureError && <p role="alert">{structureError}</p>}
+      {structureDirty && !entrySettingsOpen && (
+        <p className="field-note">
+          Category / Type changes are not applied.{" "}
+          <button className="quiet-button" onClick={() => setEntrySettingsOpen(true)}>
+            Review Entry settings
+          </button>
+        </p>
+      )}
+      {structureError && !entrySettingsOpen && (
+        <div role="alert" className="error-banner">
+          <p>{structureError}</p>
+          <button onClick={() => setEntrySettingsOpen(true)}>Review Entry settings</button>
+        </div>
+      )}
+      <Dialog
+        open={entrySettingsOpen}
+        title="Entry settings"
+        onClose={() => setEntrySettingsOpen(false)}
+      >
+        <p className="muted">
+          Organize this Entry and choose its available fields. Existing values are preserved.
+        </p>
+        <label>
+          Category
+          <select
+            aria-label="entry-category"
+            disabled={mutations.state === "saving"}
+            value={categoryId}
+            onChange={(event) => {
+              setTypes([]);
+              setCategoryId(event.currentTarget.value);
+              setStructureTypeChosen(
+                event.currentTarget.value === editor.entry.categoryId || !typeId,
+              );
+            }}
+          >
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Type (optional)
+          <select
+            aria-label="entry-type"
+            disabled={mutations.state === "saving"}
+            value={typeId}
+            onChange={(event) => {
+              setTypeId(event.currentTarget.value);
+              setStructureTypeChosen(true);
+            }}
+          >
+            <option value="">No Type</option>
+            {typeId && !types.some((type) => type.id === typeId) && (
+              <option value={typeId} disabled>
+                Incompatible current Type — choose explicitly
+              </option>
+            )}
+            {types.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="row">
+          <button
+            disabled={
+              mutations.state === "saving" ||
+              !structureDirty ||
+              (categoryId !== editor.entry.categoryId && !structureTypeChosen)
+            }
+            onClick={() => void saveStructure()}
+          >
+            Apply Category / Type
+          </button>
+        </div>
+        {entrySettingsOpen && structureError && <p role="alert">{structureError}</p>}
+        <details className="technical-details">
+          <summary>Entry information</summary>
+          <p className="package-preview">Entry ID: {editor.entry.id}</p>
+        </details>
+      </Dialog>
       <EntryFieldsPanel
         projectId={projectId}
         entry={editor.entry}
@@ -1086,139 +1217,159 @@ function EntryWorkflow({
   }
 
   return (
-    <section>
-      <h2>Entries</h2>
+    <section className="entries-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">WORLD MATERIAL</p>
+          <h2>Entries</h2>
+        </div>
+      </div>
+      <p className="muted">Characters, places, objects, or an idea without a name yet.</p>
+      {entries.length === 0 && (
+        <p className="empty-state">
+          Your world starts with one idea. Create your first Entry below.
+        </p>
+      )}
       {error && <p role="alert">{error}</p>}
-      <ul>
+      <ul className="entry-list">
         {entries.map((entry) => (
           <li key={entry.id}>
             <button disabled={mutations.state === "saving"} onClick={() => openEntry(entry)}>
-              {entry.displayName}
+              <span>{entry.displayName}</span>
+              <span aria-hidden="true" className="entry-category-label">
+                {categories.find((category) => category.id === entry.categoryId)?.name}
+              </span>
             </button>
           </li>
         ))}
       </ul>
-      <h3>Create Entry</h3>
-      <label>
-        Name (optional)
-        <input
-          aria-label="new-entry-name"
-          value={draftName}
-          onChange={(event) => setDraftName(event.currentTarget.value)}
-        />
-      </label>
-      <label>
-        Category
-        <select
-          aria-label="new-entry-category"
+      <details className="disclosure create-entry" open={entries.length === 0 ? true : undefined}>
+        <summary>Create Entry</summary>
+        <label>
+          Name (optional)
+          <input
+            aria-label="new-entry-name"
+            value={draftName}
+            onChange={(event) => setDraftName(event.currentTarget.value)}
+          />
+        </label>
+        <label>
+          Category
+          <select
+            aria-label="new-entry-category"
+            disabled={mutations.state === "saving"}
+            value={categoryId}
+            onChange={(event) => {
+              setTypes([]);
+              setCategoryId(event.currentTarget.value);
+              setTypeId("");
+            }}
+          >
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
           disabled={mutations.state === "saving"}
-          value={categoryId}
-          onChange={(event) => {
-            setTypes([]);
-            setCategoryId(event.currentTarget.value);
-            setTypeId("");
-          }}
+          onClick={() => setShowCategoryCreator(true)}
         >
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button disabled={mutations.state === "saving"} onClick={() => setShowCategoryCreator(true)}>
-        Create Category inline
-      </button>
-      {showCategoryCreator && (
-        <fieldset className="inline-creator">
-          <legend>New Category</legend>
-          <label>
-            Category name
-            <input
-              aria-label="inline-category-name"
-              value={newCategoryName}
-              onChange={(event) => setNewCategoryName(event.currentTarget.value)}
-            />
-          </label>
-          <div className="row">
-            <button
-              disabled={!newCategoryName.trim() || mutations.state === "saving"}
-              onClick={() => void addCategory()}
-            >
-              Add Category
-            </button>
-            <button
-              disabled={mutations.state === "saving"}
-              onClick={() => {
-                setNewCategoryName("");
-                setShowCategoryCreator(false);
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </fieldset>
-      )}
-      <label>
-        Type (optional)
-        <select
-          aria-label="new-entry-type"
-          disabled={mutations.state === "saving"}
-          value={typeId}
-          onChange={(event) => setTypeId(event.currentTarget.value)}
+          Create Category inline
+        </button>
+        {showCategoryCreator && (
+          <fieldset className="inline-creator">
+            <legend>New Category</legend>
+            <label>
+              Category name
+              <input
+                aria-label="inline-category-name"
+                value={newCategoryName}
+                onChange={(event) => setNewCategoryName(event.currentTarget.value)}
+              />
+            </label>
+            <div className="row">
+              <button
+                disabled={!newCategoryName.trim() || mutations.state === "saving"}
+                onClick={() => void addCategory()}
+              >
+                Add Category
+              </button>
+              <button
+                disabled={mutations.state === "saving"}
+                onClick={() => {
+                  setNewCategoryName("");
+                  setShowCategoryCreator(false);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </fieldset>
+        )}
+        <label>
+          Type (optional)
+          <select
+            aria-label="new-entry-type"
+            disabled={mutations.state === "saving"}
+            value={typeId}
+            onChange={(event) => setTypeId(event.currentTarget.value)}
+          >
+            <option value="">No Type</option>
+            {types.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          disabled={!categoryId || mutations.state === "saving"}
+          onClick={() => setShowTypeCreator(true)}
         >
-          <option value="">No Type</option>
-          {types.map((type) => (
-            <option key={type.id} value={type.id}>
-              {type.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        disabled={!categoryId || mutations.state === "saving"}
-        onClick={() => setShowTypeCreator(true)}
-      >
-        Create Type inline
-      </button>
-      {showTypeCreator && (
-        <fieldset className="inline-creator">
-          <legend>New Type</legend>
-          <label>
-            Type name
-            <input
-              aria-label="inline-type-name"
-              value={newTypeName}
-              onChange={(event) => setNewTypeName(event.currentTarget.value)}
-            />
-          </label>
-          <div className="row">
-            <button
-              disabled={!newTypeName.trim() || mutations.state === "saving"}
-              onClick={() => void addType()}
-            >
-              Add Type
-            </button>
-            <button
-              disabled={mutations.state === "saving"}
-              onClick={() => {
-                setNewTypeName("");
-                setShowTypeCreator(false);
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </fieldset>
-      )}
-      <button disabled={mutations.state === "saving"} onClick={() => void addEntry()}>
-        Create Entry
-      </button>
+          Create Type inline
+        </button>
+        {showTypeCreator && (
+          <fieldset className="inline-creator">
+            <legend>New Type</legend>
+            <label>
+              Type name
+              <input
+                aria-label="inline-type-name"
+                value={newTypeName}
+                onChange={(event) => setNewTypeName(event.currentTarget.value)}
+              />
+            </label>
+            <div className="row">
+              <button
+                disabled={!newTypeName.trim() || mutations.state === "saving"}
+                onClick={() => void addType()}
+              >
+                Add Type
+              </button>
+              <button
+                disabled={mutations.state === "saving"}
+                onClick={() => {
+                  setNewTypeName("");
+                  setShowTypeCreator(false);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </fieldset>
+        )}
+        <button disabled={mutations.state === "saving"} onClick={() => void addEntry()}>
+          Create Entry
+        </button>
+      </details>
     </section>
   );
 }
 
 function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClosed: () => void }) {
+  const [projectDialog, setProjectDialog] = useState<"settings" | "backup" | null>(null);
   const rename = useProjectRename(project);
   const mutations = useMutationCoordinator();
   const {
@@ -1395,6 +1546,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
 
   const requestClose = useCallback(
     (intent: CloseIntent): void => {
+      setProjectDialog(null);
       setCloseError(null);
       if (isStructuralMutationPending()) {
         setPendingCloseIntent(null);
@@ -1477,11 +1629,53 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   }, []);
 
   return (
-    <main className="container">
-      <h1>Worldcrafter</h1>
-
-      <section>
-        <h2>Project</h2>
+    <main className="container project-screen">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">WORLDCRAFTER</p>
+          <h1>{rename.committedName}</h1>
+        </div>
+        <nav className="toolbar" aria-label="Project actions">
+          <span
+            data-testid="save-state"
+            role="status"
+            className={`save-state save-state-${combinedSaveState}`}
+          >
+            {saveStateLabel(combinedSaveState)}
+          </span>
+          <button className="quiet-button" onClick={() => setProjectDialog("backup")}>
+            Backups
+          </button>
+          <button className="quiet-button" onClick={() => setProjectDialog("settings")}>
+            Project settings
+          </button>
+          <button className="quiet-button" disabled={busy} onClick={handleClose}>
+            Close Project
+          </button>
+        </nav>
+      </header>
+      {backupStatus && projectDialog !== "backup" && (
+        <div role="status" className="backup-notice">
+          <p>{backupStatus.startsWith("Backup created at ") ? "Backup created." : backupStatus}</p>
+          <button className="quiet-button" onClick={() => setProjectDialog("backup")}>
+            Review backup
+          </button>
+        </div>
+      )}
+      {rename.errorMessage && projectDialog !== "settings" && (
+        <div role="alert" className="error-banner">
+          <p>{rename.errorMessage}</p>
+          <button onClick={() => setProjectDialog("settings")}>Review Project name</button>
+        </div>
+      )}
+      <Dialog
+        open={projectDialog === "settings"}
+        title="Project settings"
+        onClose={() => setProjectDialog(null)}
+      >
+        <p className="muted">
+          Rename this Project without moving its files. Changes save automatically.
+        </p>
         <label>
           Working name
           <input
@@ -1497,23 +1691,28 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           >
             {rename.saveState === "failed" ? "Retry save" : "Save"}
           </button>
-          <span data-testid="save-state" className={`save-state save-state-${combinedSaveState}`}>
-            {saveStateLabel(combinedSaveState)}
+          <span className={`save-state save-state-${rename.saveState}`}>
+            {saveStateLabel(rename.saveState)}
           </span>
         </div>
-        {rename.errorMessage && (
+        {projectDialog === "settings" && rename.errorMessage && (
           <p role="alert" className="error-banner">
             {rename.errorMessage}
           </p>
         )}
 
-        <dl>
-          <dt>Project ID</dt>
-          <dd data-testid="project-id">{project.projectId}</dd>
-          <dt>Location</dt>
-          <dd>{project.packagePath}</dd>
-        </dl>
-      </section>
+        <details className="technical-details">
+          <summary>Project information</summary>
+          <dl>
+            <dt>Project ID</dt>
+            <dd data-testid="project-id">{project.projectId}</dd>
+            <dt>Location</dt>
+            <dd>{project.packagePath}</dd>
+            <dt>Schema version</dt>
+            <dd>{project.schemaVersion}</dd>
+          </dl>
+        </details>
+      </Dialog>
 
       <EntryWorkflow
         projectId={project.projectId}
@@ -1522,8 +1721,15 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         mutations={mutations}
       />
 
-      <section>
-        <h2>Manual Backup</h2>
+      <Dialog
+        open={projectDialog === "backup"}
+        title="Backups"
+        onClose={() => setProjectDialog(null)}
+      >
+        <p className="muted">
+          Save a separate snapshot of the committed Project. Restore it from Home whenever you need
+          a copy.
+        </p>
         <label>
           Backup destination folder
           <input
@@ -1541,14 +1747,32 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
             Create Manual Backup
           </button>
         </div>
-        {backupStatus && <p>{backupStatus}</p>}
-      </section>
+        {projectDialog === "backup" && backupStatus && (
+          <p role="status" className="package-preview">
+            {backupStatus}
+          </p>
+        )}
+      </Dialog>
 
-      <section>
-        <h2>Close Project</h2>
+      <Dialog
+        open={!!pendingCloseIntent || !!closeError}
+        title="Before you leave"
+        onClose={() => {
+          setPendingCloseIntent(null);
+          setCloseError(null);
+        }}
+      >
         {pendingCloseIntent && (
           <div role="alert" className="error-banner">
             <p>{closeWarningMessage(pendingCloseIntent)}</p>
+            {entryControllerRef.current?.canSubmit !== false && (
+              <button
+                disabled={combinedSaveState === "saving"}
+                onClick={() => void waitForSaveThenClose(pendingCloseIntent)}
+              >
+                Save and close
+              </button>
+            )}
             <button disabled={combinedSaveState === "saving"} onClick={handleForceCloseDiscarding}>
               {closeWarningActionLabel(pendingCloseIntent)}
             </button>
@@ -1560,10 +1784,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
             {closeError}
           </p>
         )}
-        <button disabled={busy} onClick={handleClose}>
-          Close Project
-        </button>
-      </section>
+      </Dialog>
     </main>
   );
 }

@@ -49,17 +49,57 @@ function show() {
   return onController;
 }
 describe("Field authoring", () => {
+  it("keeps a shared-definition draft when its dialog closes with Escape", async () => {
+    const onController = show();
+    await screen.findByLabelText("Value: Eye colour");
+    fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+    fireEvent.change(screen.getByLabelText("field-definition"), { target: { value: "field" } });
+    fireEvent.change(screen.getByLabelText("rename-field"), { target: { value: "Eyes" } });
+    fireEvent(
+      screen.getByRole("dialog", { name: "Manage fields" }),
+      new Event("cancel", { cancelable: true }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onController).toHaveBeenLastCalledWith(
+      expect.objectContaining({ state: "dirty", canSubmit: false }),
+    );
+    expect(applyFields).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Continue definition edits" }));
+    expect(screen.getByLabelText("rename-field")).toHaveValue("Eyes");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel definition edits" }));
+    expect(onController).toHaveBeenLastCalledWith(
+      expect.objectContaining({ state: "saved", canSubmit: true }),
+    );
+  });
+
+  it("keeps a failed shared edit visible after closing its dialog", async () => {
+    vi.mocked(applyFields).mockRejectedValueOnce(new Error("Disk full"));
+    show();
+    await screen.findByLabelText("Value: Eye colour");
+    fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+    fireEvent.change(screen.getByLabelText("field-definition"), { target: { value: "field" } });
+    fireEvent.change(screen.getByLabelText("rename-field"), { target: { value: "Eyes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename definition" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Disk full");
+    fireEvent.click(screen.getByRole("button", { name: "Close Manage fields" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Disk full");
+    fireEvent.click(screen.getByRole("button", { name: "Continue definition edits" }));
+    expect(screen.getByLabelText("rename-field")).toHaveValue("Eyes");
+  });
   it("shows retired authored choices and keeps new fields optional", async () => {
     show();
     await screen.findByLabelText("Value: Eye colour");
     expect(screen.getByLabelText("Value: Eye colour")).toHaveValue("green");
     expect(screen.getByRole("option", { name: "Green (retired)" })).toBeInTheDocument();
+    expect(screen.getByLabelText("new-field-name")).not.toBeVisible();
+    fireEvent.click(screen.getByText("Add a field", { selector: "summary" }));
     expect(screen.getByRole("button", { name: "Add field" })).toBeDisabled();
     expect(applyFields).not.toHaveBeenCalled();
   });
   it("creates a local field with its value atomically and clears the form only after success", async () => {
     show();
     await screen.findByLabelText("Value: Eye colour");
+    fireEvent.click(screen.getByText("Add a field", { selector: "summary" }));
     fireEvent.change(screen.getByLabelText("new-field-name"), {
       target: { value: "Shell diameter" },
     });
@@ -82,6 +122,7 @@ describe("Field authoring", () => {
     vi.mocked(applyFields).mockRejectedValueOnce(new Error("Disk full"));
     const onController = show();
     await screen.findByLabelText("Value: Eye colour");
+    fireEvent.click(screen.getByText("Add a field", { selector: "summary" }));
     fireEvent.change(screen.getByLabelText("new-field-name"), { target: { value: "Age" } });
     expect(onController).toHaveBeenLastCalledWith(
       expect.objectContaining({ state: "dirty", canSubmit: false }),
@@ -96,6 +137,7 @@ describe("Field authoring", () => {
   it("promotes the same definition to the current Type without rewriting a value", async () => {
     show();
     await screen.findByLabelText("Value: Eye colour");
+    fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
     fireEvent.change(screen.getByLabelText("field-definition"), { target: { value: "field" } });
     await act(async () =>
       fireEvent.click(
