@@ -21,6 +21,24 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn read_relationships(
+        state: &AppState,
+        project_id: ProjectId,
+        entry: EntryId,
+    ) -> Result<crate::domain::relationships::EntryRelationships, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.read_relationships(entry))
+    }
+    pub fn apply_relationships(
+        state: &AppState,
+        project_id: ProjectId,
+        entry: EntryId,
+        expected: i64,
+        command: crate::domain::relationships::RelationshipCommand,
+    ) -> Result<crate::domain::relationships::EntryRelationships, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.apply_relationships(entry, expected, command)
+        })
+    }
     pub fn read_fields(
         state: &AppState,
         project_id: ProjectId,
@@ -660,6 +678,9 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE relationship_participant;
+             DROP TABLE relationship_instance;
+             DROP TABLE relationship_definition;
              DROP TABLE field_choice_value;
              DROP TABLE field_value;
              DROP TABLE choice_option;
@@ -759,6 +780,9 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE relationship_participant;
+             DROP TABLE relationship_instance;
+             DROP TABLE relationship_definition;
              DROP TABLE field_choice_value;
              DROP TABLE field_value;
              DROP TABLE choice_option;

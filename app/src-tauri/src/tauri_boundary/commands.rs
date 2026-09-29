@@ -30,6 +30,37 @@ fn invalid_input(message: impl ToString) -> AppErrorDto {
 }
 
 #[tauri::command]
+pub fn read_relationships(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: String,
+) -> Result<crate::domain::relationships::EntryRelationships, AppErrorDto> {
+    ProjectService::read_relationships(
+        &state,
+        parse_project_id(&project_id)?,
+        EntryId::parse(&entry_id).map_err(invalid_input)?,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_relationships(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: String,
+    expected_revision: i64,
+    command: crate::domain::relationships::RelationshipCommand,
+) -> Result<crate::domain::relationships::EntryRelationships, AppErrorDto> {
+    ProjectService::apply_relationships(
+        &state,
+        parse_project_id(&project_id)?,
+        EntryId::parse(&entry_id).map_err(invalid_input)?,
+        expected_revision,
+        command,
+    )
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn read_fields(
     state: State<'_, AppState>,
     project_id: String,

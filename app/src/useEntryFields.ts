@@ -33,6 +33,7 @@ export function useEntryFields(
   entryId: string,
   entryRevision: number,
   onRevision: (revision: number) => void,
+  getRevision?: () => number,
 ) {
   const [snapshot, setSnapshot] = useState<EntryFields | null>(null);
   const [drafts, setDrafts] = useState<Record<string, FieldDraft>>({});
@@ -42,6 +43,8 @@ export function useEntryFields(
   const draftsRef = useRef(drafts);
   const revisionRef = useRef(onRevision);
   revisionRef.current = onRevision;
+  const getRevisionRef = useRef(getRevision);
+  getRevisionRef.current = getRevision;
   const inFlight = useRef<Promise<SubmitOutcome> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generation = useRef(0);
@@ -88,7 +91,12 @@ export function useEntryFields(
       ++generation.current;
       setState("saving");
       setError(null);
-      const request = applyFields(projectId, entryId, snapshotRef.current.globalRevision, operation)
+      const request = applyFields(
+        projectId,
+        entryId,
+        Math.max(snapshotRef.current.globalRevision, getRevisionRef.current?.() ?? 0),
+        operation,
+      )
         .then((updated): SubmitOutcome => {
           accept(updated);
           const outcome: SubmitOutcome = afterCommit?.() ?? { kind: "committed" };

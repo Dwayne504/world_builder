@@ -15,7 +15,7 @@ use rusqlite::{Connection, Transaction};
 use super::error::PersistenceError;
 
 /// The newest schema version this build knows how to read and write.
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 /// Ordered (version, sql) pairs. Each migration is applied at most once and
 /// migrations must be applied in order starting just above the database's
@@ -42,6 +42,11 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 3,
         sql: include_str!("migrations/0003_fields.sql"),
+        after_sql: None,
+    },
+    Migration {
+        version: 4,
+        sql: include_str!("migrations/0004_relationships.sql"),
         after_sql: None,
     },
 ];

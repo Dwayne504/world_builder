@@ -7,6 +7,19 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AppErrorDto, Category, Entry, Preferences, ProjectSummary, TypeDef } from "./types";
 import type { EntryFields, FieldCommand } from "./types";
+import type { EntryRelationships, RelationshipCommand } from "./types";
+
+export function readRelationships(projectId: string, entryId: string): Promise<EntryRelationships> {
+  return call("read_relationships", { projectId, entryId });
+}
+export function applyRelationships(
+  projectId: string,
+  entryId: string,
+  expectedRevision: number,
+  command: RelationshipCommand,
+): Promise<EntryRelationships> {
+  return call("apply_relationships", { projectId, entryId, expectedRevision, command });
+}
 
 export class AppCommandError extends Error {
   kind: string;

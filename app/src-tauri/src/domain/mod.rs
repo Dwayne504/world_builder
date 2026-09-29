@@ -7,6 +7,7 @@
 pub mod error;
 pub mod fields;
 pub mod ids;
+pub mod relationships;
 pub mod structure;
 pub mod working_name;
 

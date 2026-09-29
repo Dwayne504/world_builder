@@ -89,14 +89,16 @@ export function EntryFieldsPanel({
   disabled,
   onController,
   onRevision,
+  getRevision,
 }: {
   projectId: string;
   entry: Entry;
   disabled: boolean;
   onController: (controller: FieldsController) => void;
   onRevision: (revision: number) => void;
+  getRevision?: () => number;
 }) {
-  const fields = useEntryFields(projectId, entry.id, entry.revision, onRevision);
+  const fields = useEntryFields(projectId, entry.id, entry.revision, onRevision, getRevision);
   const [manageOpen, setManageOpen] = useState(false);
   const { submit: submitValues } = fields;
   const [newName, setNewName] = useState("");

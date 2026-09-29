@@ -513,7 +513,10 @@ fn schema_two_migrates_with_a_valid_external_recovery_point_and_preserves_entrie
         .unwrap();
     drop(conn);
     let opened = ProjectService::open_project(&state, &paths.root, false).unwrap();
-    assert_eq!(opened.schema_version, 3);
+    assert_eq!(
+        opened.schema_version,
+        worldcrafter_lib::persistence::migrations::CURRENT_SCHEMA_VERSION
+    );
     assert_eq!(
         ProjectService::get_entry(&state, project, entry)
             .unwrap()
@@ -543,6 +546,6 @@ fn schema_two_migrates_with_a_valid_external_recovery_point_and_preserves_entrie
         Manifest::read(&paths.manifest_path())
             .unwrap()
             .schema_version,
-        3
+        worldcrafter_lib::persistence::migrations::CURRENT_SCHEMA_VERSION
     );
 }
