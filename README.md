@@ -307,6 +307,12 @@ the existing external pre-migration recovery snapshot and manifest publication.
 See [`docs/milestones/MILESTONE_01_FIELDS_FOUNDATION.md`](docs/milestones/MILESTONE_01_FIELDS_FOUNDATION.md)
 for the scope, remaining Fields work, acceptance tests, and manual checklist.
 
+The workspace UI now keeps default folders, Project maintenance and shared
+definitions in separate settings/management dialogs. Entry names and values stay
+in the main editor, while optional creation and manual path controls expand on
+demand. See the [UI cleanup note](docs/milestones/MILESTONE_01_UI_CLEANUP.md) for
+control locations, draft protection, verification and Windows manual review.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
 Capabilities, Relationships, Spatial, Chapters/Story Units, TipTap prose

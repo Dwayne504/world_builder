@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Entry, EntryField, FieldCommand, FieldKind, FieldProvider, SaveState } from "./types";
 import type { SubmitOutcome } from "./useProjectRename";
 import { parseFieldDraft, useEntryFields, valueDraft, type FieldDraft } from "./useEntryFields";
+import { Dialog } from "./Dialog";
 
 export interface FieldsController {
   state: SaveState;
@@ -96,6 +97,7 @@ export function EntryFieldsPanel({
   onRevision: (revision: number) => void;
 }) {
   const fields = useEntryFields(projectId, entry.id, entry.revision, onRevision);
+  const [manageOpen, setManageOpen] = useState(false);
   const { submit: submitValues } = fields;
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<FieldKind>("short_text");
@@ -184,11 +186,20 @@ export function EntryFieldsPanel({
 
   return (
     <section aria-label="Entry fields" className="fields-panel">
-      <h3>Fields</h3>
-      <p>All fields are optional. Values belong to this Entry.</p>
+      <div className="section-heading">
+        <div>
+          <h3>Fields</h3>
+          <p className="muted">Add only what helps tell this Entry's story.</p>
+        </div>
+        <button className="quiet-button" onClick={() => setManageOpen(true)}>
+          Manage fields
+        </button>
+      </div>
       {!fields.snapshot && !fields.error && <p role="status">Loading fields…</p>}
-      {(fields.error || formError) && <p role="alert">{fields.error || formError}</p>}
-      {fields.error && (
+      {!manageOpen && (fields.error || formError) && (
+        <p role="alert">{fields.error || formError}</p>
+      )}
+      {!manageOpen && fields.error && (
         <button disabled={busy} onClick={() => void fields.reload()}>
           Reload fields (keep drafts)
         </button>
@@ -198,7 +209,17 @@ export function EntryFieldsPanel({
           Save field values
         </button>
       )}
-      {fields.snapshot?.fields.length === 0 && <p>No fields yet. Add one when it helps.</p>}
+      {fields.snapshot?.fields.length === 0 && (
+        <p className="empty-state">No fields yet. A name and a value are enough to start.</p>
+      )}
+      {!manageOpen && (renamed || optionLabel) && (
+        <p className="field-note">
+          You have unfinished definition edits.{" "}
+          <button className="quiet-button" onClick={() => setManageOpen(true)}>
+            Continue definition edits
+          </button>
+        </p>
+      )}
       {fields.snapshot?.fields.map((field) => (
         <div className="field-value" key={field.definition.id}>
           <label>
@@ -220,101 +241,130 @@ export function EntryFieldsPanel({
           />
           {(field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
             <button
+              className="quiet-button clear-field"
+              aria-label={`Clear value: ${field.definition.name}`}
               disabled={busy || formDirty}
               onClick={() => fields.change(field.definition.id, "")}
             >
-              Clear value: {field.definition.name}
+              Clear
             </button>
           )}
         </div>
       ))}
-      <fieldset disabled={configDisabled || !!renamed || !!optionLabel} className="inline-creator">
-        <legend>Add a field</legend>
-        <label>
-          Field name
-          <input
-            aria-label="new-field-name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-        </label>
-        <label>
-          Kind
-          <select
-            aria-label="new-field-kind"
-            value={newKind}
-            onChange={(e) => {
-              setNewKind(e.target.value as FieldKind);
-              setNewValue("");
-              setNewOptions("");
-            }}
-          >
-            {Object.entries(kinds).map(([kind, label]) => (
-              <option key={kind} value={kind}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Make available to
-          <select
-            aria-label="new-field-scope"
-            value={newScope}
-            onChange={(e) => setNewScope(e.target.value as FieldProvider["kind"])}
-          >
-            <option value="entry">This Entry only</option>
-            <option value="category">This Category</option>
-            {entry.typeId && <option value="type">This Type</option>}
-          </select>
-        </label>
-        {newKind === "choice" || newKind === "multi_choice" ? (
+      <details className="disclosure add-field">
+        <summary>
+          Add a field{newName || String(newValue) || newOptions ? " · unfinished" : ""}
+        </summary>
+        <fieldset
+          disabled={configDisabled || !!renamed || !!optionLabel}
+          className="inline-creator"
+        >
+          <legend>Add a field</legend>
           <label>
-            Options (one per line)
-            <textarea
-              aria-label="new-field-options"
-              value={newOptions}
-              onChange={(e) => setNewOptions(e.target.value)}
+            Field name
+            <input
+              aria-label="new-field-name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
             />
           </label>
-        ) : (
-          <label>
-            Initial value (optional)
-            {newKind === "boolean" ? (
+          <details className="field-options">
+            <summary>
+              Field options · {kinds[newKind]} ·{" "}
+              {newScope === "entry"
+                ? "This Entry"
+                : newScope === "type"
+                  ? "This Type"
+                  : "This Category"}
+            </summary>
+            <label>
+              Kind
               <select
-                aria-label="new-field-value"
-                value={String(newValue)}
-                onChange={(e) => setNewValue(e.target.value)}
+                aria-label="new-field-kind"
+                value={newKind}
+                onChange={(e) => {
+                  setNewKind(e.target.value as FieldKind);
+                  setNewValue("");
+                  setNewOptions("");
+                }}
               >
-                <option value="">Not filled in</option>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
+                {Object.entries(kinds).map(([kind, label]) => (
+                  <option key={kind} value={kind}>
+                    {label}
+                  </option>
+                ))}
               </select>
-            ) : (
-              <input
-                aria-label="new-field-value"
-                value={String(newValue)}
-                onChange={(e) => setNewValue(e.target.value)}
+            </label>
+            <label>
+              Make available to
+              <select
+                aria-label="new-field-scope"
+                value={newScope}
+                onChange={(e) => setNewScope(e.target.value as FieldProvider["kind"])}
+              >
+                <option value="entry">This Entry only</option>
+                <option value="category">This Category</option>
+                {entry.typeId && <option value="type">This Type</option>}
+              </select>
+            </label>
+          </details>
+          {newKind === "choice" || newKind === "multi_choice" ? (
+            <label>
+              Options (one per line)
+              <textarea
+                aria-label="new-field-options"
+                value={newOptions}
+                onChange={(e) => setNewOptions(e.target.value)}
               />
-            )}
-          </label>
-        )}
-        <div className="row">
-          <button
-            disabled={!newName.trim() || (newScope === "type" && !entry.typeId)}
-            onClick={() => void create()}
-          >
-            Add field
-          </button>
-          <button onClick={cancelNew}>Cancel new field</button>
-        </div>
-      </fieldset>
-      <details>
-        <summary>Manage field definitions for this Project</summary>
+            </label>
+          ) : (
+            <label>
+              Initial value (optional)
+              {newKind === "boolean" ? (
+                <select
+                  aria-label="new-field-value"
+                  value={String(newValue)}
+                  onChange={(e) => setNewValue(e.target.value)}
+                >
+                  <option value="">Not filled in</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              ) : (
+                <input
+                  aria-label="new-field-value"
+                  value={String(newValue)}
+                  onChange={(e) => setNewValue(e.target.value)}
+                />
+              )}
+            </label>
+          )}
+          <div className="row">
+            <button
+              disabled={!newName.trim() || (newScope === "type" && !entry.typeId)}
+              onClick={() => void create()}
+            >
+              Add field
+            </button>
+            <button onClick={cancelNew}>Cancel new field</button>
+          </div>
+        </fieldset>
+      </details>
+      <Dialog open={manageOpen} title="Manage fields" onClose={() => setManageOpen(false)}>
         <p>
           Definition changes affect every Entry using that field. Detaching or retiring preserves
           existing values.
         </p>
+        {manageOpen && (fields.error || formError) && (
+          <p role="alert" className="error-banner">
+            {fields.error || formError}
+          </p>
+        )}
+        {manageOpen && fields.error && (
+          <button disabled={busy} onClick={() => void fields.reload()}>
+            Reload fields (keep drafts)
+          </button>
+        )}
         <select
           aria-label="field-definition"
           disabled={configDisabled || formDirty}
@@ -328,7 +378,10 @@ export function EntryFieldsPanel({
           {fields.snapshot?.definitions.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
-              {d.retired ? " (retired)" : ""} — {d.id.slice(-8)}
+              {d.retired ? " (retired)" : ""}
+              {fields.snapshot!.definitions.filter((other) => other.name === d.name).length > 1
+                ? ` · ${kinds[d.kind]} · ${d.id.slice(-8)}`
+                : ""}
             </option>
           ))}
         </select>
@@ -476,7 +529,7 @@ export function EntryFieldsPanel({
             )}
           </fieldset>
         )}
-      </details>
+      </Dialog>
     </section>
   );
 }
