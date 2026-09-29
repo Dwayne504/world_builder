@@ -70,6 +70,8 @@ vi.mock("./api", () => ({
   applyRelationships: vi.fn(),
   readFields: vi.fn().mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] }),
   applyFields: vi.fn(),
+  readFieldCatalog: vi.fn().mockResolvedValue({ globalRevision: 1, definitions: [] }),
+  applyTemplateFields: vi.fn(),
   AppCommandError: class AppCommandError extends Error {
     kind: string;
     constructor(dto: { kind: string; message: string }) {
@@ -103,6 +105,8 @@ vi.mock("./api", () => ({
 import App from "./App";
 import {
   AppCommandError,
+  readFieldCatalog,
+  applyTemplateFields,
   createProject,
   readFields,
   applyFields,
@@ -216,6 +220,10 @@ describe("Project screen Saved contract", () => {
       .mockReset()
       .mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] });
     vi.mocked(applyFields).mockReset();
+    vi.mocked(readFieldCatalog)
+      .mockReset()
+      .mockResolvedValue({ globalRevision: 1, definitions: [] });
+    vi.mocked(applyTemplateFields).mockReset();
     vi.mocked(readRelationships)
       .mockReset()
       .mockResolvedValue({ globalRevision: 1, definitions: [], relationships: [], entries: [] });
@@ -253,6 +261,132 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("groups Entries under Category headings without repeating Category names on rows", async () => {
+    const entry = mockEditableEntry();
+    listEntriesMock.mockResolvedValue([
+      entry,
+      {
+        ...entry,
+        id: "city",
+        displayName: "Uthlavik",
+        authoredName: "Uthlavik",
+        categoryId: "places",
+        typeId: null,
+      },
+    ]);
+    await openTheProjectScreen();
+    const characters = await screen.findByRole("heading", { name: "Characters" });
+    const places = screen.getByRole("heading", { name: "Places" });
+    expect(characters.closest("details")).toContainElement(
+      screen.getByRole("button", { name: "Thron" }),
+    );
+    expect(places.closest("details")).toContainElement(
+      screen.getByRole("button", { name: "Uthlavik" }),
+    );
+    expect(screen.getByRole("button", { name: "Thron" })).toHaveTextContent(/^Thron$/);
+    fireEvent.click(characters.closest("summary")!);
+    expect(screen.getByText("Thron")).not.toBeVisible();
+  });
+
+  it("creates and selects a Type while editing an existing untyped Entry", async () => {
+    const entry = { ...mockEditableEntry(), typeId: null };
+    listEntriesMock.mockResolvedValue([entry]);
+    createTypeMock.mockResolvedValue({
+      id: "warrior",
+      name: "Warrior",
+      categoryId: "characters",
+      parentTypeId: null,
+      revision: 1,
+      globalRevision: 2,
+    });
+    changeEntryStructureMock.mockResolvedValue({
+      ...entry,
+      typeId: "warrior",
+      revision: 2,
+      globalRevision: 3,
+    });
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create a Type in this Category" }));
+    fireEvent.change(screen.getByLabelText("new-editor-type-name"), {
+      target: { value: "Warrior" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Type and select" }));
+    await waitFor(() => expect(screen.getByLabelText("entry-type")).toHaveValue("warrior"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
+    await waitFor(() =>
+      expect(changeEntryStructureMock).toHaveBeenCalledWith(
+        project.projectId,
+        "entry",
+        "characters",
+        "warrior",
+        1,
+      ),
+    );
+  });
+
+  it("adopts Category defaults on an open Entry immediately", async () => {
+    mockEditableEntry();
+    const def = {
+      id: "mass",
+      name: "Mass",
+      kind: "number" as const,
+      unit: "tons",
+      retired: false,
+      revision: 1,
+      options: [],
+      bindings: [],
+    };
+    vi.mocked(applyTemplateFields).mockResolvedValue({ globalRevision: 2, definitions: [def] });
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Categories" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Categories" }));
+    fireEvent.click(await screen.findByText("Add a default field for Characters"));
+    fireEvent.change(screen.getByLabelText("Default field name"), { target: { value: "Mass" } });
+    fireEvent.change(screen.getByLabelText("Default field kind"), { target: { value: "number" } });
+    fireEvent.change(screen.getByLabelText("Default field unit"), { target: { value: "tons" } });
+    vi.mocked(readFields).mockResolvedValue({
+      globalRevision: 2,
+      definitions: [def],
+      fields: [{ definition: def, available: true, value: null }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+    await waitFor(() => expect(applyTemplateFields).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Close Categories and defaults" }));
+    expect(await screen.findByLabelText("Value: Mass")).toBeVisible();
+    expect(screen.getByText("Unit: tons")).toBeVisible();
+  });
+
+  it("native close waits for a Category default commit and blocks unfinished manager drafts", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    const pending = deferred<{ globalRevision: number; definitions: [] }>();
+    vi.mocked(applyTemplateFields).mockReturnValue(pending.promise);
+    closeProjectMock.mockResolvedValue(undefined);
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Categories" }));
+    fireEvent.click(await screen.findByText("Add a default field for Characters"));
+    fireEvent.change(screen.getByLabelText("Default field name"), { target: { value: "Height" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Categories and defaults" }));
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Save and close" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Before you leave" }));
+    fireEvent.click(screen.getByRole("button", { name: "Categories" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Add default field" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+    await waitFor(() => expect(applyTemplateFields).toHaveBeenCalledOnce());
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ globalRevision: 2, definitions: [] }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    expect(nativeWindowCloseMock).toHaveBeenCalled();
   });
 
   it("native close waits for relationship creation to commit before exiting", async () => {

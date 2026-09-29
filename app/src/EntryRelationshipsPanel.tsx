@@ -198,7 +198,9 @@ export function EntryRelationshipsPanel({
             Relationship note
             <textarea
               aria-label={`Note: ${view.label} ${view.other.label}`}
-              disabled={busy || (!!noteDraft && noteDraft.id !== r.id)}
+              // Autosave must not disable the focused editor. Newer text stays
+              // in noteRef until its own acknowledgement; other actions still wait.
+              disabled={disabled || formDirty || (!!noteDraft && noteDraft.id !== r.id)}
               value={noteDraft?.id === r.id ? noteDraft.value : r.note}
               onChange={(e) => {
                 const next = { id: r.id, value: e.target.value };

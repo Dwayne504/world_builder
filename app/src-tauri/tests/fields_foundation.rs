@@ -49,6 +49,7 @@ impl Fixture {
     }
     fn create(&self, kind: FieldKind, value: Option<FieldValue>) -> FieldId {
         let result = self.apply(FieldCommand::Create {
+            unit: None,
             name: "A field".into(),
             field_kind: kind,
             provider: FieldProvider {
@@ -224,6 +225,7 @@ fn template_changes_detach_and_retirement_never_erase_authored_values() {
 fn choice_options_have_stable_ids_and_retired_selections_are_preserved() {
     let f = Fixture::new();
     let result = f.apply(FieldCommand::Create {
+        unit: None,
         name: "Eye colour".into(),
         field_kind: FieldKind::MultiChoice,
         provider: FieldProvider {
@@ -340,6 +342,7 @@ fn choice_cardinality_identity_and_empty_storage_are_enforced() {
     let mut definitions = Vec::new();
     for _ in 0..2 {
         let snapshot = f.apply(FieldCommand::Create {
+            unit: None,
             name: "Same name".into(),
             field_kind: FieldKind::Choice,
             provider: FieldProvider {
@@ -430,6 +433,7 @@ fn nonexistent_providers_and_cross_project_fields_cannot_be_written() {
         f.entry.id,
         before.global_revision,
         FieldCommand::Create {
+            unit: None,
             name: "Invalid".into(),
             field_kind: FieldKind::Boolean,
             provider: FieldProvider {

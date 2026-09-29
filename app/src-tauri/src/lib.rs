@@ -38,6 +38,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             tauri_boundary::read_relationships,
             tauri_boundary::apply_relationships,
+            tauri_boundary::read_field_catalog,
+            tauri_boundary::apply_template_fields,
             tauri_boundary::read_fields,
             tauri_boundary::apply_fields,
             tauri_boundary::create_project,

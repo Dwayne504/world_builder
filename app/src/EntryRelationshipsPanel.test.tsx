@@ -220,7 +220,9 @@ it("retains a newer note draft when an older note is acknowledged", async () => 
   change("Note: owns Singularity Blade", "First draft");
   fireEvent.click(screen.getByRole("button", { name: "Save note" }));
   await waitFor(() => expect(controller.state).toBe("saving"));
-  // Programmatic change exercises the generation guard even though real input is disabled during save.
+  const input = screen.getByLabelText("Note: owns Singularity Blade");
+  input.focus();
+  expect(input).toBeEnabled();
   change("Note: owns Singularity Blade", "Newer draft");
   const updated = snapshot();
   updated.relationships[0].note = "First draft";
@@ -229,6 +231,7 @@ it("retains a newer note draft when an older note is acknowledged", async () => 
   });
   expect(screen.getByLabelText("Note: owns Singularity Blade")).toHaveValue("Newer draft");
   expect(controller.state).toBe("dirty");
+  expect(input).toHaveFocus();
 });
 it("creates symmetric definitions with matching labels and expectations", async () => {
   await mount();

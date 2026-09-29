@@ -30,6 +30,29 @@ fn invalid_input(message: impl ToString) -> AppErrorDto {
 }
 
 #[tauri::command]
+pub fn read_field_catalog(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<crate::domain::fields::FieldCatalog, AppErrorDto> {
+    ProjectService::read_field_catalog(&state, parse_project_id(&project_id)?).map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_template_fields(
+    state: State<'_, AppState>,
+    project_id: String,
+    expected_revision: i64,
+    command: crate::domain::fields::FieldCommand,
+) -> Result<crate::domain::fields::FieldCatalog, AppErrorDto> {
+    ProjectService::apply_template_fields(
+        &state,
+        parse_project_id(&project_id)?,
+        expected_revision,
+        command,
+    )
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn read_relationships(
     state: State<'_, AppState>,
     project_id: String,

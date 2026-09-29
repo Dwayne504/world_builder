@@ -32,6 +32,7 @@ import { decideClose, type CloseIntent } from "./closeDecision";
 import { EntryFieldsPanel, type FieldsController } from "./EntryFieldsPanel";
 import { EntryRelationshipsPanel } from "./EntryRelationshipsPanel";
 import { Dialog } from "./Dialog";
+import { CategoryManager } from "./CategoryManager";
 
 function errorMessage(err: unknown): string {
   if (err instanceof AppCommandError) {
@@ -733,6 +734,7 @@ function EntryEditor({
   onNavigate,
   onController,
   mutations,
+  templateEpoch,
 }: {
   projectId: string;
   initialEntry: Entry;
@@ -742,6 +744,7 @@ function EntryEditor({
   onNavigate: (id: string) => void;
   onController: (controller: EntrySaveController) => void;
   mutations: MutationCoordinator;
+  templateEpoch: number;
 }) {
   const editor = useEntryName(projectId, initialEntry);
   const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
@@ -787,6 +790,8 @@ function EntryEditor({
   const [types, setTypes] = useState<TypeDef[]>([]);
   const [categoryId, setCategoryId] = useState(editor.entry.categoryId);
   const [typeId, setTypeId] = useState(editor.entry.typeId ?? "");
+  const [newTypeName, setNewTypeName] = useState("");
+  const [showTypeCreator, setShowTypeCreator] = useState(false);
   const [structureError, setStructureError] = useState<string | null>(null);
   const [structureTypeChosen, setStructureTypeChosen] = useState(true);
   const onChangedRef = useRef(onChanged);
@@ -799,7 +804,9 @@ function EntryEditor({
     [currentEntry],
   );
   const structureDirty =
-    categoryId !== editor.entry.categoryId || typeId !== (editor.entry.typeId ?? "");
+    categoryId !== editor.entry.categoryId ||
+    typeId !== (editor.entry.typeId ?? "") ||
+    !!newTypeName;
   structureDirtyRef.current = structureDirty;
   const combinedEntryState: SaveState =
     editor.saveState === "saving" ||
@@ -851,7 +858,7 @@ function EntryEditor({
     return () => {
       current = false;
     };
-  }, [categoryId, projectId]);
+  }, [categoryId, projectId, templateEpoch]);
 
   async function saveStructure() {
     const submittedCategoryId = categoryId;
@@ -986,12 +993,71 @@ function EntryEditor({
             ))}
           </select>
         </label>
+        <button
+          disabled={
+            mutations.state === "saving" ||
+            relationshipsState === "saving" ||
+            fieldsState !== "saved"
+          }
+          onClick={() => setShowTypeCreator(true)}
+        >
+          Create a Type in this Category
+        </button>
+        {showTypeCreator && (
+          <fieldset
+            className="inline-creator"
+            disabled={mutations.state === "saving" || relationshipsState === "saving"}
+          >
+            <legend>New Type</legend>
+            <label>
+              Type name
+              <input
+                aria-label="new-editor-type-name"
+                value={newTypeName}
+                onChange={(e) => setNewTypeName(e.target.value)}
+              />
+            </label>
+            <div className="row">
+              <button
+                disabled={!newTypeName.trim()}
+                onClick={() =>
+                  void mutations
+                    .run(
+                      () => createType(projectId, categoryId, newTypeName),
+                      (created) => {
+                        setTypes((items) => [...items, created]);
+                        setTypeId(created.id);
+                        setStructureTypeChosen(true);
+                        setNewTypeName("");
+                        setShowTypeCreator(false);
+                        receiveRevision(created.globalRevision);
+                      },
+                    )
+                    .then((result) => {
+                      if (result.kind === "failed") setStructureError(result.errorMessage);
+                    })
+                }
+              >
+                Create Type and select
+              </button>
+              <button
+                onClick={() => {
+                  setNewTypeName("");
+                  setShowTypeCreator(false);
+                }}
+              >
+                Cancel new Type
+              </button>
+            </div>
+          </fieldset>
+        )}
         <div className="row">
           <button
             disabled={
               mutations.state === "saving" ||
               relationshipsState === "saving" ||
               !structureDirty ||
+              !!newTypeName ||
               (categoryId !== editor.entry.categoryId && !structureTypeChosen)
             }
             onClick={() => void saveStructure()}
@@ -1016,6 +1082,7 @@ function EntryEditor({
         onController={receiveFields}
         onRevision={receiveRevision}
         getRevision={getRevision}
+        templateEpoch={templateEpoch}
       />
       <EntryRelationshipsPanel
         projectId={projectId}
@@ -1041,11 +1108,13 @@ function EntryWorkflow({
   onController,
   onGlobalRevision,
   mutations,
+  templateEpoch,
 }: {
   projectId: string;
   onController: (controller: EntrySaveController | null) => void;
   onGlobalRevision: (revision: number) => void;
   mutations: MutationCoordinator;
+  templateEpoch: number;
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -1079,7 +1148,7 @@ function EntryWorkflow({
 
   useEffect(() => {
     void refresh().catch((reason) => setError(errorMessage(reason)));
-  }, [refresh]);
+  }, [refresh, templateEpoch]);
 
   useEffect(() => {
     let current = true;
@@ -1099,7 +1168,7 @@ function EntryWorkflow({
     return () => {
       current = false;
     };
-  }, [categoryId, projectId]);
+  }, [categoryId, projectId, templateEpoch]);
 
   const receiveController = useCallback(
     (controller: EntrySaveController) => {
@@ -1273,6 +1342,7 @@ function EntryWorkflow({
           key={selected.id}
           projectId={projectId}
           initialEntry={selected}
+          templateEpoch={templateEpoch}
           categories={categories}
           mutations={mutations}
           onController={receiveController}
@@ -1310,18 +1380,32 @@ function EntryWorkflow({
         </p>
       )}
       {error && <p role="alert">{error}</p>}
-      <ul className="entry-list">
-        {entries.map((entry) => (
-          <li key={entry.id}>
-            <button disabled={mutations.state === "saving"} onClick={() => openEntry(entry)}>
-              <span>{entry.displayName}</span>
-              <span aria-hidden="true" className="entry-category-label">
-                {categories.find((category) => category.id === entry.categoryId)?.name}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      <div className="entry-groups">
+        {categories.map((category) => {
+          const members = entries.filter((entry) => entry.categoryId === category.id);
+          if (!members.length) return null;
+          return (
+            <details key={category.id} className="entry-group" open>
+              <summary>
+                <h3>{category.name}</h3>
+                <span className="muted">{members.length}</span>
+              </summary>
+              <ul className="entry-list">
+                {members.map((entry) => (
+                  <li key={entry.id}>
+                    <button
+                      disabled={mutations.state === "saving"}
+                      onClick={() => openEntry(entry)}
+                    >
+                      {entry.displayName}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          );
+        })}
+      </div>
       <details className="disclosure create-entry" open={entries.length === 0 ? true : undefined}>
         <summary>Create Entry</summary>
         <label>
@@ -1448,7 +1532,9 @@ function EntryWorkflow({
 }
 
 function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClosed: () => void }) {
-  const [projectDialog, setProjectDialog] = useState<"settings" | "backup" | null>(null);
+  const [projectDialog, setProjectDialog] = useState<"settings" | "backup" | "categories" | null>(
+    null,
+  );
   const rename = useProjectRename(project);
   const mutations = useMutationCoordinator();
   const {
@@ -1465,6 +1551,13 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const [closeError, setCloseError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const approvedNativeClose = useRef(false);
+  const [templateEpoch, setTemplateEpoch] = useState(0);
+  const managerControllerRef = useRef<FieldsController | null>(null);
+  const [managerState, setManagerState] = useState<SaveState>("saved");
+  const receiveManagerController = useCallback((controller: FieldsController) => {
+    managerControllerRef.current = controller;
+    setManagerState(controller.state);
+  }, []);
   const entryControllerRef = useRef<EntrySaveController | null>(null);
   const [entrySaveState, setEntrySaveState] = useState<SaveState>("saved");
   const saveStateRef = useRef<SaveState>(rename.saveState);
@@ -1472,13 +1565,16 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   const waitingCloseRef = useRef<Promise<void> | null>(null);
   const waitingCloseIntentRef = useRef<CloseIntent | null>(null);
   const nativeWindowCloseRequested = useRef(false);
-  const combinedSaveState: SaveState = [rename.saveState, entrySaveState, mutationState].includes(
-    "saving",
-  )
+  const combinedSaveState: SaveState = [
+    rename.saveState,
+    entrySaveState,
+    mutationState,
+    managerState,
+  ].includes("saving")
     ? "saving"
-    : [rename.saveState, entrySaveState, mutationState].includes("failed")
+    : [rename.saveState, entrySaveState, mutationState, managerState].includes("failed")
       ? "failed"
-      : [rename.saveState, entrySaveState].includes("dirty")
+      : [rename.saveState, entrySaveState, managerState].includes("dirty")
         ? "dirty"
         : "saved";
   saveStateRef.current = combinedSaveState;
@@ -1594,11 +1690,13 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         renameSubmit(),
         entryControllerRef.current?.submit() ?? Promise.resolve({ kind: "no-op" } as SubmitOutcome),
         waitForStructuralMutation(),
+        managerControllerRef.current?.submit() ??
+          Promise.resolve({ kind: "no-op" } as SubmitOutcome),
       ])
-        .then(([renameOutcome, entryOutcome, structuralSuccessful]) => {
+        .then(([renameOutcome, entryOutcome, structuralSuccessful, managerOutcome]) => {
           if (
             structuralSuccessful &&
-            [renameOutcome, entryOutcome].every(
+            [renameOutcome, entryOutcome, managerOutcome].every(
               (outcome) => outcome.kind === "committed" || outcome.kind === "no-op",
             )
           ) {
@@ -1653,10 +1751,15 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   requestCloseRef.current = requestClose;
 
   useEffect(() => {
-    if (rename.saveState === "saved" && entrySaveState === "saved" && mutationState === "saved") {
+    if (
+      rename.saveState === "saved" &&
+      entrySaveState === "saved" &&
+      mutationState === "saved" &&
+      managerState === "saved"
+    ) {
       setPendingCloseIntent(null);
     }
-  }, [entrySaveState, mutationState, rename.saveState]);
+  }, [entrySaveState, mutationState, rename.saveState, managerState]);
 
   function handleClose() {
     requestClose("project");
@@ -1718,6 +1821,13 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           >
             {saveStateLabel(combinedSaveState)}
           </span>
+          <button
+            className="quiet-button"
+            disabled={entrySaveState !== "saved" || mutationState === "saving"}
+            onClick={() => setProjectDialog("categories")}
+          >
+            Categories
+          </button>
           <button className="quiet-button" onClick={() => setProjectDialog("backup")}>
             Backups
           </button>
@@ -1789,7 +1899,18 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         </details>
       </Dialog>
 
+      <CategoryManager
+        projectId={project.projectId}
+        open={projectDialog === "categories"}
+        onClose={() => setProjectDialog(null)}
+        onController={receiveManagerController}
+        onChanged={(revision) => {
+          rename.updateRevision(revision);
+          setTemplateEpoch((epoch) => epoch + 1);
+        }}
+      />
       <EntryWorkflow
+        templateEpoch={templateEpoch}
         projectId={project.projectId}
         onController={receiveEntryController}
         onGlobalRevision={rename.updateRevision}
@@ -1840,14 +1961,15 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
         {pendingCloseIntent && (
           <div role="alert" className="error-banner">
             <p>{closeWarningMessage(pendingCloseIntent)}</p>
-            {entryControllerRef.current?.canSubmit !== false && (
-              <button
-                disabled={combinedSaveState === "saving"}
-                onClick={() => void waitForSaveThenClose(pendingCloseIntent)}
-              >
-                Save and close
-              </button>
-            )}
+            {entryControllerRef.current?.canSubmit !== false &&
+              managerControllerRef.current?.canSubmit !== false && (
+                <button
+                  disabled={combinedSaveState === "saving"}
+                  onClick={() => void waitForSaveThenClose(pendingCloseIntent)}
+                >
+                  Save and close
+                </button>
+              )}
             <button disabled={combinedSaveState === "saving"} onClick={handleForceCloseDiscarding}>
               {closeWarningActionLabel(pendingCloseIntent)}
             </button>

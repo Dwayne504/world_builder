@@ -529,7 +529,7 @@ fn schema_three_upgrade_is_backed_up_and_failed_upgrade_can_be_retried() {
     let f = Fixture::new();
     ProjectService::close_project(&f.state, f.project).unwrap();
     let conn = f.db();
-    conn.execute_batch("DROP TABLE relationship_participant; DROP TABLE relationship_instance; DROP TABLE relationship_definition; PRAGMA user_version=3; UPDATE project_meta SET schema_version=3;").unwrap();
+    conn.execute_batch("DROP TRIGGER field_unit_preserve_values; ALTER TABLE field_definition DROP COLUMN unit; DROP TABLE relationship_participant; DROP TABLE relationship_instance; DROP TABLE relationship_definition; PRAGMA user_version=3; UPDATE project_meta SET schema_version=3;").unwrap();
     let manifest_path = std::path::Path::new(&f.path).join("manifest.json");
     let mut manifest = Manifest::read(&manifest_path).unwrap();
     manifest.schema_version = 3;
@@ -549,7 +549,10 @@ fn schema_three_upgrade_is_backed_up_and_failed_upgrade_can_be_retried() {
     drop(conn);
     let opened =
         ProjectService::open_project(&f.state, std::path::Path::new(&f.path), false).unwrap();
-    assert_eq!(opened.schema_version, 4);
+    assert_eq!(
+        opened.schema_version,
+        worldcrafter_lib::persistence::migrations::CURRENT_SCHEMA_VERSION
+    );
     assert_eq!(f.read(f.entry.id).entries[0].id, f.entry.id);
     let recovery = f
         .dir

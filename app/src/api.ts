@@ -6,7 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { AppErrorDto, Category, Entry, Preferences, ProjectSummary, TypeDef } from "./types";
-import type { EntryFields, FieldCommand } from "./types";
+import type { EntryFields, FieldCommand, FieldCatalog } from "./types";
 import type { EntryRelationships, RelationshipCommand } from "./types";
 
 export function readRelationships(projectId: string, entryId: string): Promise<EntryRelationships> {
@@ -202,4 +202,15 @@ export function previewPackagePath(baseDir: string, workingName: string): Promis
 /** Shows a native folder picker. Returns `null` if the user cancels. */
 export function pickDirectory(defaultPath?: string | null): Promise<string | null> {
   return call("pick_directory", { defaultPath: defaultPath || null });
+}
+
+export function readFieldCatalog(projectId: string): Promise<FieldCatalog> {
+  return call("read_field_catalog", { projectId });
+}
+export function applyTemplateFields(
+  projectId: string,
+  expectedRevision: number,
+  command: FieldCommand,
+): Promise<FieldCatalog> {
+  return call("apply_template_fields", { projectId, expectedRevision, command });
 }

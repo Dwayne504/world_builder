@@ -11,7 +11,7 @@ export interface FieldsController {
 }
 const kinds: Record<FieldKind, string> = {
   short_text: "Short Text",
-  number: "Number",
+  number: "Number (optional unit)",
   boolean: "Boolean",
   choice: "Choice",
   multi_choice: "Multi-choice",
@@ -90,6 +90,7 @@ export function EntryFieldsPanel({
   onController,
   onRevision,
   getRevision,
+  templateEpoch = 0,
 }: {
   projectId: string;
   entry: Entry;
@@ -97,11 +98,19 @@ export function EntryFieldsPanel({
   onController: (controller: FieldsController) => void;
   onRevision: (revision: number) => void;
   getRevision?: () => number;
+  templateEpoch?: number;
 }) {
-  const fields = useEntryFields(projectId, entry.id, entry.revision, onRevision, getRevision);
+  const fields = useEntryFields(
+    projectId,
+    entry.id,
+    `${entry.revision}:${templateEpoch}`,
+    onRevision,
+    getRevision,
+  );
   const [manageOpen, setManageOpen] = useState(false);
   const { submit: submitValues } = fields;
   const [newName, setNewName] = useState("");
+  const [newUnit, setNewUnit] = useState("");
   const [newKind, setNewKind] = useState<FieldKind>("short_text");
   const [newScope, setNewScope] = useState<FieldProvider["kind"]>("entry");
   const [newValue, setNewValue] = useState<FieldDraft>("");
@@ -111,7 +120,14 @@ export function EntryFieldsPanel({
   const [optionId, setOptionId] = useState("");
   const [optionLabel, setOptionLabel] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  const formDirty = !!(newName || String(newValue) || newOptions || renamed || optionLabel);
+  const formDirty = !!(
+    newName ||
+    String(newValue) ||
+    newOptions ||
+    newUnit ||
+    renamed ||
+    optionLabel
+  );
   const combinedState =
     fields.state === "saving" || fields.state === "failed"
       ? fields.state
@@ -145,6 +161,7 @@ export function EntryFieldsPanel({
   }
   function cancelNew() {
     setNewName("");
+    setNewUnit("");
     setNewValue("");
     setNewOptions("");
     setFormError(null);
@@ -172,6 +189,7 @@ export function EntryFieldsPanel({
           kind: "create",
           name: newName,
           fieldKind: newKind,
+          ...(newKind === "number" && newUnit.trim() ? { unit: newUnit.trim() } : {}),
           provider: provider(newScope),
           options: newOptions
             .split("\n")
@@ -237,15 +255,16 @@ export function EntryFieldsPanel({
           <ValueInput
             field={field}
             draft={fields.drafts[field.definition.id] ?? valueDraft(field.value)}
-            disabled={busy || formDirty}
+            disabled={disabled || formDirty}
             onChange={(draft) => fields.change(field.definition.id, draft)}
             onBlur={() => void fields.submit()}
           />
+          {field.definition.unit && <p className="field-unit">Unit: {field.definition.unit}</p>}
           {(field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
             <button
               className="quiet-button clear-field"
               aria-label={`Clear value: ${field.definition.name}`}
-              disabled={busy || formDirty}
+              disabled={disabled || formDirty}
               onClick={() => fields.change(field.definition.id, "")}
             >
               Clear
@@ -270,6 +289,36 @@ export function EntryFieldsPanel({
               onChange={(e) => setNewName(e.target.value)}
             />
           </label>
+          <label>
+            Kind
+            <select
+              aria-label="new-field-kind"
+              value={newKind}
+              onChange={(e) => {
+                setNewKind(e.target.value as FieldKind);
+                setNewValue("");
+                setNewOptions("");
+                setNewUnit("");
+              }}
+            >
+              {Object.entries(kinds).map(([kind, label]) => (
+                <option key={kind} value={kind}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {newKind === "number" && (
+            <label>
+              Unit (optional)
+              <input
+                aria-label="new-field-unit"
+                placeholder="tons, km, years, gold crowns..."
+                value={newUnit}
+                onChange={(e) => setNewUnit(e.target.value)}
+              />
+            </label>
+          )}
           <details className="field-options">
             <summary>
               Field options · {kinds[newKind]} ·{" "}
@@ -279,24 +328,6 @@ export function EntryFieldsPanel({
                   ? "This Type"
                   : "This Category"}
             </summary>
-            <label>
-              Kind
-              <select
-                aria-label="new-field-kind"
-                value={newKind}
-                onChange={(e) => {
-                  setNewKind(e.target.value as FieldKind);
-                  setNewValue("");
-                  setNewOptions("");
-                }}
-              >
-                {Object.entries(kinds).map(([kind, label]) => (
-                  <option key={kind} value={kind}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label>
               Make available to
               <select
@@ -390,6 +421,7 @@ export function EntryFieldsPanel({
         {selected && (
           <fieldset disabled={configDisabled || !!newName || !!String(newValue) || !!newOptions}>
             <legend>Shared definition: {selected.name}</legend>
+            {selected.unit && <p>Unit: {selected.unit}. Unit conversion is not available yet.</p>}
             <label>
               New definition name
               <input

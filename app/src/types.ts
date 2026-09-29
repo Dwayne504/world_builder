@@ -71,6 +71,7 @@ export interface FieldDefinition {
   id: string;
   name: string;
   kind: FieldKind;
+  unit?: string | null;
   retired: boolean;
   revision: number;
   options: ChoiceOption[];
@@ -96,6 +97,7 @@ export type FieldCommand =
       kind: "create";
       name: string;
       fieldKind: FieldKind;
+      unit?: string | null;
       provider: FieldProvider;
       options: string[];
       value: FieldValue | null;
@@ -158,3 +160,8 @@ export type RelationshipCommand =
     }
   | { kind: "set_note"; id: string; note: string }
   | { kind: "set_ended"; id: string; ended: boolean };
+
+export interface FieldCatalog {
+  globalRevision: number;
+  definitions: FieldDefinition[];
+}
