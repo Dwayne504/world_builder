@@ -793,6 +793,22 @@ function EntryEditor({
   const [newTypeName, setNewTypeName] = useState("");
   const [showTypeCreator, setShowTypeCreator] = useState(false);
   const [structureError, setStructureError] = useState<string | null>(null);
+  const [titleType, setTitleType] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    let current = true;
+    if (editor.entry.typeId)
+      void listTypes(projectId, editor.entry.categoryId)
+        .then((items) => {
+          if (current) setTitleType(items.find((t) => t.id === editor.entry.typeId) ?? null);
+        })
+        .catch((error) => {
+          if (current) setStructureError(errorMessage(error));
+        });
+    return () => {
+      current = false;
+    };
+  }, [projectId, editor.entry.categoryId, editor.entry.typeId, templateEpoch]);
+
   const [structureTypeChosen, setStructureTypeChosen] = useState(true);
   const onChangedRef = useRef(onChanged);
   onChangedRef.current = onChanged;
@@ -900,9 +916,30 @@ function EntryEditor({
   return (
     <section className="entry-editor">
       <div className="section-heading">
-        <div>
-          <p className="eyebrow">ENTRY</p>
-          <h2>{editor.entry.displayName}</h2>
+        <div className="entry-title-block">
+          <p className="eyebrow">
+            {categories.find((c) => c.id === editor.entry.categoryId)?.name ??
+              "Category unavailable"}
+          </p>
+          <h2 className="entry-title" aria-label={editor.draftName || "[Unnamed Entry]"}>
+            <input
+              aria-label="entry-name"
+              title="Edit Entry title"
+              placeholder="[Unnamed Entry]"
+              disabled={mutations.state === "saving" || relationshipsState === "saving"}
+              value={editor.draftName}
+              onChange={(event) => editor.onChangeDraft(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  void editor.submit();
+                }
+              }}
+            />
+          </h2>
+          {editor.entry.typeId && titleType?.id === editor.entry.typeId && (
+            <p className="entry-type">{titleType.name}</p>
+          )}
         </div>
         <div className="row">
           <button className="quiet-button" onClick={() => setEntrySettingsOpen(true)}>
@@ -913,15 +950,6 @@ function EntryEditor({
           </button>
         </div>
       </div>
-      <label>
-        Name (optional)
-        <input
-          aria-label="entry-name"
-          disabled={mutations.state === "saving" || relationshipsState === "saving"}
-          value={editor.draftName}
-          onChange={(event) => editor.onChangeDraft(event.currentTarget.value)}
-        />
-      </label>
       <span data-testid="entry-save-state" className="sr-only">
         {saveStateLabel(combinedEntryState)}
       </span>
@@ -1071,34 +1099,36 @@ function EntryEditor({
           <p className="package-preview">Entry ID: {editor.entry.id}</p>
         </details>
       </Dialog>
-      <EntryFieldsPanel
-        projectId={projectId}
-        entry={editor.entry}
-        disabled={
-          mutations.state === "saving" ||
-          editor.saveState === "saving" ||
-          relationshipsState === "saving"
-        }
-        onController={receiveFields}
-        onRevision={receiveRevision}
-        getRevision={getRevision}
-        templateEpoch={templateEpoch}
-      />
-      <EntryRelationshipsPanel
-        projectId={projectId}
-        entryId={editor.entry.id}
-        categories={categories}
-        disabled={
-          mutations.state === "saving" ||
-          editor.saveState !== "saved" ||
-          fieldsState !== "saved" ||
-          structureDirty
-        }
-        onController={receiveRelationships}
-        onRevision={receiveRevision}
-        getRevision={getRevision}
-        onNavigate={onNavigate}
-      />
+      <div className="entry-content">
+        <EntryFieldsPanel
+          projectId={projectId}
+          entry={editor.entry}
+          disabled={
+            mutations.state === "saving" ||
+            editor.saveState === "saving" ||
+            relationshipsState === "saving"
+          }
+          onController={receiveFields}
+          onRevision={receiveRevision}
+          getRevision={getRevision}
+          templateEpoch={templateEpoch}
+        />
+        <EntryRelationshipsPanel
+          projectId={projectId}
+          entryId={editor.entry.id}
+          categories={categories}
+          disabled={
+            mutations.state === "saving" ||
+            editor.saveState !== "saved" ||
+            fieldsState !== "saved" ||
+            structureDirty
+          }
+          onController={receiveRelationships}
+          onRevision={receiveRevision}
+          getRevision={getRevision}
+          onNavigate={onNavigate}
+        />
+      </div>
     </section>
   );
 }
@@ -1121,6 +1151,8 @@ function EntryWorkflow({
   const [types, setTypes] = useState<TypeDef[]>([]);
   const [selected, setSelected] = useState<Entry | null>(null);
   const [draftName, setDraftName] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creationTouched, setCreationTouched] = useState(false);
   const [categoryId, setCategoryId] = useState("");
   const [typeId, setTypeId] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -1133,6 +1165,33 @@ function EntryWorkflow({
   const [pendingBack, setPendingBack] = useState(false);
   const [controllerState, setControllerState] = useState<SaveState>("saved");
   const [controllerCanSubmit, setControllerCanSubmit] = useState(true);
+  const creationDirty = !!(draftName || newCategoryName || newTypeName || creationTouched);
+  const creationDirtyRef = useRef(creationDirty);
+  creationDirtyRef.current = creationDirty;
+  const waitForCreation = mutations.waitForPending;
+  const submitCreation = useCallback(async (): Promise<SubmitOutcome> => {
+    const successful = await waitForCreation();
+    return { kind: successful && !creationDirtyRef.current ? "no-op" : "failed" };
+  }, [waitForCreation]);
+  useEffect(() => {
+    if (!selected)
+      onController({
+        state: mutations.state === "saving" ? "saving" : creationDirty ? "dirty" : "saved",
+        submit: submitCreation,
+        canSubmit: !creationDirty,
+      });
+  }, [selected, creationDirty, mutations.state, submitCreation, onController]);
+  function cancelCreation() {
+    setDraftName("");
+    setNewCategoryName("");
+    setNewTypeName("");
+    setShowCategoryCreator(false);
+    setShowTypeCreator(false);
+    setCreationTouched(false);
+    creationDirtyRef.current = false;
+    setCreateOpen(false);
+    setError(null);
+  }
 
   const refresh = useCallback(async () => {
     const [nextCategories, nextEntries] = await Promise.all([
@@ -1266,6 +1325,7 @@ function EntryWorkflow({
         setCategoryId(category.id);
         setTypeId("");
         setNewCategoryName("");
+        creationDirtyRef.current = !!(draftName || newTypeName || creationTouched);
         setShowCategoryCreator(false);
       },
     );
@@ -1282,6 +1342,7 @@ function EntryWorkflow({
         setTypes((items) => [...items, type]);
         setTypeId(type.id);
         setNewTypeName("");
+        creationDirtyRef.current = !!(draftName || newCategoryName || creationTouched);
         setShowTypeCreator(false);
       },
     );
@@ -1303,6 +1364,9 @@ function EntryWorkflow({
         setEntries((items) => [...items, entry]);
         onGlobalRevision(entry.globalRevision);
         setDraftName("");
+        setCreationTouched(false);
+        creationDirtyRef.current = false;
+        setCreateOpen(false);
         setSelected(entry);
       },
     );
@@ -1372,14 +1436,23 @@ function EntryWorkflow({
           <p className="eyebrow">WORLD MATERIAL</p>
           <h2>Entries</h2>
         </div>
+        <button disabled={mutations.state === "saving"} onClick={() => setCreateOpen(true)}>
+          Add Entry
+        </button>
       </div>
       <p className="muted">Characters, places, objects, or an idea without a name yet.</p>
       {entries.length === 0 && (
-        <p className="empty-state">
-          Your world starts with one idea. Create your first Entry below.
+        <p className="empty-state">Your world starts with one idea. Add your first Entry.</p>
+      )}
+      {!createOpen && error && <p role="alert">{error}</p>}
+      {!createOpen && creationDirty && (
+        <p className="field-note">
+          You have an unfinished Entry.{" "}
+          <button className="quiet-button" onClick={() => setCreateOpen(true)}>
+            Continue Entry draft
+          </button>
         </p>
       )}
-      {error && <p role="alert">{error}</p>}
       <div className="entry-groups">
         {categories.map((category) => {
           const members = entries.filter((entry) => entry.categoryId === category.id);
@@ -1394,7 +1467,7 @@ function EntryWorkflow({
                 {members.map((entry) => (
                   <li key={entry.id}>
                     <button
-                      disabled={mutations.state === "saving"}
+                      disabled={mutations.state === "saving" || creationDirty}
                       onClick={() => openEntry(entry)}
                     >
                       {entry.displayName}
@@ -1406,127 +1479,138 @@ function EntryWorkflow({
           );
         })}
       </div>
-      <details className="disclosure create-entry" open={entries.length === 0 ? true : undefined}>
-        <summary>Create Entry</summary>
-        <label>
-          Name (optional)
-          <input
-            aria-label="new-entry-name"
-            value={draftName}
-            onChange={(event) => setDraftName(event.currentTarget.value)}
-          />
-        </label>
-        <label>
-          Category
-          <select
-            aria-label="new-entry-category"
+      <Dialog open={createOpen} title="Add Entry" onClose={() => setCreateOpen(false)}>
+        <p>A name is enough to start. Category and Type can be changed later.</p>
+        {error && <p role="alert">{error}</p>}
+        <fieldset disabled={mutations.state === "saving"} className="creation-form">
+          <label>
+            Name (optional)
+            <input
+              aria-label="new-entry-name"
+              value={draftName}
+              onChange={(event) => setDraftName(event.currentTarget.value)}
+            />
+          </label>
+          <label>
+            Category
+            <select
+              aria-label="new-entry-category"
+              disabled={mutations.state === "saving"}
+              value={categoryId}
+              onChange={(event) => {
+                setTypes([]);
+                setCategoryId(event.currentTarget.value);
+                setTypeId("");
+                setCreationTouched(true);
+              }}
+            >
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
             disabled={mutations.state === "saving"}
-            value={categoryId}
-            onChange={(event) => {
-              setTypes([]);
-              setCategoryId(event.currentTarget.value);
-              setTypeId("");
-            }}
+            onClick={() => setShowCategoryCreator(true)}
           >
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          disabled={mutations.state === "saving"}
-          onClick={() => setShowCategoryCreator(true)}
-        >
-          Create Category inline
-        </button>
-        {showCategoryCreator && (
-          <fieldset className="inline-creator">
-            <legend>New Category</legend>
-            <label>
-              Category name
-              <input
-                aria-label="inline-category-name"
-                value={newCategoryName}
-                onChange={(event) => setNewCategoryName(event.currentTarget.value)}
-              />
-            </label>
-            <div className="row">
-              <button
-                disabled={!newCategoryName.trim() || mutations.state === "saving"}
-                onClick={() => void addCategory()}
-              >
-                Add Category
-              </button>
-              <button
-                disabled={mutations.state === "saving"}
-                onClick={() => {
-                  setNewCategoryName("");
-                  setShowCategoryCreator(false);
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </fieldset>
-        )}
-        <label>
-          Type (optional)
-          <select
-            aria-label="new-entry-type"
-            disabled={mutations.state === "saving"}
-            value={typeId}
-            onChange={(event) => setTypeId(event.currentTarget.value)}
+            Create Category inline
+          </button>
+          {showCategoryCreator && (
+            <fieldset className="inline-creator">
+              <legend>New Category</legend>
+              <label>
+                Category name
+                <input
+                  aria-label="inline-category-name"
+                  value={newCategoryName}
+                  onChange={(event) => setNewCategoryName(event.currentTarget.value)}
+                />
+              </label>
+              <div className="row">
+                <button
+                  disabled={!newCategoryName.trim() || mutations.state === "saving"}
+                  onClick={() => void addCategory()}
+                >
+                  Add Category
+                </button>
+                <button
+                  disabled={mutations.state === "saving"}
+                  onClick={() => {
+                    setNewCategoryName("");
+                    setShowCategoryCreator(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </fieldset>
+          )}
+          <label>
+            Type (optional)
+            <select
+              aria-label="new-entry-type"
+              disabled={mutations.state === "saving"}
+              value={typeId}
+              onChange={(event) => {
+                setTypeId(event.currentTarget.value);
+                setCreationTouched(true);
+              }}
+            >
+              <option value="">No Type</option>
+              {types.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            disabled={!categoryId || mutations.state === "saving"}
+            onClick={() => setShowTypeCreator(true)}
           >
-            <option value="">No Type</option>
-            {types.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          disabled={!categoryId || mutations.state === "saving"}
-          onClick={() => setShowTypeCreator(true)}
-        >
-          Create Type inline
-        </button>
-        {showTypeCreator && (
-          <fieldset className="inline-creator">
-            <legend>New Type</legend>
-            <label>
-              Type name
-              <input
-                aria-label="inline-type-name"
-                value={newTypeName}
-                onChange={(event) => setNewTypeName(event.currentTarget.value)}
-              />
-            </label>
-            <div className="row">
-              <button
-                disabled={!newTypeName.trim() || mutations.state === "saving"}
-                onClick={() => void addType()}
-              >
-                Add Type
-              </button>
-              <button
-                disabled={mutations.state === "saving"}
-                onClick={() => {
-                  setNewTypeName("");
-                  setShowTypeCreator(false);
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </fieldset>
-        )}
-        <button disabled={mutations.state === "saving"} onClick={() => void addEntry()}>
-          Create Entry
-        </button>
-      </details>
+            Create Type inline
+          </button>
+          {showTypeCreator && (
+            <fieldset className="inline-creator">
+              <legend>New Type</legend>
+              <label>
+                Type name
+                <input
+                  aria-label="inline-type-name"
+                  value={newTypeName}
+                  onChange={(event) => setNewTypeName(event.currentTarget.value)}
+                />
+              </label>
+              <div className="row">
+                <button
+                  disabled={!newTypeName.trim() || mutations.state === "saving"}
+                  onClick={() => void addType()}
+                >
+                  Add Type
+                </button>
+                <button
+                  disabled={mutations.state === "saving"}
+                  onClick={() => {
+                    setNewTypeName("");
+                    setShowTypeCreator(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </fieldset>
+          )}
+          <button
+            disabled={mutations.state === "saving" || !!newCategoryName || !!newTypeName}
+            onClick={() => void addEntry()}
+          >
+            Create Entry
+          </button>
+          <button onClick={cancelCreation}>Cancel new Entry</button>
+        </fieldset>
+      </Dialog>
     </section>
   );
 }

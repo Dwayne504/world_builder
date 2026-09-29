@@ -73,11 +73,11 @@ function change(label: string, value: string) {
 }
 it("creates optional numeric defaults directly on a Category without an Entry", async () => {
   await show();
-  fireEvent.click(screen.getByText("Add a default field for Weapons"));
+  fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
   change("Default field name", "Mass");
   change("Default field kind", "number");
   change("Default field unit", "tons");
-  fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create default field" }));
   await waitFor(() =>
     expect(applyTemplateFields).toHaveBeenCalledWith("project", 1, {
       kind: "create",
@@ -95,7 +95,7 @@ it("creates optional numeric defaults directly on a Category without an Entry", 
 it("lists Types and configures Type defaults by their identity", async () => {
   await show();
   fireEvent.click(screen.getByRole("button", { name: "Defaults for Sword" }));
-  fireEvent.click(screen.getByText("Reuse an existing field"));
+  fireEvent.click(screen.getByRole("button", { name: "Reuse field" }));
   change("Existing default field", "mass");
   fireEvent.click(screen.getByRole("button", { name: "Use as default" }));
   await waitFor(() =>
@@ -127,9 +127,9 @@ it("removes only the availability binding and explains retained values", async (
 it("keeps hidden and failed drafts and blocks close until explicitly cancelled", async () => {
   vi.mocked(applyTemplateFields).mockRejectedValueOnce(new Error("Stale revision"));
   const view = await show();
-  fireEvent.click(screen.getByText("Add a default field for Weapons"));
-  change("Default field name", "Range");
   fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+  change("Default field name", "Range");
+  fireEvent.click(screen.getByRole("button", { name: "Create default field" }));
   await screen.findByText("Stale revision");
   expect(controller.state).toBe("failed");
   view.rerender(<CategoryManager {...props} open={false} />);
@@ -152,9 +152,9 @@ it("waits for acknowledged creation and clears only committed work", async () =>
       }),
   );
   await show();
-  fireEvent.click(screen.getByText("Add a default field for Weapons"));
-  change("Default field name", "Range");
   fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+  change("Default field name", "Range");
+  fireEvent.click(screen.getByRole("button", { name: "Create default field" }));
   await waitFor(() => expect(controller.state).toBe("saving"));
   let finished = false;
   let waiting: Promise<unknown>;
@@ -174,7 +174,7 @@ it("waits for acknowledged creation and clears only committed work", async () =>
 it("creates Categories and Types and refreshes the manager in the same session", async () => {
   vi.mocked(createType).mockResolvedValue({ ...sword, id: "axe", name: "Axe", globalRevision: 3 });
   await show();
-  fireEvent.click(screen.getByText("Create a Type in Weapons"));
+  fireEvent.click(screen.getByRole("button", { name: "Add Type" }));
   change("Category manager Type name", "Axe");
   vi.mocked(listTypes).mockResolvedValue([sword, { ...sword, id: "axe", name: "Axe" }]);
   fireEvent.click(screen.getByRole("button", { name: "Create Type" }));
@@ -190,9 +190,28 @@ it("creates Categories and Types and refreshes the manager in the same session",
     weapons,
     { ...weapons, id: "places", name: "Places" },
   ]);
-  fireEvent.click(screen.getByText("Create a Category"));
+  fireEvent.click(screen.getByRole("button", { name: "Add Category" }));
   change("Category manager name", "Places");
   fireEvent.click(screen.getByRole("button", { name: "Create Category" }));
   await screen.findByText("Types in Places");
   expect(changed).toHaveBeenLastCalledWith(4);
+});
+
+it("uses creation dialogs and retains a child draft when returning to the manager", async () => {
+  await show();
+  expect(screen.getByLabelText("Default field name")).not.toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+  change("Default field name", "Reach");
+  fireEvent(
+    screen.getByRole("dialog", { name: "Add default field" }),
+    new Event("cancel", { cancelable: true }),
+  );
+  expect(screen.getByRole("dialog", { name: "Categories and defaults" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Continue manager draft" })).toBeVisible();
+  expect(controller.canSubmit).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Continue manager draft" }));
+  expect(screen.getByLabelText("Default field name")).toHaveValue("Reach");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel manager draft" }));
+  expect(controller.state).toBe("saved");
+  expect(applyTemplateFields).not.toHaveBeenCalled();
 });

@@ -230,7 +230,6 @@ export function EntryRelationshipsPanel({
     <section className="relationships-panel">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">CONNECTIONS</p>
           <h3>Relationships</h3>
         </div>
         <div className="row">

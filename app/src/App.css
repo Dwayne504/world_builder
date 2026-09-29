@@ -1,18 +1,19 @@
+/* Warm paper stays light in either system theme, as requested for the sketchbook. */
 :root {
   font-family: "Segoe UI", system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.55;
   font-weight: 400;
-  color: #26352f;
-  background: #f3f2ed;
-  --surface: #fffefa;
-  --input: #fff;
-  --text: #26352f;
-  --muted: #647168;
-  --line: #d9dfd5;
-  --accent: #315e4b;
-  --tint: #edf2eb;
-  --danger: #a1382f;
+  color: #382e25;
+  background: #faf7f0;
+  --surface: #fffcf5;
+  --input: #fffdf8;
+  --text: #382e25;
+  --muted: #71614f;
+  --line: #d9cdb9;
+  --accent: #775335;
+  --tint: #f4edde;
+  --danger: #9f332c;
   --danger-bg: #fff0ed;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -24,11 +25,28 @@
 }
 body {
   margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at top left, #a66b3020, transparent 28%),
+    radial-gradient(ellipse at bottom right, #a66b3015, transparent 25%), #faf7f0;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 12px #75431e38,
+    inset 0 0 45px #b57a3520;
+  background:
+    radial-gradient(ellipse at 0 16%, #75431e1a, transparent 5%),
+    radial-gradient(ellipse at 100% 77%, #75431e17, transparent 5%);
 }
 .container {
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 36px clamp(18px, 4vw, 48px) 64px;
+  width: 100%;
+  min-height: 100vh;
+  padding: 32px clamp(20px, 3vw, 64px) 64px;
 }
 .app-header,
 .section-heading,
@@ -65,12 +83,13 @@ p {
 }
 h1 {
   font-family: Georgia, serif;
-  font-size: clamp(28px, 4vw, 38px);
+  font-size: clamp(28px, 3vw, 40px);
   line-height: 1.2;
   font-weight: 500;
 }
 h2 {
-  font-size: 23px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 28px;
   line-height: 1.3;
   font-weight: 600;
 }
@@ -84,7 +103,7 @@ h3 {
   margin: 0;
 }
 .eyebrow {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.16em;
   color: var(--muted);
@@ -109,8 +128,9 @@ h3 {
 section {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 26px;
+  border-radius: 3px 12px 4px 7px;
+  box-shadow: 0 2px 8px #68432008;
+  padding: clamp(20px, 2.5vw, 40px);
   min-width: 0;
 }
 .home-footer {
@@ -130,7 +150,7 @@ button {
   font: inherit;
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 4px;
 }
 input,
 select,
@@ -178,7 +198,7 @@ textarea:disabled {
   border-color: var(--accent);
 }
 .primary-button:hover {
-  background: #244e3b;
+  background: #5c3e29;
   color: #fff;
 }
 .quiet-button {
@@ -292,8 +312,9 @@ legend {
 .field-value {
   position: relative;
   border-bottom: 1px solid var(--line);
-  padding: 0 70px 18px 0;
+  padding: 0 0 48px;
   margin-bottom: 18px;
+  min-width: 0;
 }
 .field-value label {
   margin-bottom: 4px;
@@ -305,8 +326,10 @@ legend {
 .clear-field {
   position: absolute;
   right: 0;
-  bottom: 18px;
+  bottom: 8px;
   font-size: 12px;
+  padding: 2px 8px;
+  min-height: 28px;
 }
 .fields-panel select[multiple] {
   min-height: 110px;
@@ -350,7 +373,7 @@ legend {
 dialog {
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 5px 14px 5px 9px;
   background: var(--surface);
   color: var(--text);
   width: min(600px, calc(100vw - 32px));
@@ -358,7 +381,8 @@ dialog {
   box-shadow: 0 24px 80px #0003;
 }
 dialog::backdrop {
-  background: #15251ecc;
+  background: #3e302866;
+  backdrop-filter: blur(2px);
 }
 .dialog-header {
   position: sticky;
@@ -415,41 +439,6 @@ dd {
   .dialog-header,
   .dialog-body {
     padding: 18px;
-  }
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    color: #e3e9e1;
-    background: #18221e;
-    --surface: #202d26;
-    --input: #19241e;
-    --text: #e3e9e1;
-    --muted: #aebdad;
-    --line: #3b4c40;
-    --accent: #a7c9ab;
-    --tint: #2b3d30;
-    --danger: #ffb4a9;
-    --danger-bg: #422c29;
-  }
-  .primary-button {
-    color: #18221e;
-  }
-  .primary-button:hover {
-    background: #bdd9bf;
-    color: #18221e;
-  }
-  .save-state-saved {
-    color: #c6e4c4;
-    background: #324b37;
-  }
-  .save-state-dirty {
-    color: #f1d699;
-    background: #4a4029;
-  }
-  .save-state-saving {
-    color: #b5d7ef;
-    background: #2b4356;
   }
 }
 
@@ -616,8 +605,187 @@ textarea {
 .template-fields small {
   color: var(--muted);
 }
-.field-unit {
+/* Values read as a quantity: the unit follows the authored number. */
+.number-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 10px 12px;
   margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--input);
+}
+.number-value input {
+  flex: 0 1 auto;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.field-unit {
   color: var(--muted);
-  font-size: 13px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.entry-title-block {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.entry-title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(30px, 3vw, 44px);
+  font-weight: 500;
+  line-height: 1.2;
+}
+.entry-title input {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+.entry-title input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.entry-title input:focus-visible {
+  outline: 1px dashed var(--accent);
+  outline-offset: 4px;
+}
+.entry-title-block .eyebrow {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.entry-title input:hover:not(:disabled) {
+  color: var(--accent);
+}
+.entry-type {
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 18px;
+  color: var(--muted);
+  margin: 8px 0 0 !important;
+}
+.entry-editor > .section-heading {
+  align-items: flex-start;
+}
+.entry-content {
+  display: grid;
+  gap: 32px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.entry-content > section {
+  min-width: 0;
+  box-shadow: none;
+}
+.entry-content .section-heading {
+  align-items: flex-start;
+  gap: 12px;
+}
+.entry-content .section-heading h3 {
+  margin: 8px 0 0;
+}
+.entry-content .section-heading .row {
+  margin: 0;
+}
+.field-grid {
+  display: grid;
+  gap: 8px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+}
+.entry-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  align-items: start;
+  gap: 16px 32px;
+}
+.entry-group {
+  min-width: 0;
+}
+.entry-group > summary h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  font-size: 23px;
+}
+.entry-list button {
+  background: transparent;
+  border-color: transparent;
+  border-bottom-color: var(--line);
+  border-radius: 0;
+  padding: 12px 8px;
+  font-weight: 500;
+}
+.entry-list button:hover {
+  background: var(--tint);
+  border-color: var(--line);
+}
+.category-dialog {
+  width: min(1100px, calc(100vw - 48px));
+}
+.category-workspace {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr);
+  gap: 32px;
+}
+.category-sidebar {
+  border-right: 1px solid var(--line);
+  padding-right: 24px;
+}
+.category-sidebar label {
+  margin-top: 0;
+}
+.category-main {
+  min-width: 0;
+}
+.category-main .section-heading {
+  margin-bottom: 12px;
+}
+.category-main .section-heading h3 {
+  margin: 0;
+}
+.default-heading {
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+  margin-top: 32px;
+}
+.dialog-body .creation-form {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+@media (min-width: 1200px) {
+  .entry-content {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    column-gap: clamp(32px, 4vw, 72px);
+  }
+}
+@media (max-width: 680px) {
+  .category-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .category-sidebar {
+    padding: 0 0 20px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .entry-content {
+    gap: 0;
+  }
+  .category-dialog {
+    width: calc(100vw - 32px);
+  }
+}
+@media (forced-colors: active) {
+  body::before {
+    display: none;
+  }
 }
