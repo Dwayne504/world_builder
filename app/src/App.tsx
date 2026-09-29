@@ -1,3 +1,5 @@
+import { AppearanceButton, AppearanceProvider } from "./AppearanceProvider";
+import { useAppearance } from "./appearanceContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
@@ -134,6 +136,7 @@ function canResetPreferences(kind: string | null): boolean {
 }
 
 function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void }) {
+  const { reload: reloadAppearance } = useAppearance();
   const [homeDialog, setHomeDialog] = useState<"settings" | "restore" | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
@@ -406,6 +409,7 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
     try {
       preferencesRevision.current += 1;
       const defaults = await resetPreferences();
+      await reloadAppearance();
       setPreferences(defaults);
       setPreferencesError(null);
       setPreferencesErrorKind(null);
@@ -424,9 +428,12 @@ function HomeScreen({ onOpened }: { onOpened: (project: ProjectSummary) => void 
           <p className="eyebrow">YOUR WORLDS, AT YOUR PACE</p>
           <h1>Worldcrafter</h1>
         </div>
-        <button className="quiet-button" onClick={() => setHomeDialog("settings")}>
-          Settings
-        </button>
+        <nav className="toolbar" aria-label="App settings">
+          <button className="quiet-button" onClick={() => setHomeDialog("settings")}>
+            Settings
+          </button>
+          <AppearanceButton />
+        </nav>
       </header>
       <p className="intro">
         A place for your characters, places, and ideas. Start small and build as you go.
@@ -1918,9 +1925,7 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           <button className="quiet-button" onClick={() => setProjectDialog("settings")}>
             Project settings
           </button>
-          <button className="quiet-button" disabled={busy} onClick={handleClose}>
-            Close Project
-          </button>
+          <AppearanceButton />
         </nav>
       </header>
       {backupStatus && projectDialog !== "backup" && (
@@ -1970,6 +1975,15 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
           </p>
         )}
 
+        <div className="close-project-section">
+          <h3>Leave this Project</h3>
+          <p className="muted">
+            Return to the opening screen. Your saved work stays in its Project.
+          </p>
+          <button disabled={busy} onClick={handleClose}>
+            Close Project
+          </button>
+        </div>
         <details className="technical-details">
           <summary>Project information</summary>
           <dl>
@@ -2070,13 +2084,21 @@ function ProjectScreen({ project, onClosed }: { project: ProjectSummary; onClose
   );
 }
 
-function App() {
+function Workspace() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
 
   if (!project) {
     return <HomeScreen onOpened={setProject} />;
   }
   return <ProjectScreen project={project} onClosed={() => setProject(null)} />;
+}
+
+function App() {
+  return (
+    <AppearanceProvider>
+      <Workspace />
+    </AppearanceProvider>
+  );
 }
 
 export default App;

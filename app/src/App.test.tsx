@@ -64,6 +64,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  getAppearance: vi.fn().mockResolvedValue("storybook"),
+  setAppearance: vi.fn().mockImplementation((appearance: string) => Promise.resolve(appearance)),
   readRelationships: vi
     .fn()
     .mockResolvedValue({ globalRevision: 1, relationships: [], definitions: [], entries: [] }),
@@ -138,6 +140,12 @@ async function openTheProjectScreen() {
   fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
   await waitFor(() => screen.getByTestId("project-id"));
   return view;
+}
+
+function closeFromSettings() {
+  if (!screen.queryByRole("dialog", { name: "Project settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Project settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
 }
 
 function visibleInput(label: string) {
@@ -219,6 +227,14 @@ function mockEditableEntry() {
 }
 
 describe("Project screen Saved contract", () => {
+  it("keeps Close Project out of the main toolbar and reachable in settings", async () => {
+    await openTheProjectScreen();
+    expect(screen.queryByRole("button", { name: "Close Project" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Project settings" }));
+    expect(screen.getByRole("button", { name: "Close Project" })).toBeVisible();
+    expect(closeProjectMock).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.mocked(readFields)
       .mockReset()
@@ -743,7 +759,7 @@ describe("Project screen Saved contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
     await waitFor(() => screen.getByRole("button", { name: "Create Entry" }));
     fireEvent.click(screen.getByRole("button", { name: "Create Entry" }));
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     expect(closeProjectMock).not.toHaveBeenCalled();
     entrySave.resolve({
       id: "entry",
@@ -813,7 +829,7 @@ describe("Project screen Saved contract", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create Entry" })));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("disk full"));
     fireEvent.click(screen.getByRole("button", { name: "Close Add Entry" }));
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     expect(closeProjectMock).not.toHaveBeenCalled();
     expect(
       screen.getByRole("button", { name: "Close Project anyway (discard changes)" }),
@@ -1060,7 +1076,7 @@ describe("Project screen Saved contract", () => {
       expect(screen.getByTestId("save-state")).toHaveTextContent("Failed to save"),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     const discard = screen.getByRole("button", {
       name: "Close Project anyway (discard changes)",
     });
@@ -1070,7 +1086,7 @@ describe("Project screen Saved contract", () => {
     expect(screen.getByTestId("save-state")).toHaveTextContent("Failed to save");
     expect(closeProjectMock).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     fireEvent.click(screen.getByRole("button", { name: "Close Project anyway (discard changes)" }));
     await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
   });
@@ -1084,7 +1100,7 @@ describe("Project screen Saved contract", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     fireEvent.change(screen.getByLabelText("entry-name"), { target: { value: "Thron II" } });
     fireEvent.change(visibleInput("entry-category"), { target: { value: "places" } });
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     expect(closeProjectMock).not.toHaveBeenCalled();
 
     pendingName.resolve({
@@ -1157,7 +1173,7 @@ describe("Project screen Saved contract", () => {
       globalRevision: 2,
     });
     await waitFor(() => expect(changeEntryStructureMock).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     expect(closeProjectMock).not.toHaveBeenCalled();
     structureSave.resolve({
       ...entry,
@@ -1201,7 +1217,7 @@ describe("Project screen Saved contract", () => {
       expect(screen.getByTestId("save-state").textContent).toBe("Failed to save"),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
 
     // Close must be blocked/warned, not silently succeed.
     expect(closeProjectMock).not.toHaveBeenCalled();
@@ -1248,7 +1264,7 @@ describe("Project screen Saved contract", () => {
       target: { value: "Unsaved Rename" },
     });
     await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     fireEvent.click(screen.getByRole("button", { name: "Close app anyway (discard changes)" }));
     await waitFor(() => expect(closeProjectMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalledTimes(1));
@@ -1296,7 +1312,7 @@ describe("Project screen Saved contract", () => {
     fireEvent.change(input, { target: { value: "test" } });
     fireEvent.blur(input);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     fireEvent.click(screen.getByRole("button", { name: "Close Project anyway (discard changes)" }));
 
     await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
@@ -2064,7 +2080,7 @@ describe("Focused workspace", () => {
     await openTheProjectScreen();
     fireEvent.change(visibleInput("project-working-name"), { target: { value: "Tortuga Prime" } });
     fireEvent.click(screen.getByRole("button", { name: "Close Project settings" }));
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    closeFromSettings();
     expect(screen.getByRole("dialog", { name: "Before you leave" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Save and close" }));
     await waitFor(() => expect(screen.queryByTestId("project-id")).not.toBeInTheDocument());

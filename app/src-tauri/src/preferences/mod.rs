@@ -15,8 +15,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const PREFERENCES_SCHEMA_VERSION: i64 = 1;
+pub const PREFERENCES_SCHEMA_VERSION: i64 = 2;
 pub const PREFERENCES_FILE: &str = "preferences.json";
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Appearance {
+    #[default]
+    Storybook,
+    Starship,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppPreferences {
@@ -24,6 +32,7 @@ pub struct AppPreferences {
     // is malformed and must fail as `Corrupt`, never be silently treated
     // as the current schema version.
     pub schema_version: i64,
+    pub appearance: Appearance,
     pub default_projects_dir: Option<PathBuf>,
     pub default_backups_dir: Option<PathBuf>,
 }
@@ -32,32 +41,37 @@ impl Default for AppPreferences {
     fn default() -> Self {
         AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            appearance: Appearance::Storybook,
             default_projects_dir: None,
             default_backups_dir: None,
         }
     }
 }
 
-/// Parses `bytes` and checks the schema version before returning success.
-/// A version newer than this build supports is refused so it is never
-/// silently rewritten by an older build; a version older than the current
-/// one is refused too, since no migration from an earlier version has ever
-/// been published yet -- this is the documented, intentional behavior
-/// until a real migration exists, rather than an accidental gap.
+/// Version 1 is migrated in memory; a read never rewrites a valid file.
+/// The next explicit preference update publishes version 2 through the same
+/// recoverable protocol. Unknown versions and invalid appearances fail closed.
 fn parse_and_check_version(bytes: &[u8]) -> Result<AppPreferences, PreferencesError> {
-    #[derive(Deserialize)]
-    struct Version {
-        schema_version: i64,
-    }
-    let version: Version =
+    let mut value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| PreferencesError::Corrupt(e.to_string()))?;
-    if version.schema_version != PREFERENCES_SCHEMA_VERSION {
-        return Err(PreferencesError::UnsupportedVersion {
-            found: version.schema_version,
-            supported: PREFERENCES_SCHEMA_VERSION,
-        });
+    let version = value
+        .get("schema_version")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| PreferencesError::Corrupt("Missing or invalid schema version".into()))?;
+    match version {
+        1 => {
+            value["schema_version"] = PREFERENCES_SCHEMA_VERSION.into();
+            value["appearance"] = serde_json::to_value(Appearance::default()).unwrap();
+        }
+        PREFERENCES_SCHEMA_VERSION => {}
+        found => {
+            return Err(PreferencesError::UnsupportedVersion {
+                found,
+                supported: PREFERENCES_SCHEMA_VERSION,
+            })
+        }
     }
-    serde_json::from_slice(bytes).map_err(|e| PreferencesError::Corrupt(e.to_string()))
+    serde_json::from_value(value).map_err(|e| PreferencesError::Corrupt(e.to_string()))
 }
 
 /// Loads preferences from `path`, first repairing an interrupted
@@ -215,6 +229,40 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn version_one_migrates_without_writing_and_keeps_directories_on_appearance_update() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let bytes = br#"{"schema_version":1,"default_projects_dir":"/Projects","default_backups_dir":"/Backups"}"#;
+        fs::write(&path, bytes).unwrap();
+        let store = PreferencesStore::new(&path);
+        let read = store.load().unwrap();
+        assert_eq!(read.appearance, Appearance::Storybook);
+        assert_eq!(read.schema_version, 2);
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        store
+            .update(|p| p.appearance = Appearance::Starship)
+            .unwrap();
+        let restarted = PreferencesStore::new(&path).load().unwrap();
+        assert_eq!(restarted.appearance, Appearance::Starship);
+        assert_eq!(restarted.default_projects_dir, read.default_projects_dir);
+        assert_eq!(restarted.default_backups_dir, read.default_backups_dir);
+    }
+
+    #[test]
+    fn invalid_appearance_is_visible_and_never_overwritten() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let bytes = br#"{"schema_version":2,"appearance":"unknown","default_projects_dir":null,"default_backups_dir":null}"#;
+        fs::write(&path, bytes).unwrap();
+        let store = PreferencesStore::new(&path);
+        assert!(matches!(store.load(), Err(PreferencesError::Corrupt(_))));
+        assert!(store
+            .update(|p| p.appearance = Appearance::Storybook)
+            .is_err());
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
     fn newer_shapes_and_interrupted_publications_fail_closed() {
         for suffix in ["json", "json.next", "json.previous"] {
             let dir = tempdir().unwrap();
@@ -308,6 +356,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let prefs = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            appearance: Appearance::Storybook,
             default_projects_dir: Some(dir.path().join("Projects")),
             default_backups_dir: Some(dir.path().join("Backups")),
         };
@@ -334,6 +383,7 @@ mod tests {
             &path,
             &AppPreferences {
                 schema_version: PREFERENCES_SCHEMA_VERSION,
+                appearance: Appearance::Storybook,
                 default_projects_dir: Some(PathBuf::from("/old/projects")),
                 default_backups_dir: None,
             },
@@ -343,6 +393,7 @@ mod tests {
             &path,
             &AppPreferences {
                 schema_version: PREFERENCES_SCHEMA_VERSION,
+                appearance: Appearance::Storybook,
                 default_projects_dir: Some(PathBuf::from("/new/projects")),
                 default_backups_dir: None,
             },
@@ -363,6 +414,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let prefs = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            appearance: Appearance::Storybook,
             default_projects_dir: Some(PathBuf::from("/recovered")),
             default_backups_dir: None,
         };
@@ -385,6 +437,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let prior = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            appearance: Appearance::Storybook,
             default_projects_dir: Some(PathBuf::from("/prior")),
             default_backups_dir: None,
         };
@@ -405,6 +458,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let current = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            appearance: Appearance::Storybook,
             default_projects_dir: Some(PathBuf::from("/current")),
             default_backups_dir: None,
         };
@@ -426,6 +480,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let prior = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            appearance: Appearance::Storybook,
             default_projects_dir: Some(PathBuf::from("/still-valid")),
             default_backups_dir: None,
         };

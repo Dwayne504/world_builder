@@ -1,13 +1,14 @@
-/* Warm paper stays light in either system theme, as requested for the sketchbook. */
+/* Two deliberate palettes, selected in application preferences. */
 :root {
   font-family: "Segoe UI", system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.55;
   font-weight: 400;
-  color: #382e25;
-  background: #faf7f0;
-  --surface: #fffcf5;
-  --input: #fffdf8;
+  color: var(--text);
+  background: var(--page);
+  --page: #efe5d2;
+  --surface: #fcf6e9;
+  --input: #fffaf0;
   --text: #382e25;
   --muted: #71614f;
   --line: #d9cdb9;
@@ -28,7 +29,7 @@ body {
   min-height: 100vh;
   background:
     radial-gradient(ellipse at top left, #a66b3020, transparent 28%),
-    radial-gradient(ellipse at bottom right, #a66b3015, transparent 25%), #faf7f0;
+    radial-gradient(ellipse at bottom right, #a66b3015, transparent 25%), var(--page);
 }
 body::before {
   content: "";
@@ -612,7 +613,9 @@ textarea {
   align-items: baseline;
   gap: 4px 8px;
   padding: 10px 12px;
-  margin-top: 6px;
+  margin: 6px 0 0;
+  font: inherit;
+  cursor: text;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--input);
@@ -788,4 +791,227 @@ textarea {
   body::before {
     display: none;
   }
+}
+
+/* Leather cover with a stitched inset; the writing pages remain quiet. */
+.app-header {
+  position: relative;
+  padding: 24px 28px;
+  border: 1px solid #29180f;
+  border-radius: 8px 12px 8px 4px;
+  background:
+    repeating-linear-gradient(28deg, transparent 0 3px, #00000008 4px 5px),
+    linear-gradient(115deg, #5a3825, #38271d 65%, #4c3122);
+  box-shadow:
+    inset 0 1px 2px #d7aa6870,
+    0 4px 10px #321d1920;
+  --text: #f3e3c6;
+  --muted: #d5bea0;
+  --accent: #efd0a2;
+  --line: #846b50;
+  --tint: #654831;
+  color: var(--text);
+}
+.app-header::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 1px dashed #cba87970;
+  border-radius: 4px;
+  pointer-events: none;
+}
+.number-value:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.number-value input:focus-visible {
+  outline: none;
+}
+.close-project-section {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  margin-top: 24px;
+}
+.appearance-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 24px 0;
+}
+.appearance-card {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  gap: 8px;
+  padding: 14px;
+}
+.appearance-card > span:not(.appearance-swatch) {
+  font-weight: 400;
+  font-size: 13px;
+}
+.appearance-card[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.appearance-swatch {
+  width: 100%;
+  height: 65px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.preview-storybook .appearance-swatch {
+  background: linear-gradient(#483020 0 30%, #cfb890 31% 33%, #faf0df 34%);
+}
+.preview-starship .appearance-swatch {
+  background:
+    linear-gradient(110deg, #60758170, transparent),
+    linear-gradient(#303c44 0 30%, #6eabb1 31% 33%, #1e272d 34%);
+}
+:root[data-appearance="starship"] {
+  color-scheme: dark;
+  --page: #171e23;
+  --surface: #202a30;
+  --input: #1a2329;
+  --text: #d4dfe3;
+  --muted: #a3b4be;
+  --line: #43535d;
+  --accent: #99c7d0;
+  --tint: #2c3a43;
+  --danger: #f1a7a0;
+  --danger-bg: #482c2e;
+}
+:root[data-appearance="starship"] body {
+  background: radial-gradient(ellipse at top, #31465245, transparent 65%), var(--page);
+}
+:root[data-appearance="starship"] body::before {
+  display: none;
+}
+:root[data-appearance="starship"] :is(h1, h2, .entry-title) {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-weight: 500;
+}
+:root[data-appearance="starship"] .app-header {
+  --text: #dbe4e8;
+  --muted: #a7bac3;
+  --accent: #a1d5de;
+  --tint: #354750;
+  --line: #657781;
+  background:
+    repeating-linear-gradient(0deg, #ffffff03 0 1px, transparent 1px 3px),
+    linear-gradient(115deg, #394852, #263138 45%, #34434c 80%, #202b32);
+  border: 1px solid #576973;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 1px 0 #a1bac54a,
+    inset 0 -2px 0 #111a22,
+    0 5px 18px #080d1240;
+}
+:root[data-appearance="starship"] .app-header::before {
+  inset: auto 24px 0;
+  height: 2px;
+  border: 0;
+  background: linear-gradient(90deg, transparent, #80abb7, transparent);
+}
+:root[data-appearance="starship"] :is(.home-grid > section, .container > section) {
+  border-radius: 6px;
+  box-shadow: 0 2px 8px #00000018;
+}
+:root[data-appearance="starship"] .primary-button {
+  background: #345d69;
+  color: #edf8fc;
+  border-color: #668f9b;
+}
+:root[data-appearance="starship"] .primary-button:hover {
+  background: #416c78;
+}
+:root[data-appearance="starship"] .save-state-saved {
+  color: #b4d4c0;
+  background: #2d4037;
+}
+:root[data-appearance="starship"] .save-state-dirty {
+  color: #e0cfa3;
+  background: #433c2d;
+}
+:root[data-appearance="starship"] .save-state-saving {
+  color: #b1d3e3;
+  background: #2a3f4c;
+}
+:root[data-appearance="starship"] dialog::backdrop {
+  background: #080e1699;
+}
+.field-context,
+.field-suggestions {
+  color: var(--muted);
+  font-size: 13px;
+}
+.field-suggestions {
+  padding: 14px;
+  background: var(--tint);
+  border-radius: 4px;
+}
+.field-suggestions ul {
+  padding: 0;
+  list-style: none;
+}
+.field-suggestions li {
+  padding: 8px 0;
+}
+.field-suggestions button {
+  display: block;
+  margin-top: 8px;
+}
+@media (max-width: 650px) {
+  .app-header {
+    padding: 20px;
+  }
+  .appearance-options {
+    grid-template-columns: 1fr;
+  }
+}
+@media (forced-colors: active) {
+  .app-header {
+    background: Canvas;
+    color: CanvasText;
+    --accent: LinkText;
+    --muted: CanvasText;
+    --line: ButtonBorder;
+  }
+  .app-header::before,
+  .appearance-swatch {
+    display: none;
+  }
+  .number-value:focus-within {
+    outline-color: Highlight;
+  }
+}
+
+.merge-table-scroll {
+  overflow: auto;
+  max-height: 320px;
+  margin: 16px 0;
+}
+.merge-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
+.merge-table :is(th, td) {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.merge-confirm {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.merge-confirm input {
+  width: auto;
+  margin: 0;
+}
+
+:root[data-appearance="starship"] .entry-type {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-style: normal;
 }

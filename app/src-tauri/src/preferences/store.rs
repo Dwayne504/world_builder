@@ -91,7 +91,7 @@ mod tests {
     fn concurrent_updates_to_different_settings_both_survive() {
         let dir = tempdir().unwrap();
         let store = Arc::new(PreferencesStore::new(dir.path().join("preferences.json")));
-        let barrier = Arc::new(Barrier::new(2));
+        let barrier = Arc::new(Barrier::new(3));
 
         let store_a = store.clone();
         let barrier_a = barrier.clone();
@@ -115,10 +115,19 @@ mod tests {
                 .unwrap();
         });
 
+        let store_c = Arc::new(PreferencesStore::new(store.path()));
+        let handle_c = thread::spawn(move || {
+            barrier.wait();
+            store_c
+                .update(|prefs| prefs.appearance = super::super::Appearance::Starship)
+                .unwrap();
+        });
+        handle_c.join().unwrap();
         handle_a.join().unwrap();
         handle_b.join().unwrap();
 
         let final_prefs = store.load().unwrap();
+        assert_eq!(final_prefs.appearance, super::super::Appearance::Starship);
         assert_eq!(
             final_prefs.default_projects_dir,
             Some(dir.path().join("Projects"))

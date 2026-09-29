@@ -48,6 +48,7 @@ impl Fixture {
         .unwrap()
     }
     fn create(&self, kind: FieldKind, value: Option<FieldValue>) -> FieldId {
+        let prior = self.read();
         let result = self.apply(FieldCommand::Create {
             unit: None,
             name: "A field".into(),
@@ -59,7 +60,12 @@ impl Fixture {
             options: vec![],
             value,
         });
-        result.definitions.last().unwrap().id
+        result
+            .definitions
+            .iter()
+            .find(|d| !prior.definitions.iter().any(|old| old.id == d.id))
+            .unwrap()
+            .id
     }
     fn set(&self, id: FieldId, value: Option<FieldValue>) -> EntryFields {
         self.apply(FieldCommand::SetValues {
@@ -551,5 +557,310 @@ fn schema_two_migrates_with_a_valid_external_recovery_point_and_preserves_entrie
             .unwrap()
             .schema_version,
         worldcrafter_lib::persistence::migrations::CURRENT_SCHEMA_VERSION
+    );
+}
+
+fn duplicate_number(f: &Fixture, unit: Option<&str>, value: Option<f64>) -> FieldId {
+    let before = f.read();
+    let result = f.apply(FieldCommand::Create {
+        name: "Age".into(),
+        field_kind: FieldKind::Number,
+        unit: unit.map(str::to_owned),
+        provider: FieldProvider {
+            kind: ProviderKind::Entry,
+            id: f.entry.id.to_string(),
+        },
+        options: vec![],
+        value: value.map(FieldValue::Number),
+    });
+    result
+        .definitions
+        .iter()
+        .find(|d| !before.definitions.iter().any(|b| b.id == d.id))
+        .unwrap()
+        .id
+}
+
+#[test]
+fn reviewed_merge_preserves_value_identity_bindings_and_restorable_snapshot() {
+    let f = Fixture::new();
+    let source = duplicate_number(&f, Some("years"), Some(48.0));
+    let target = duplicate_number(&f, Some("years"), None);
+    f.apply(FieldCommand::Bind {
+        field_id: target,
+        provider: FieldProvider {
+            kind: ProviderKind::Category,
+            id: f.entry.category_id.to_string(),
+        },
+    });
+    let paths = worldcrafter_lib::package::PackagePaths::new(&f.path);
+    let db = Connection::open(paths.db_path()).unwrap();
+    let value_id: String = db
+        .query_row(
+            "SELECT id FROM field_value WHERE field_id=?1",
+            [source.to_string()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let preview = ProjectService::preview_field_merge(&f.state, f.project, source, target).unwrap();
+    assert!(preview.blockers.is_empty());
+    assert_eq!(preview.entries.len(), 1);
+    assert_eq!(
+        preview.entries[0].source_value,
+        Some(FieldValue::Number(48.0))
+    );
+    let result = ProjectService::merge_fields(
+        &f.state,
+        f.project,
+        source,
+        target,
+        preview.global_revision,
+        &f.dir.path().join("Backups"),
+    )
+    .unwrap();
+    assert_eq!(result.global_revision, preview.global_revision + 1);
+    let after = f.read();
+    assert_eq!(after.definitions.len(), 1);
+    assert_eq!(after.definitions[0].id, target);
+    assert_eq!(after.definitions[0].bindings.len(), 2);
+    assert_eq!(after.fields[0].value, Some(FieldValue::Number(48.0)));
+    assert_eq!(
+        db.query_row(
+            "SELECT id FROM field_value WHERE field_id=?1",
+            [target.to_string()],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        value_id
+    );
+    drop(db);
+    let copy = ProjectService::restore_backup_as_copy(
+        &f.state,
+        std::path::Path::new(&result.backup_path),
+        &f.dir.path().join("Restored"),
+        Some("Before merge"),
+    )
+    .unwrap();
+    let restored = ProjectService::read_fields(&f.state, copy.project_id, f.entry.id).unwrap();
+    assert_eq!(restored.definitions.len(), 2);
+    assert_eq!(
+        restored
+            .fields
+            .iter()
+            .find(|v| v.definition.id == source)
+            .unwrap()
+            .value,
+        Some(FieldValue::Number(48.0))
+    );
+    ProjectService::close_project(&f.state, copy.project_id).unwrap();
+}
+
+#[test]
+fn merge_blocks_conflicting_values_units_kinds_and_cross_project_ids_without_writing() {
+    let f = Fixture::new();
+    let source = duplicate_number(&f, Some("years"), Some(48.0));
+    let target = duplicate_number(&f, Some("years"), Some(49.0));
+    let before = f.read();
+    let backup = f.dir.path().join("Backups");
+    let preview = ProjectService::preview_field_merge(&f.state, f.project, source, target).unwrap();
+    assert!(preview.entries[0].conflict);
+    assert!(ProjectService::merge_fields(
+        &f.state,
+        f.project,
+        source,
+        target,
+        preview.global_revision,
+        &backup
+    )
+    .is_err());
+    assert_eq!(f.read(), before);
+    assert!(!backup.exists());
+    let months = duplicate_number(&f, Some("months"), None);
+    assert!(
+        !ProjectService::preview_field_merge(&f.state, f.project, source, months)
+            .unwrap()
+            .blockers
+            .is_empty()
+    );
+    let text = f.create(FieldKind::ShortText, None);
+    assert!(
+        !ProjectService::preview_field_merge(&f.state, f.project, source, text)
+            .unwrap()
+            .blockers
+            .is_empty()
+    );
+    assert!(
+        ProjectService::preview_field_merge(&f.state, f.project, source, FieldId::new()).is_err()
+    );
+    assert!(ProjectService::preview_field_merge(&f.state, f.project, source, source).is_err());
+}
+
+#[test]
+fn merge_equal_values_and_stale_reviews_are_checked_before_backup() {
+    let f = Fixture::new();
+    let source = duplicate_number(&f, None, Some(48.0));
+    let target = duplicate_number(&f, None, Some(48.0));
+    let preview = ProjectService::preview_field_merge(&f.state, f.project, source, target).unwrap();
+    f.set(source, Some(FieldValue::Number(50.0)));
+    let backup = f.dir.path().join("Backups");
+    assert!(ProjectService::merge_fields(
+        &f.state,
+        f.project,
+        source,
+        target,
+        preview.global_revision,
+        &backup
+    )
+    .is_err());
+    assert!(!backup.exists());
+    f.set(source, Some(FieldValue::Number(48.0)));
+    let result = ProjectService::merge_fields(
+        &f.state,
+        f.project,
+        source,
+        target,
+        f.read().global_revision,
+        &backup,
+    )
+    .unwrap();
+    assert!(std::path::Path::new(&result.backup_path).is_dir());
+    assert_eq!(f.read().fields.len(), 1);
+    assert_eq!(f.read().fields[0].value, Some(FieldValue::Number(48.0)));
+}
+
+#[test]
+fn backup_failure_and_transaction_failure_leave_merge_sources_untouched() {
+    let f = Fixture::new();
+    let source = duplicate_number(&f, None, Some(48.0));
+    let target = duplicate_number(&f, None, None);
+    let before = f.read();
+    let backup_file = f.dir.path().join("not-a-directory");
+    std::fs::write(&backup_file, b"preserve").unwrap();
+    assert!(ProjectService::merge_fields(
+        &f.state,
+        f.project,
+        source,
+        target,
+        before.global_revision,
+        &backup_file
+    )
+    .is_err());
+    assert_eq!(f.read(), before);
+    let db =
+        Connection::open(worldcrafter_lib::package::PackagePaths::new(&f.path).db_path()).unwrap();
+    db.execute_batch("CREATE TRIGGER injected_merge_failure BEFORE DELETE ON field_definition BEGIN SELECT RAISE(ABORT, 'injected merge failure'); END;").unwrap();
+    assert!(ProjectService::merge_fields(
+        &f.state,
+        f.project,
+        source,
+        target,
+        before.global_revision,
+        &f.dir.path().join("Backups")
+    )
+    .is_err());
+    assert_eq!(f.read(), before);
+}
+
+#[test]
+fn concurrent_merge_requests_commit_once_and_preserve_other_entries() {
+    let f = Fixture::new();
+    let source = duplicate_number(&f, Some("years"), Some(48.0));
+    let target = duplicate_number(&f, Some("years"), None);
+    f.apply(FieldCommand::Bind {
+        field_id: source,
+        provider: FieldProvider {
+            kind: ProviderKind::Category,
+            id: f.entry.category_id.to_string(),
+        },
+    });
+    let other = ProjectService::create_entry(
+        &f.state,
+        f.project,
+        Some(f.entry.category_id),
+        None,
+        Some("Second".into()),
+    )
+    .unwrap();
+    ProjectService::apply_fields(
+        &f.state,
+        f.project,
+        other.id,
+        f.read().global_revision,
+        FieldCommand::SetValues {
+            edits: vec![FieldEdit {
+                field_id: source,
+                value: Some(FieldValue::Number(17.0)),
+            }],
+        },
+    )
+    .unwrap();
+    let expected = f.read().global_revision;
+    let backups = f.dir.path().join("Backups");
+    let results = std::thread::scope(|scope| {
+        let a = scope.spawn(|| {
+            ProjectService::merge_fields(&f.state, f.project, source, target, expected, &backups)
+        });
+        let b = scope.spawn(|| {
+            ProjectService::merge_fields(&f.state, f.project, source, target, expected, &backups)
+        });
+        [a.join().unwrap(), b.join().unwrap()]
+    });
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(
+        std::fs::read_dir(backups.join(f.project.to_string()))
+            .unwrap()
+            .count(),
+        1
+    );
+    let after = ProjectService::read_fields(&f.state, f.project, other.id).unwrap();
+    assert_eq!(after.fields.len(), 1);
+    assert_eq!(after.fields[0].definition.id, target);
+    assert_eq!(after.fields[0].value, Some(FieldValue::Number(17.0)));
+    assert_eq!(after.global_revision, expected + 1);
+}
+
+#[test]
+fn scalar_merges_keep_false_and_text_while_choice_and_retired_definitions_block() {
+    for (kind, value) in [
+        (FieldKind::Boolean, FieldValue::Boolean(false)),
+        (
+            FieldKind::ShortText,
+            FieldValue::Text("Authored words".into()),
+        ),
+    ] {
+        let f = Fixture::new();
+        let source = f.create(kind, Some(value.clone()));
+        let target = f.create(kind, None);
+        ProjectService::merge_fields(
+            &f.state,
+            f.project,
+            source,
+            target,
+            f.read().global_revision,
+            &f.dir.path().join("Backups"),
+        )
+        .unwrap();
+        assert_eq!(f.read().fields[0].value, Some(value));
+    }
+    let f = Fixture::new();
+    let source = f.create(FieldKind::Choice, None);
+    let target = f.create(FieldKind::Choice, None);
+    assert!(
+        !ProjectService::preview_field_merge(&f.state, f.project, source, target)
+            .unwrap()
+            .blockers
+            .is_empty()
+    );
+    let source = duplicate_number(&f, None, Some(48.0));
+    let target = duplicate_number(&f, None, None);
+    f.apply(FieldCommand::SetRetired {
+        field_id: source,
+        retired: true,
+    });
+    assert!(
+        !ProjectService::preview_field_merge(&f.state, f.project, source, target)
+            .unwrap()
+            .blockers
+            .is_empty()
     );
 }

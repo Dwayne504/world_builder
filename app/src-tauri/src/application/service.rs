@@ -21,6 +21,54 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn preview_field_merge(
+        state: &AppState,
+        project: ProjectId,
+        source: crate::domain::structure::FieldId,
+        target: crate::domain::structure::FieldId,
+    ) -> Result<crate::domain::fields::FieldMergePreview, AppError> {
+        Self::with_worker(state, project, |worker| {
+            worker.preview_field_merge(source, target)
+        })
+    }
+    pub fn merge_fields(
+        state: &AppState,
+        project: ProjectId,
+        source: crate::domain::structure::FieldId,
+        target: crate::domain::structure::FieldId,
+        expected: i64,
+        backup_root: &Path,
+    ) -> Result<crate::domain::fields::FieldMergeOutcome, AppError> {
+        let open = state
+            .open_projects
+            .lock()
+            .expect("registry mutex poisoned")
+            .get(&project)
+            .cloned()
+            .ok_or(AppError::ProjectNotOpen(project))?;
+        let guard = open.worker.lock().expect("worker mutex poisoned");
+        let worker = guard.as_ref().ok_or(AppError::ProjectNotOpen(project))?;
+        let preview = worker.preview_field_merge(source, target)?;
+        if preview.global_revision != expected {
+            return Err(PersistenceError::StaleRevision {
+                expected,
+                current: preview.global_revision,
+            }
+            .into());
+        }
+        if !preview.blockers.is_empty() {
+            return Err(PersistenceError::Other(preview.blockers.join(" ")).into());
+        }
+        // Nothing can write or close this Project between the validated backup
+        // and transaction. A backup failure aborts before any authored change.
+        let backup = crate::backup_recovery::create_backup(worker, &open.paths, backup_root)?;
+        let revision = worker.merge_fields(source, target, expected)?;
+        Ok(crate::domain::fields::FieldMergeOutcome {
+            global_revision: revision,
+            backup_path: backup.display().to_string(),
+        })
+    }
+
     pub fn read_field_catalog(
         state: &AppState,
         project_id: ProjectId,

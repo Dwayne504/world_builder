@@ -86,6 +86,11 @@ describe("Field authoring", () => {
     expect(value).toHaveValue("48");
     expect(value).toHaveAccessibleDescription("years");
     expect(value.parentElement).toContainElement(screen.getByText("years"));
+    const user = userEvent.setup();
+    await user.click(value.parentElement!);
+    expect(value).toHaveFocus();
+    await user.click(screen.getByText("years"));
+    expect(value).toHaveFocus();
     expect(screen.queryByText("Unit: years")).not.toBeInTheDocument();
     expect(screen.queryByText("(Number (optional unit))")).not.toBeInTheDocument();
   });
@@ -272,4 +277,32 @@ describe("Field authoring", () => {
       provider: { kind: "type", id: "type" },
     });
   });
+});
+
+it("suggests reuse with readable provider context and preserves an initial value draft", async () => {
+  const local = {
+    ...definition,
+    kind: "number" as const,
+    name: "Age",
+    unit: "years",
+    options: [],
+    bindings: [{ provider: { kind: "entry" as const, id: "entry" }, label: "Thron" }],
+  };
+  vi.mocked(readFields).mockResolvedValue({ ...snapshot, fields: [], definitions: [local] });
+  show();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Add field" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+  fireEvent.change(screen.getByLabelText("new-field-name"), { target: { value: " age " } });
+  expect(screen.getByText(/Age · Number · years · Entry: Thron/, { selector: "li" })).toBeVisible();
+  fireEvent.change(screen.getByLabelText("new-field-value"), { target: { value: "48" } });
+  expect(screen.getByRole("button", { name: "Reuse Age" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("new-field-value"), { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Reuse Age" }));
+  await waitFor(() =>
+    expect(applyFields).toHaveBeenCalledWith("project", "entry", 2, {
+      kind: "bind",
+      fieldId: "field",
+      provider: { kind: "entry", id: "entry" },
+    }),
+  );
 });

@@ -51,10 +51,22 @@ pub struct ExistingProjectPreflight {
 }
 
 type Reply<T> = Sender<Result<T, PersistenceError>>;
-use crate::domain::fields::{EntryFields, FieldCatalog, FieldCommand};
+use crate::domain::fields::{EntryFields, FieldCatalog, FieldCommand, FieldMergePreview};
 use crate::domain::relationships::{EntryRelationships, RelationshipCommand};
+use crate::domain::structure::FieldId;
 
 enum Job {
+    PreviewFieldMerge {
+        source: FieldId,
+        target: FieldId,
+        reply: Reply<FieldMergePreview>,
+    },
+    MergeFields {
+        source: FieldId,
+        target: FieldId,
+        expected: i64,
+        reply: Reply<i64>,
+    },
     ReadFieldCatalog {
         reply: Reply<FieldCatalog>,
     },
@@ -318,6 +330,21 @@ impl ProjectDbWorker {
                         &mut conn, entry, expected, command,
                     ));
                 }
+                Job::PreviewFieldMerge {
+                    source,
+                    target,
+                    reply,
+                } => {
+                    let _ = reply.send(super::fields::preview_merge(&conn, source, target));
+                }
+                Job::MergeFields {
+                    source,
+                    target,
+                    expected,
+                    reply,
+                } => {
+                    let _ = reply.send(super::fields::merge(&mut conn, source, target, expected));
+                }
                 Job::ReadFields { entry, reply } => {
                     let _ = reply.send(super::fields::read(&conn, entry));
                 }
@@ -462,6 +489,31 @@ impl ProjectDbWorker {
         })
     }
 
+    pub fn preview_field_merge(
+        &self,
+        source: FieldId,
+        target: FieldId,
+    ) -> Result<FieldMergePreview, PersistenceError> {
+        self.call(|reply| Job::PreviewFieldMerge {
+            source,
+            target,
+            reply,
+        })
+    }
+    // The application service holds its worker lock across backup and merge.
+    pub(crate) fn merge_fields(
+        &self,
+        source: FieldId,
+        target: FieldId,
+        expected: i64,
+    ) -> Result<i64, PersistenceError> {
+        self.call(|reply| Job::MergeFields {
+            source,
+            target,
+            expected,
+            reply,
+        })
+    }
     pub fn read_field_catalog(&self) -> Result<FieldCatalog, PersistenceError> {
         self.call(|reply| Job::ReadFieldCatalog { reply })
     }

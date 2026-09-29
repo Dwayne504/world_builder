@@ -30,6 +30,42 @@ fn invalid_input(message: impl ToString) -> AppErrorDto {
 }
 
 #[tauri::command]
+pub fn preview_field_merge(
+    state: State<'_, AppState>,
+    project_id: String,
+    source_id: String,
+    target_id: String,
+) -> Result<crate::domain::fields::FieldMergePreview, AppErrorDto> {
+    ProjectService::preview_field_merge(
+        &state,
+        parse_project_id(&project_id)?,
+        crate::domain::structure::FieldId::parse(&source_id).map_err(invalid_input)?,
+        crate::domain::structure::FieldId::parse(&target_id).map_err(invalid_input)?,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub fn merge_fields(
+    state: State<'_, AppState>,
+    project_id: String,
+    source_id: String,
+    target_id: String,
+    expected_revision: i64,
+    backup_dir: String,
+) -> Result<crate::domain::fields::FieldMergeOutcome, AppErrorDto> {
+    preferences::validate_directory(&PathBuf::from(&backup_dir))?;
+    ProjectService::merge_fields(
+        &state,
+        parse_project_id(&project_id)?,
+        crate::domain::structure::FieldId::parse(&source_id).map_err(invalid_input)?,
+        crate::domain::structure::FieldId::parse(&target_id).map_err(invalid_input)?,
+        expected_revision,
+        &PathBuf::from(backup_dir),
+    )
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn read_field_catalog(
     state: State<'_, AppState>,
     project_id: String,
@@ -380,6 +416,23 @@ pub fn change_entry_structure(
     )
     .map(Into::into)
     .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn get_appearance(
+    store: State<'_, PreferencesStore>,
+) -> Result<preferences::Appearance, AppErrorDto> {
+    Ok(store.load()?.appearance)
+}
+
+#[tauri::command]
+pub fn set_appearance(
+    store: State<'_, PreferencesStore>,
+    appearance: preferences::Appearance,
+) -> Result<preferences::Appearance, AppErrorDto> {
+    Ok(store
+        .update(|prefs| prefs.appearance = appearance)?
+        .appearance)
 }
 
 #[tauri::command]

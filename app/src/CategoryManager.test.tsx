@@ -8,10 +8,17 @@ import {
   listCategories,
   listTypes,
   readFieldCatalog,
+  getPreferences,
+  previewFieldMerge,
+  mergeFields,
 } from "./api";
 import type { FieldsController } from "./EntryFieldsPanel";
 import type { FieldCatalog, FieldDefinition } from "./types";
 vi.mock("./api", () => ({
+  getPreferences: vi.fn(),
+  previewFieldMerge: vi.fn(),
+  mergeFields: vi.fn(),
+  pickDirectory: vi.fn(),
   applyTemplateFields: vi.fn(),
   createCategory: vi.fn(),
   createType: vi.fn(),
@@ -214,4 +221,65 @@ it("uses creation dialogs and retains a child draft when returning to the manage
   fireEvent.click(screen.getByRole("button", { name: "Cancel manager draft" }));
   expect(controller.state).toBe("saved");
   expect(applyTemplateFields).not.toHaveBeenCalled();
+});
+
+it("reuses an existing local definition for Type defaults instead of copying values", async () => {
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Defaults for Sword" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+  change("Default field name", "Mass");
+  fireEvent.click(screen.getByRole("button", { name: "Reuse Mass" }));
+  await waitFor(() =>
+    expect(applyTemplateFields).toHaveBeenCalledWith("project", 1, {
+      kind: "bind",
+      fieldId: "mass",
+      provider: { kind: "type", id: "sword" },
+    }),
+  );
+});
+
+it("tracks a merge until it commits and never offers an acknowledged merge as a failed write", async () => {
+  const duplicate = { ...mass, id: "duplicate" };
+  vi.mocked(readFieldCatalog).mockResolvedValue({
+    globalRevision: 1,
+    definitions: [mass, duplicate],
+  });
+  vi.mocked(getPreferences).mockResolvedValue({
+    defaultProjectsDir: null,
+    defaultProjectsDirExists: false,
+    defaultBackupsDir: "/Backups",
+    defaultBackupsDirExists: true,
+  });
+  vi.mocked(previewFieldMerge).mockResolvedValue({
+    globalRevision: 1,
+    source: duplicate,
+    target: mass,
+    entries: [],
+    blockers: [],
+  });
+  let finish!: (result: { globalRevision: number; backupPath: string }) => void;
+  vi.mocked(mergeFields).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Combine duplicate fields" }));
+  change("Keep Field", "mass");
+  change("Duplicate Field", "duplicate");
+  fireEvent.click(screen.getByRole("button", { name: "Review merge" }));
+  await screen.findByText("Review: Mass");
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "Back up and merge" }));
+  expect(controller.state).toBe("saving");
+  vi.mocked(readFieldCatalog).mockRejectedValueOnce(new Error("Refresh unavailable"));
+  await act(async () => {
+    finish({ globalRevision: 2, backupPath: "/Backups/before.wcbackup" });
+    expect(await controller.submit()).toEqual({ kind: "committed" });
+  });
+  await screen.findByText(/Refresh unavailable/);
+  expect(screen.getByRole("status")).toHaveTextContent("Fields combined.");
+  expect(changed).toHaveBeenCalledWith(2);
+  expect(screen.queryByRole("button", { name: "Back up and merge" })).not.toBeInTheDocument();
 });
