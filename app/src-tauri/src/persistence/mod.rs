@@ -13,6 +13,7 @@ pub mod pragmas;
 mod relationships;
 pub mod snapshot;
 mod spatial;
+mod story;
 pub mod worker;
 
 pub use error::PersistenceError;

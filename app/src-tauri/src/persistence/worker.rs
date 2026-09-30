@@ -56,6 +56,22 @@ use crate::domain::relationships::{EntryRelationships, RelationshipCommand, Rela
 use crate::domain::structure::FieldId;
 
 enum Job {
+    ReadStory {
+        reply: Reply<crate::domain::story::StoryIndex>,
+    },
+    ReadChapter {
+        chapter_id: crate::domain::structure::ChapterId,
+        reply: Reply<crate::domain::story::ChapterSnapshot>,
+    },
+    StoryUsage {
+        entry_id: EntryId,
+        reply: Reply<Vec<crate::domain::story::StoryUsage>>,
+    },
+    ApplyStory {
+        expected: i64,
+        command: crate::domain::story::StoryCommand,
+        reply: Reply<crate::domain::story::ChapterSnapshot>,
+    },
     ReadSpatial {
         reply: Reply<crate::domain::spatial::SpatialSnapshot>,
     },
@@ -323,6 +339,22 @@ impl ProjectDbWorker {
         let mut conn = conn;
         for job in jobs {
             match job {
+                Job::ReadStory { reply } => {
+                    let _ = reply.send(super::story::index(&conn));
+                }
+                Job::ReadChapter { chapter_id, reply } => {
+                    let _ = reply.send(super::story::read(&conn, chapter_id));
+                }
+                Job::StoryUsage { entry_id, reply } => {
+                    let _ = reply.send(super::story::usage(&conn, entry_id));
+                }
+                Job::ApplyStory {
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::story::apply(&mut conn, expected, command));
+                }
                 Job::ReadSpatial { reply } => {
                     let _ = reply.send(super::spatial::read(&conn));
                 }
@@ -505,6 +537,32 @@ impl ProjectDbWorker {
             .map_err(|_| PersistenceError::WorkerShutDown)?
     }
 
+    pub fn read_story(&self) -> Result<crate::domain::story::StoryIndex, PersistenceError> {
+        self.call(|reply| Job::ReadStory { reply })
+    }
+    pub fn read_chapter(
+        &self,
+        chapter_id: crate::domain::structure::ChapterId,
+    ) -> Result<crate::domain::story::ChapterSnapshot, PersistenceError> {
+        self.call(|reply| Job::ReadChapter { chapter_id, reply })
+    }
+    pub fn story_usage(
+        &self,
+        entry_id: EntryId,
+    ) -> Result<Vec<crate::domain::story::StoryUsage>, PersistenceError> {
+        self.call(|reply| Job::StoryUsage { entry_id, reply })
+    }
+    pub fn apply_story(
+        &self,
+        expected: i64,
+        command: crate::domain::story::StoryCommand,
+    ) -> Result<crate::domain::story::ChapterSnapshot, PersistenceError> {
+        self.call(|reply| Job::ApplyStory {
+            expected,
+            command,
+            reply,
+        })
+    }
     pub fn read_spatial(
         &self,
     ) -> Result<crate::domain::spatial::SpatialSnapshot, PersistenceError> {
@@ -1388,6 +1446,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;

@@ -1,4 +1,10 @@
 import { RecentProjects } from "./RecentProjects";
+import { ChapterLibrary } from "./ChapterLibrary";
+import { ChapterEditor } from "./ChapterEditor";
+import { StoryUsage } from "./StoryUsage";
+import { readChapter } from "./api";
+import type { ChapterSnapshot } from "./storyTypes";
+import type { WritingPosition } from "./RichTextEditor";
 import { WorkspaceFrame } from "./WorkspaceFrame";
 import { RelationshipsBrowser } from "./RelationshipsBrowser";
 import type { RelationshipView } from "./workspaceHistory";
@@ -750,6 +756,7 @@ function saveStateLabel(state: string): string {
 }
 
 interface EntrySaveController {
+  autoFlush?: boolean;
   state: SaveState;
   submit: () => Promise<SubmitOutcome>;
   canSubmit: boolean;
@@ -1272,6 +1279,7 @@ function EntryEditor({
 }
 
 function EntryWorkflow({
+  locked,
   projectId,
   onController,
   onGlobalRevision,
@@ -1279,6 +1287,7 @@ function EntryWorkflow({
   templateEpoch,
   onRecoveryBackup,
 }: {
+  locked: boolean;
   projectId: string;
   onController: (controller: EntrySaveController | null) => void;
   onGlobalRevision: (revision: number) => void;
@@ -1294,6 +1303,8 @@ function EntryWorkflow({
   }
   const [types, setTypes] = useState<TypeDef[]>([]);
   const [selected, setSelected] = useState<Entry | null>(null);
+  const [chapter, setChapter] = useState<ChapterSnapshot | null>(null);
+  const writingPositions = useRef<Record<string, WritingPosition>>({});
   const [draftName, setDraftName] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [creationTouched, setCreationTouched] = useState(false);
@@ -1325,6 +1336,7 @@ function EntryWorkflow({
     if (!restore) return;
     restorePosition.current = null;
     let observer: ResizeObserver | undefined;
+    let contentObserver: MutationObserver | undefined;
     let focused = false;
     let frame = 0;
     function applyPosition() {
@@ -1333,10 +1345,13 @@ function EntryWorkflow({
           document.querySelectorAll<HTMLElement>("[data-navigation-focus]"),
         ).find((item) => item.dataset.navigationFocus === restore!.focusKey);
         element?.focus({ preventScroll: true });
-        focused = !restore!.focusKey || !!element;
+        focused = !restore!.focusKey || document.activeElement === element;
       }
       window.scrollTo({ top: restore!.scrollY, behavior: "instant" });
-      if (focused && Math.abs(window.scrollY - restore!.scrollY) < 2) observer?.disconnect();
+      if (focused && Math.abs(window.scrollY - restore!.scrollY) < 2) {
+        observer?.disconnect();
+        contentObserver?.disconnect();
+      }
     }
     function schedule() {
       cancelAnimationFrame(frame);
@@ -1345,11 +1360,23 @@ function EntryWorkflow({
     function stop() {
       cancelAnimationFrame(frame);
       observer?.disconnect();
+      contentObserver?.disconnect();
     }
     const content = document.querySelector(".workspace-content");
     if (content && typeof ResizeObserver !== "undefined") {
       observer = new ResizeObserver(schedule);
       observer.observe(content);
+    }
+    // Linked content arrives asynchronously; do not consume focus restoration
+    // before its target exists or while the outgoing navigation guard is disabled.
+    if (content) {
+      contentObserver = new MutationObserver(schedule);
+      contentObserver.observe(content, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["disabled", "hidden", "open"],
+      });
     }
     schedule();
     const deadline = setTimeout(stop, 2000);
@@ -1393,13 +1420,13 @@ function EntryWorkflow({
     return { kind: successful && !creationDirtyRef.current ? "no-op" : "failed" };
   }, [waitForCreation]);
   useEffect(() => {
-    if (!selected)
+    if (!selected && location.page !== "chapters")
       onController({
         state: mutations.state === "saving" ? "saving" : creationDirty ? "dirty" : "saved",
         submit: submitCreation,
         canSubmit: !creationDirty,
       });
-  }, [selected, creationDirty, mutations.state, submitCreation, onController]);
+  }, [selected, location.page, creationDirty, mutations.state, submitCreation, onController]);
   function cancelCreation() {
     setDraftName("");
     setNewCategoryName("");
@@ -1470,7 +1497,11 @@ function EntryWorkflow({
     return { ...initialLocation, entryId, categoryId: category, typeId: type };
   }
 
-  async function commitNavigation(intent: NavigationIntent, knownEntry?: Entry) {
+  async function commitNavigation(
+    intent: NavigationIntent,
+    knownEntry?: Entry,
+    knownChapter?: ChapterSnapshot,
+  ) {
     if (navigatingRef.current) return;
     // Disabling the outgoing content blurs its focused link. Capture before any await.
     const focusKey =
@@ -1484,6 +1515,9 @@ function EntryWorkflow({
       const entry = intent.location.entryId
         ? (knownEntry ?? (await getEntry(projectId, intent.location.entryId)))
         : null;
+      const nextChapter = intent.location.chapterId
+        ? (knownChapter ?? (await readChapter(projectId, intent.location.chapterId)))
+        : null;
       const current = capture(historyRef.current, window.scrollY, collapsedGroups, focusKey);
       const next =
         intent.index === undefined
@@ -1496,6 +1530,7 @@ function EntryWorkflow({
       controllerRef.current = null;
       onController(null);
       setSelected(entry);
+      setChapter(nextChapter);
       if (entry) rememberEntry(entry.id);
       setPendingNavigation(null);
       setError(null);
@@ -1513,25 +1548,31 @@ function EntryWorkflow({
     }
   }
 
-  async function requestNavigation(requested: NavigationIntent, knownEntry?: Entry) {
+  async function requestNavigation(
+    requested: NavigationIntent,
+    knownEntry?: Entry,
+    knownChapter?: ChapterSnapshot,
+  ) {
     if (navigatingRef.current || navigationRequestRef.current || creationDirty) return;
     const intent: NavigationIntent = {
       ...requested,
       fromFocusKey: (document.activeElement as HTMLElement | null)?.dataset.navigationFocus ?? null,
     };
-    if (mutations.isPending() || controllerRef.current?.state === "saving") {
+    if (
+      mutations.isPending() ||
+      controllerRef.current?.state === "saving" ||
+      (chapter && controllerRef.current?.autoFlush && controllerRef.current.state === "dirty")
+    ) {
       navigationRequestRef.current = true;
       setNavigating(true);
       setPendingNavigation(intent);
       try {
-        const entrySave = selected
-          ? controllerRef.current?.submit()
-          : Promise.resolve({ kind: "no-op" });
+        const entrySave = controllerRef.current?.submit() ?? Promise.resolve({ kind: "no-op" });
         const structureSaved = await mutations.waitForPending();
         const outcome = await entrySave;
         if (structureSaved && (outcome?.kind === "committed" || outcome?.kind === "no-op")) {
-          await commitNavigation(intent, knownEntry);
-        } else setError("This Entry has unsaved changes. Save or discard them before navigating.");
+          await commitNavigation(intent, knownEntry, knownChapter);
+        } else setError("There are unsaved changes. Save or discard them before navigating.");
       } catch (reason) {
         setError(errorMessage(reason));
       } finally {
@@ -1540,12 +1581,12 @@ function EntryWorkflow({
       }
       return;
     }
-    if (selected && controllerRef.current?.state !== "saved") {
+    if ((selected || chapter) && controllerRef.current?.state !== "saved") {
       setPendingNavigation(intent);
-      setError("This Entry has unsaved changes. Save or discard them before navigating.");
+      setError("There are unsaved changes. Save or discard them before navigating.");
       return;
     }
-    await commitNavigation(intent, knownEntry);
+    await commitNavigation(intent, knownEntry, knownChapter);
   }
 
   function openEntry(entry: Entry) {
@@ -1590,6 +1631,10 @@ function EntryWorkflow({
       if (!selected && location.page === "relationships") return;
       void requestNavigation({ location: { ...initialLocation, page: "relationships" } });
     },
+    onChapters: () => {
+      if (!chapter && location.page === "chapters") return;
+      void requestNavigation({ location: { ...initialLocation, page: "chapters" } });
+    },
     onAddEntry: (id: string) => {
       void requestNavigation({ location: destination(null, id, ""), createInCategoryId: id });
     },
@@ -1598,7 +1643,7 @@ function EntryWorkflow({
     canBack: history.index > 0,
     canForward: history.index + 1 < history.locations.length,
     busy: navigating,
-    browsingDisabled: creationDirty,
+    browsingDisabled: creationDirty || locked,
   };
 
   function updateRelationshipView(relationshipView: RelationshipView) {
@@ -1672,6 +1717,69 @@ function EntryWorkflow({
     }
   }
 
+  if (location.page === "chapters") {
+    return (
+      <WorkspaceFrame {...navigationProps}>
+        {error && (
+          <div role="alert">
+            <p>{error}</p>
+            {pendingNavigation && (
+              <div className="row">
+                <button disabled={!controllerCanSubmit} onClick={() => void saveAndNavigate()}>
+                  Retry and continue
+                </button>
+                <button
+                  disabled={controllerState === "saving" || navigating}
+                  onClick={discardAndNavigate}
+                >
+                  Discard and continue
+                </button>
+                <button
+                  onClick={() => {
+                    setPendingNavigation(null);
+                    setError(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {chapter ? (
+          <ChapterEditor
+            categories={categories}
+            locked={locked || navigating}
+            key={chapter.chapter.id}
+            projectId={projectId}
+            initial={chapter}
+            positions={writingPositions.current}
+            onController={receiveController}
+            onChanged={(next) => {
+              onGlobalRevision(next.globalRevision);
+              setChapter(next);
+            }}
+            onEntry={(id) => void requestNavigation({ location: destination(id) })}
+            onBack={navigationProps.onChapters}
+          />
+        ) : (
+          <ChapterLibrary
+            projectId={projectId}
+            onController={receiveController}
+            onRevision={onGlobalRevision}
+            onOpen={(id, snapshot) =>
+              void requestNavigation(
+                { location: { ...initialLocation, page: "chapters", chapterId: id } },
+                undefined,
+                snapshot,
+              )
+            }
+          />
+        )}
+      </WorkspaceFrame>
+    );
+  }
+
   if (selected) {
     return (
       <WorkspaceFrame {...navigationProps}>
@@ -1719,6 +1827,15 @@ function EntryWorkflow({
             setSelected(updated);
             setEntries((items) => items.map((item) => (item.id === updated.id ? updated : item)));
           }}
+        />
+        <StoryUsage
+          projectId={projectId}
+          entryId={selected.id}
+          onOpen={(id) =>
+            void requestNavigation({
+              location: { ...initialLocation, page: "chapters", chapterId: id },
+            })
+          }
         />
       </WorkspaceFrame>
     );
@@ -2221,6 +2338,11 @@ function ProjectScreen({
         void waitForSaveThenClose(intent);
         return;
       }
+      if (entryControllerRef.current?.autoFlush && saveStateRef.current === "dirty") {
+        setPendingCloseIntent(null);
+        void waitForSaveThenClose(intent);
+        return;
+      }
       const decision = decideClose(saveStateRef.current, intent);
       switch (decision) {
         case "close-project":
@@ -2421,6 +2543,7 @@ function ProjectScreen({
         }}
       />
       <EntryWorkflow
+        locked={busy}
         templateEpoch={templateEpoch}
         projectId={project.projectId}
         onController={receiveEntryController}

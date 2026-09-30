@@ -1,6 +1,7 @@
 /** Session navigation stores identity and presentation, never copies of authored data. */
 export interface WorkspaceLocation {
-  page: "entries" | "relationships";
+  page: "entries" | "relationships" | "chapters";
+  chapterId: string | null;
   relationshipView: RelationshipView;
   entryId: string | null;
   categoryId: string;
@@ -27,6 +28,7 @@ export interface WorkspaceHistory {
 }
 export const initialLocation: WorkspaceLocation = {
   page: "entries",
+  chapterId: null,
   relationshipView: initialRelationshipView,
   entryId: null,
   categoryId: "",

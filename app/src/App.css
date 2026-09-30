@@ -1776,3 +1776,265 @@ dialog::after {
 .feature-defaults {
   margin-block: 1rem;
 }
+.chapter-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.chapter-heading > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.chapter-heading .editable-title {
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  font-size: clamp(1.6rem, 3vw, 2.5rem);
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.2;
+}
+.chapter-heading .editable-title:focus-visible {
+  outline: 1px dashed var(--accent);
+  outline-offset: 4px;
+}
+:root[data-appearance="starship"] .chapter-heading .editable-title {
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+.chapter-writing-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 22rem);
+  gap: 2rem;
+  align-items: start;
+}
+.context-collapsed .chapter-writing-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+.chapter-manuscript {
+  min-width: 0;
+}
+.writing-area-tabs {
+  display: flex;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.5rem;
+}
+.writing-area-tabs button {
+  background: transparent;
+  border: 0;
+  padding: 0.5rem 0.8rem;
+}
+.writing-area-tabs button[aria-selected="true"] {
+  box-shadow: inset 0 -2px var(--accent);
+}
+.writing-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.6rem 0;
+  margin: 0;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+.writing-tools button {
+  background: transparent;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.82rem;
+}
+.writing-tools button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.rich-writing .tiptap {
+  min-height: 55vh;
+  max-width: 76ch;
+  margin: 0 auto;
+  padding: 1.8rem clamp(0.5rem, 2vw, 2rem);
+  line-height: 1.85;
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+  outline-offset: -2px;
+}
+.rich-writing .tiptap p {
+  margin: 0 0 0.85em;
+}
+.rich-writing .tiptap h1,
+.rich-writing .tiptap h2,
+.rich-writing .tiptap h3 {
+  margin: 1em 0 0.5em;
+}
+.rich-writing .tiptap blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 1.2em;
+  margin-left: 0;
+}
+.rich-writing .tiptap li p {
+  margin-bottom: 0.25em;
+}
+.rich-writing .tiptap ul,
+.rich-writing .tiptap ol {
+  padding-left: 1.6em;
+}
+.writing-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.chapter-context {
+  border-left: 1px solid var(--line);
+  padding-left: 1.5rem;
+  min-width: 0;
+}
+.chapter-context .section-heading {
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+.chapter-context button {
+  font-size: 0.85rem;
+}
+.chapter-world-link {
+  border-top: 1px solid var(--line);
+  padding: 0.85rem 0;
+}
+.chapter-world-link > summary {
+  cursor: pointer;
+}
+.chapter-world-link > summary small {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-weight: normal;
+}
+.chapter-entry-preview {
+  font-size: 0.9rem;
+  padding: 0.7rem 0;
+  overflow-wrap: anywhere;
+}
+.chapter-entry-preview dl > div {
+  display: grid;
+  grid-template-columns: minmax(5rem, 1fr) 2fr;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+.chapter-entry-preview dt {
+  color: var(--muted);
+}
+.chapter-entry-preview dd {
+  margin: 0;
+}
+.story-role-options {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.7rem 0;
+}
+.story-role-options label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-weight: normal;
+}
+.story-role-options input {
+  width: auto;
+}
+.story-link-options {
+  font-size: 0.8rem;
+}
+.story-usage {
+  margin-top: 1rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--line);
+}
+.chapter-list {
+  list-style: none;
+  padding: 0;
+}
+.chapter-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.chapter-list li > div:first-child {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+.chapter-list .chapter-link {
+  text-align: left;
+  overflow-wrap: anywhere;
+  padding-left: 0;
+  font-size: 1.1rem;
+}
+.chapter-list small {
+  font-size: 0.8rem;
+}
+.chapter-views button[aria-pressed="true"] {
+  border-bottom: 2px solid var(--accent);
+}
+.chapter-entry-results {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.chapter-entry-results button {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.preserved-manuscript {
+  white-space: pre-wrap;
+  font: inherit;
+  line-height: 1.8;
+  padding: 1rem;
+  overflow-wrap: anywhere;
+}
+.recovery-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.recovery-comparison textarea,
+.writing-error textarea {
+  min-height: 12rem;
+}
+.writing-error {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+@media (max-width: 1100px) {
+  .chapter-writing-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chapter-context {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 1rem 0 0;
+  }
+  .chapter-heading {
+    flex-direction: column;
+  }
+  .chapter-heading > div {
+    width: 100%;
+  }
+}
+@media (max-width: 600px) {
+  .recovery-comparison {
+    grid-template-columns: 1fr;
+  }
+}

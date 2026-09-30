@@ -626,7 +626,7 @@ fn schema_seven_migration_is_atomic_backed_up_and_preserves_existing_entries() {
     ProjectService::close_project(&state, project.project_id).unwrap();
     let root = std::path::Path::new(&project.package_path);
     let db = Connection::open(root.join("data").join("project.sqlite")).unwrap();
-    db.execute_batch("DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; PRAGMA user_version=7; UPDATE project_meta SET schema_version=7; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
+    db.execute_batch("DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit; DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; PRAGMA user_version=7; UPDATE project_meta SET schema_version=7; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
     let mut manifest = Manifest::read(&root.join("manifest.json")).unwrap();
     manifest.schema_version = 7;
     manifest.write(&root.join("manifest.json")).unwrap();
@@ -640,7 +640,10 @@ fn schema_seven_migration_is_atomic_backed_up_and_preserves_existing_entries() {
     db.execute_batch("DROP TRIGGER fail_upgrade").unwrap();
     drop(db);
     let open = ProjectService::open_project(&state, root, false).unwrap();
-    assert_eq!(open.schema_version, 8);
+    assert_eq!(
+        open.schema_version,
+        worldcrafter_lib::persistence::migrations::CURRENT_SCHEMA_VERSION
+    );
     let snapshot = ProjectService::read_spatial(&state, project.project_id).unwrap();
     assert_eq!(snapshot.entries[0].id, entry.id);
     assert!(!snapshot.entries[0].spatial);
