@@ -7,6 +7,8 @@ use crate::persistence::PersistenceError;
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    #[error("This folder belongs to a different Project than the recent shortcut.")]
+    RecentProjectMismatch,
     #[error(transparent)]
     Domain(#[from] DomainError),
 
@@ -35,6 +37,7 @@ impl AppError {
     /// vs. surfacing `lock_held` with the current owner's details).
     pub fn kind(&self) -> &'static str {
         match self {
+            AppError::RecentProjectMismatch => "identity_mismatch",
             AppError::Domain(_) => "invalid_input",
             AppError::Package(PackageError::AlreadyExists(_)) => "already_exists",
             AppError::Package(PackageError::UnsupportedFormatVersion { .. }) => {

@@ -195,7 +195,12 @@ export function useEntryFields(
     },
     [submit],
   );
+  const waitForPending = useCallback(
+    () => inFlight.current ?? Promise.resolve({ kind: "no-op" } as SubmitOutcome),
+    [],
+  );
   return {
+    waitForPending,
     snapshot,
     drafts,
     state,

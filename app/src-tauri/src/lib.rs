@@ -10,6 +10,7 @@
 //! depends on the `tauri` crate.
 
 pub mod application;
+pub mod application_home;
 pub mod atomic_file;
 pub mod backup_recovery;
 pub mod domain;
@@ -32,11 +33,15 @@ pub fn run() {
             let handle = app.handle().clone();
             let path = tauri_boundary::commands::preferences_path(&handle)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.message.into() })?;
+            app.manage(application_home::RecentProjectsStore::new(
+                path.with_file_name("recent-projects.sqlite"),
+            ));
             app.manage(PreferencesStore::new(path));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             tauri_boundary::read_relationships,
+            tauri_boundary::read_project_relationships,
             tauri_boundary::apply_relationships,
             tauri_boundary::preview_field_merge,
             tauri_boundary::merge_fields,
@@ -46,6 +51,9 @@ pub fn run() {
             tauri_boundary::automatic_backup_directory,
             tauri_boundary::read_fields,
             tauri_boundary::apply_fields,
+            tauri_boundary::list_recent_projects,
+            tauri_boundary::forget_recent_project,
+            tauri_boundary::open_recent_project,
             tauri_boundary::create_project,
             tauri_boundary::open_project,
             tauri_boundary::rename_project,

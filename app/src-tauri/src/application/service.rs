@@ -122,6 +122,15 @@ impl ProjectService {
         })
     }
 
+    pub fn read_project_relationships(
+        state: &AppState,
+        project_id: ProjectId,
+    ) -> Result<crate::domain::relationships::RelationshipSnapshot, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.read_project_relationships()
+        })
+    }
+
     pub fn read_relationships(
         state: &AppState,
         project_id: ProjectId,
@@ -222,8 +231,35 @@ impl ProjectService {
         package_root: &Path,
         force_stale_lock_recovery: bool,
     ) -> Result<ProjectSummary, AppError> {
+        Self::open_expected_project(state, package_root, force_stale_lock_recovery, None)
+    }
+
+    /// Recent-project repair must never open or migrate a different Project.
+    pub fn open_expected_project(
+        state: &AppState,
+        package_root: &Path,
+        force_stale_lock_recovery: bool,
+        expected: Option<ProjectId>,
+    ) -> Result<ProjectSummary, AppError> {
+        if let Some(expected) = expected {
+            // Structure validation can recover an interrupted manifest publication.
+            // Verify a recent shortcut's identity read-only before touching that file.
+            ProjectDbWorker::preflight_existing(
+                PackagePaths::new(package_root).db_path(),
+                expected,
+            )
+            .map_err(|error| match error {
+                PersistenceError::ProjectIdMismatch { .. } => AppError::RecentProjectMismatch,
+                other => other.into(),
+            })?;
+        }
         let paths = package::layout::validate_structure(package_root)?;
         let mut manifest = Manifest::read(&paths.manifest_path())?;
+        if let Some(expected) = expected {
+            if expected != manifest.project_id {
+                return Err(AppError::RecentProjectMismatch);
+            }
+        }
         ensure_manifest_is_writable(&manifest)?;
         let preflight = ProjectDbWorker::preflight_existing(paths.db_path(), manifest.project_id)?;
         if manifest.schema_version > preflight.schema_version {

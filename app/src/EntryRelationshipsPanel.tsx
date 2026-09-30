@@ -172,6 +172,7 @@ export function EntryRelationshipsPanel({
             <button
               className="relationship-target"
               disabled={busy}
+              data-navigation-focus={`relationship-${view.other.id}`}
               onClick={() => onNavigate(view.other.id!)}
             >
               {view.other.label}

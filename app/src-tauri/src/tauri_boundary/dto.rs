@@ -10,6 +10,7 @@ use crate::domain::{Category, Entry, TypeDef};
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSummaryDto {
+    pub recent_projects_warning: Option<String>,
     pub project_id: String,
     pub working_name: String,
     pub revision: i64,
@@ -23,6 +24,7 @@ pub struct ProjectSummaryDto {
 impl From<ProjectSummary> for ProjectSummaryDto {
     fn from(s: ProjectSummary) -> Self {
         ProjectSummaryDto {
+            recent_projects_warning: None,
             project_id: s.project_id.to_string(),
             working_name: s.working_name,
             revision: s.revision,

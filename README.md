@@ -348,6 +348,19 @@ Relationships use slimmer rows, and Starship has a gentle pointer light and
 background pattern. See the [focused workspace note](docs/milestones/MILESTONE_01_FOCUSED_ENTRY_WORKSPACE.md)
 for preservation rules, verification, and the Windows checklist.
 
+The desktop navigation foundation adds the last three **Recent Projects** to
+Home, a collapsible **Category sidebar**, and an exact **Type / No Type** filter.
+Use **Back / Forward** (Alt+Left / Alt+Right) to revisit Entries and filtered
+lists with their scroll position. Small sidebar counts show all Entries and each
+Category's total; collapse the Category section or use a row's **+** to create an
+Entry in that Category. **Relationships** opens a card view with five connections
+initially and **Show more** for the rest. Filter by participating Entries, the
+relationship definition, and current/ended state. Maintenance actions and
+**Close Project** are under **Project menu**.
+This is session navigation; full tabs, pins, search, and restart restoration are
+still deferred. See the [desktop navigation note](docs/milestones/MILESTONE_01_DESKTOP_NAVIGATION.md)
+for storage rules, verification, and the Windows checklist.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
 Capabilities, relationship-backed Fields and advanced relationship constraints,
@@ -412,14 +425,14 @@ For the PR #10 handoff audit, verification and manual checks, see
 
 ### Appearance and duplicate Fields
 
-**Appearance** on the opening screen or Project toolbar switches between
+**Appearance** on the opening screen or under **Project menu** switches between
 **Storybook** (parchment and leather) and **Starship** (dark panels and brushed
 metal). This choice stays in app preferences across restarts. Custom colors
 remain deferred.
 
 Click anywhere in a numeric Field's outlined quantity control to edit the
-number; its unit stays alongside it. **Close Project** is now in **Project
-settings**.
+number; its unit stays alongside it. **Close Project** is at the bottom of the
+**Project menu**; pending changes still use the existing save guard.
 
 When adding a Field/default, reuse a same-name definition when it represents the
 same fact. To repair existing duplicates, open **Categories → Combine duplicate

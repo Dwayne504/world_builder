@@ -11,6 +11,7 @@ export interface FieldsController {
   state: SaveState;
   submit: () => Promise<SubmitOutcome>;
   canSubmit: boolean;
+  waitForPending?: () => Promise<SubmitOutcome>;
 }
 const kinds: Record<FieldKind, string> = {
   short_text: "Short Text",
@@ -135,7 +136,7 @@ export function EntryFieldsPanel({
     null,
   );
   const [createOpen, setCreateOpen] = useState(false);
-  const { submit: submitValues } = fields;
+  const { submit: submitValues, waitForPending } = fields;
   const [newName, setNewName] = useState("");
   const [newUnit, setNewUnit] = useState("");
   const [newKind, setNewKind] = useState<FieldKind>("short_text");
@@ -169,8 +170,8 @@ export function EntryFieldsPanel({
     return submitValues();
   }, [formDirty, submitValues]);
   useEffect(
-    () => onController({ state: combinedState, submit, canSubmit: !formDirty }),
-    [combinedState, submit, formDirty, onController],
+    () => onController({ state: combinedState, submit, canSubmit: !formDirty, waitForPending }),
+    [combinedState, submit, formDirty, onController, waitForPending],
   );
   const busy = disabled || fields.state === "saving";
   const hasValueDraft = Object.keys(fields.drafts).length > 0;
