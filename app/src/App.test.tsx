@@ -64,6 +64,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  readSpatial: vi.fn().mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] }),
+  applySpatial: vi.fn(),
   listOpenProjects: vi.fn().mockResolvedValue([]),
   getProjectSummary: vi.fn(),
   listRecentProjects: vi.fn().mockResolvedValue([]),
@@ -116,6 +118,8 @@ vi.mock("./api", () => ({
 
 import App from "./App";
 import {
+  readSpatial,
+  applySpatial,
   AppCommandError,
   listOpenProjects,
   getProjectSummary,
@@ -265,6 +269,10 @@ describe("Project screen Saved contract", () => {
   });
 
   beforeEach(() => {
+    vi.mocked(readSpatial)
+      .mockReset()
+      .mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] });
+    vi.mocked(applySpatial).mockReset();
     vi.mocked(readFields)
       .mockReset()
       .mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] });
@@ -970,6 +978,42 @@ describe("Project screen Saved contract", () => {
     expect(nativeWindowCloseMock).toHaveBeenCalled();
   });
 
+  it("native close protects Spatial child drafts and waits for their acknowledged creation", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    closeProjectMock.mockResolvedValue(undefined);
+    const spatial = {
+      globalRevision: 1,
+      defaults: [],
+      entries: [
+        { id: "entry", label: "Thron", workspaceState: "active", spatial: true, parentId: null },
+      ],
+    };
+    vi.mocked(readSpatial).mockResolvedValue(spatial);
+    const pending = deferred<typeof spatial>();
+    vi.mocked(applySpatial).mockReturnValueOnce(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Arrange places" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create child" }));
+    fireEvent.change(screen.getByLabelText("Child name (optional)"), {
+      target: { value: "Chamber" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close Arrange places" }));
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Save and close" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Before you leave" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue Spatial draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create place inside Thron" }));
+    await waitFor(() => expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saving"));
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ ...spatial, globalRevision: 2 }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    expect(nativeWindowCloseMock).toHaveBeenCalled();
+  });
+
   it("native close waits for relationship creation to commit before exiting", async () => {
     enableTauriWindow();
     mockEditableEntry();
@@ -998,40 +1042,65 @@ describe("Project screen Saved contract", () => {
     expect(nativeWindowCloseMock).toHaveBeenCalled();
   });
 
-  it("uses acknowledged relationship revisions for the next Field write", async () => {
-    mockEditableEntry();
-    vi.mocked(applyRelationships).mockResolvedValue({
-      globalRevision: 7,
-      definitions: [],
-      relationships: [],
-      entries: [],
-    });
-    vi.mocked(applyFields).mockResolvedValue({ globalRevision: 8, definitions: [], fields: [] });
-    await openTheProjectScreen();
-    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Manage relationships" })).toBeEnabled(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Manage relationships" }));
-    for (const [label, value] of [
-      ["Definition name", "Ownership"],
-      ["Forward label", "owns"],
-      ["Inverse label", "is owned by"],
-    ])
-      fireEvent.change(screen.getByLabelText(label), { target: { value } });
-    fireEvent.click(screen.getByRole("button", { name: "Create definition" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    fireEvent.change(visibleInput("new-field-name"), { target: { value: "Color" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create field" }));
-    await waitFor(() =>
-      expect(applyFields).toHaveBeenCalledWith(
-        project.projectId,
-        "entry",
-        7,
-        expect.objectContaining({ kind: "create" }),
-      ),
-    );
-  });
+  it.each(["immediate", "delayed"])(
+    "uses acknowledged relationship revisions for the next Field write (%s acknowledgement)",
+    async (acknowledgement) => {
+      mockEditableEntry();
+      const updated: RelationshipSnapshot = {
+        globalRevision: 7,
+        definitions: [],
+        relationships: [],
+        entries: [],
+      };
+      const pending = deferred<RelationshipSnapshot>();
+      vi.mocked(applyRelationships).mockReturnValue(
+        acknowledgement === "delayed" ? pending.promise : Promise.resolve(updated),
+      );
+      vi.mocked(applyFields).mockResolvedValue({ globalRevision: 8, definitions: [], fields: [] });
+      await openTheProjectScreen();
+      fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Manage relationships" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Manage relationships" }));
+      for (const [label, value] of [
+        ["Definition name", "Ownership"],
+        ["Forward label", "owns"],
+        ["Inverse label", "is owned by"],
+      ])
+        fireEvent.change(screen.getByLabelText(label), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: "Create definition" }));
+      if (acknowledgement === "delayed") {
+        await waitFor(() =>
+          expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saving"),
+        );
+        expect(screen.getByRole("button", { name: "Add field" })).toBeDisabled();
+        expect(applyFields).not.toHaveBeenCalled();
+        await act(async () => pending.resolve(updated));
+      }
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      // The dialog can close before the parent receives the saved controller state.
+      // Wait for the real action, and never type into a still-hidden dialog.
+      await waitFor(() => expect(screen.getByRole("button", { name: "Add field" })).toBeEnabled());
+      fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+      const fieldDialog = await screen.findByRole("dialog", { name: "Add field" });
+      fireEvent.change(within(fieldDialog).getByRole("textbox", { name: "new-field-name" }), {
+        target: { value: "Color" },
+      });
+      fireEvent.click(within(fieldDialog).getByRole("button", { name: "Create field" }));
+      await waitFor(() =>
+        expect(applyFields).toHaveBeenCalledWith(
+          project.projectId,
+          "entry",
+          7,
+          expect.objectContaining({ kind: "create" }),
+        ),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saved"),
+      );
+    },
+  );
 
   it("native close waits for field-value acknowledgement and retains a failed draft", async () => {
     enableTauriWindow();

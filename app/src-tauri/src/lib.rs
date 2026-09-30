@@ -40,6 +40,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            tauri_boundary::read_spatial,
+            tauri_boundary::apply_spatial,
             tauri_boundary::read_relationships,
             tauri_boundary::read_project_relationships,
             tauri_boundary::apply_relationships,

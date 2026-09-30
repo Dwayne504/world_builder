@@ -3,6 +3,8 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { CategoryManager } from "./CategoryManager";
 import {
   applyTemplateFields,
+  applySpatial,
+  readSpatial,
   createCategory,
   createType,
   listCategories,
@@ -16,6 +18,8 @@ import {
 import type { FieldsController } from "./EntryFieldsPanel";
 import type { FieldCatalog, FieldDefinition } from "./types";
 vi.mock("./api", () => ({
+  readSpatial: vi.fn().mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] }),
+  applySpatial: vi.fn(),
   getPreferences: vi.fn(),
   previewFieldMerge: vi.fn(),
   mergeFields: vi.fn(),
@@ -312,7 +316,9 @@ it("tracks a merge until it commits and never offers an acknowledged merge as a 
   change("Duplicate Field", "duplicate");
   fireEvent.click(screen.getByRole("button", { name: "Review merge" }));
   await screen.findByText("Review: Mass");
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "I reviewed the values and combined defaults." }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Back up and merge" }));
   expect(controller.state).toBe("saving");
   vi.mocked(readFieldCatalog).mockRejectedValueOnce(new Error("Refresh unavailable"));
@@ -324,4 +330,34 @@ it("tracks a merge until it commits and never offers an acknowledged merge as a 
   expect(screen.getByRole("status")).toHaveTextContent("Fields combined.");
   expect(changed).toHaveBeenCalledWith(2);
   expect(screen.queryByRole("button", { name: "Back up and merge" })).not.toBeInTheDocument();
+});
+
+it("saves Spatial defaults for the selected Type without applying them to existing Entries", async () => {
+  await show();
+  fireEvent.change(screen.getByLabelText("Default field scope"), { target: { value: "sword" } });
+  vi.mocked(readSpatial).mockResolvedValueOnce({
+    globalRevision: 2,
+    entries: [],
+    defaults: [{ kind: "type", id: "sword" }],
+  });
+  vi.mocked(applySpatial).mockResolvedValueOnce({
+    globalRevision: 2,
+    entries: [],
+    defaults: [{ kind: "type", id: "sword" }],
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Spatial — can contain other places" }));
+  await waitFor(() =>
+    expect(applySpatial).toHaveBeenCalledWith("project", 1, {
+      kind: "set_default",
+      provider: { kind: "type", id: "sword" },
+      enabled: true,
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("checkbox", { name: "Spatial — can contain other places" }),
+    ).toBeChecked(),
+  );
+  expect(screen.getByText(/Existing Entries keep their features/)).toBeInTheDocument();
+  expect(changed).toHaveBeenCalledWith(2);
 });

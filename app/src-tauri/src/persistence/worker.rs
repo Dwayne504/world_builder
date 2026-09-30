@@ -56,6 +56,14 @@ use crate::domain::relationships::{EntryRelationships, RelationshipCommand, Rela
 use crate::domain::structure::FieldId;
 
 enum Job {
+    ReadSpatial {
+        reply: Reply<crate::domain::spatial::SpatialSnapshot>,
+    },
+    ApplySpatial {
+        expected: i64,
+        command: crate::domain::spatial::SpatialCommand,
+        reply: Reply<crate::domain::spatial::SpatialSnapshot>,
+    },
     ReadProjectRelationships {
         reply: Reply<RelationshipSnapshot>,
     },
@@ -315,6 +323,16 @@ impl ProjectDbWorker {
         let mut conn = conn;
         for job in jobs {
             match job {
+                Job::ReadSpatial { reply } => {
+                    let _ = reply.send(super::spatial::read(&conn));
+                }
+                Job::ApplySpatial {
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::spatial::apply(&mut conn, expected, command));
+                }
                 Job::ReadProjectRelationships { reply } => {
                     let _ = reply.send(super::relationships::read_project(&conn));
                 }
@@ -487,6 +505,22 @@ impl ProjectDbWorker {
             .map_err(|_| PersistenceError::WorkerShutDown)?
     }
 
+    pub fn read_spatial(
+        &self,
+    ) -> Result<crate::domain::spatial::SpatialSnapshot, PersistenceError> {
+        self.call(|reply| Job::ReadSpatial { reply })
+    }
+    pub fn apply_spatial(
+        &self,
+        expected: i64,
+        command: crate::domain::spatial::SpatialCommand,
+    ) -> Result<crate::domain::spatial::SpatialSnapshot, PersistenceError> {
+        self.call(|reply| Job::ApplySpatial {
+            expected,
+            command,
+            reply,
+        })
+    }
     pub fn read_meta(&self) -> Result<ProjectMetaSnapshot, PersistenceError> {
         self.call(|reply| Job::ReadMeta { reply })
     }
@@ -1354,7 +1388,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
+             DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
              DROP TABLE relationship_definition;

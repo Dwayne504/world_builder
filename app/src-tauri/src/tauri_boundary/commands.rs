@@ -16,6 +16,29 @@ use crate::preferences::{self, PreferencesError, PreferencesStore};
 
 use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
+#[tauri::command]
+pub fn read_spatial(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<crate::domain::spatial::SpatialSnapshot, AppErrorDto> {
+    ProjectService::read_spatial(&state, parse_project_id(&project_id)?).map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_spatial(
+    state: State<'_, AppState>,
+    project_id: String,
+    expected_revision: i64,
+    command: crate::domain::spatial::SpatialCommand,
+) -> Result<crate::domain::spatial::SpatialSnapshot, AppErrorDto> {
+    ProjectService::apply_spatial(
+        &state,
+        parse_project_id(&project_id)?,
+        expected_revision,
+        command,
+    )
+    .map_err(Into::into)
+}
+
 fn parse_project_id(raw: &str) -> Result<ProjectId, AppErrorDto> {
     ProjectId::parse(raw).map_err(|e| AppErrorDto {
         kind: "invalid_input".to_string(),

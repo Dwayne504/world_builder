@@ -128,7 +128,7 @@ it("shows canonical notes, warnings and inactive participants without a scalar i
   expect(screen.getByText("An inherited blade")).toBeVisible();
   expect(screen.queryByLabelText("Value: Current owner")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Clear value: Current owner")).not.toBeInTheDocument();
-  expect(presented).toHaveBeenLastCalledWith(["connection"]);
+  await waitFor(() => expect(presented).toHaveBeenLastCalledWith(["connection"]));
 });
 
 it("retains a detached projection visibly and requires restoring its availability before editing", async () => {

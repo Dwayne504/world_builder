@@ -218,3 +218,27 @@ export interface EntryFieldDeleteOutcome {
   snapshot: EntryFields;
   backupPath: string;
 }
+export type CapabilityProvider = { kind: "category" | "type"; id: string };
+export interface SpatialEntry {
+  id: string;
+  label: string;
+  workspaceState: string;
+  spatial: boolean;
+  parentId: string | null;
+}
+export interface SpatialSnapshot {
+  globalRevision: number;
+  entries: SpatialEntry[];
+  defaults: CapabilityProvider[];
+}
+export type SpatialCommand =
+  | { kind: "set_enabled"; entryId: string; enabled: boolean }
+  | { kind: "reparent"; entryId: string; parentId: string | null }
+  | {
+      kind: "create_child";
+      parentId: string;
+      name: string | null;
+      categoryId: string | null;
+      typeId: string | null;
+    }
+  | { kind: "set_default"; provider: CapabilityProvider; enabled: boolean };
