@@ -1,5 +1,7 @@
 //! Field definitions, template availability and authored values are distinct.
+use super::relationships::{OtherEntry, Perspective, Relationship};
 use super::structure::{ChoiceOptionId, FieldId};
+use super::structure::{RelationshipDefinitionId, RelationshipId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -10,6 +12,7 @@ pub enum FieldKind {
     Boolean,
     Choice,
     MultiChoice,
+    Relationship,
 }
 
 impl FieldKind {
@@ -20,6 +23,7 @@ impl FieldKind {
             Self::Boolean => "boolean",
             Self::Choice => "choice",
             Self::MultiChoice => "multi_choice",
+            Self::Relationship => "relationship",
         }
     }
 }
@@ -83,6 +87,20 @@ pub struct FieldEdit {
     rename_all_fields = "camelCase"
 )]
 pub enum FieldCommand {
+    CreateProjection {
+        name: String,
+        relationship_definition_id: RelationshipDefinitionId,
+        perspective: Perspective,
+        provider: FieldProvider,
+    },
+    EditProjection {
+        field_id: FieldId,
+        other: OtherEntry,
+        instance_id: Option<RelationshipId>,
+    },
+    RemoveProjection {
+        field_id: FieldId,
+    },
     Create {
         name: String,
         field_kind: FieldKind,
@@ -155,6 +173,14 @@ pub struct FieldDefinition {
     pub revision: i64,
     pub options: Vec<ChoiceOption>,
     pub bindings: Vec<FieldBinding>,
+    pub projection: Option<FieldProjection>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldProjection {
+    pub relationship_definition_id: RelationshipDefinitionId,
+    pub perspective: Perspective,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -165,6 +191,8 @@ pub struct EntryField {
     pub hidden: bool,
     pub default_sources: Vec<FieldBinding>,
     pub value: Option<FieldValue>,
+    /// Derived from canonical current relationships, never a Field Value.
+    pub projected_relationships: Vec<Relationship>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

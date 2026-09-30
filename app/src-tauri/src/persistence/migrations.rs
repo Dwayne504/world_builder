@@ -15,7 +15,7 @@ use rusqlite::{Connection, Transaction};
 use super::error::PersistenceError;
 
 /// The newest schema version this build knows how to read and write.
-pub const CURRENT_SCHEMA_VERSION: i64 = 6;
+pub const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 /// Ordered (version, sql) pairs. Each migration is applied at most once and
 /// migrations must be applied in order starting just above the database's
@@ -59,6 +59,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0006_entry_field_presentation.sql"),
         after_sql: None,
     },
+    Migration {
+        version: 7,
+        sql: include_str!("migrations/0007_field_projections.sql"),
+        after_sql: None,
+    },
 ];
 
 /// Applies any migrations newer than the database's current version.
@@ -82,7 +87,22 @@ pub fn migrate(conn: &Connection) -> Result<(), PersistenceError> {
         return Ok(());
     }
 
-    apply_pending_chain(conn, current_version, &pending)?;
+    // SQLite table rebuilding requires FK enforcement off outside the
+    // transaction. No authored commands run on this connection during open.
+    // Keep original settings even when migration or integrity validation fails.
+    let foreign_keys: bool = conn.pragma_query_value(None, "foreign_keys", |r| r.get(0))?;
+    let legacy_alter: bool = conn.pragma_query_value(None, "legacy_alter_table", |r| r.get(0))?;
+    conn.pragma_update(None, "foreign_keys", false)?;
+    if let Err(error) = conn.pragma_update(None, "legacy_alter_table", true) {
+        conn.pragma_update(None, "foreign_keys", foreign_keys)?;
+        return Err(error.into());
+    }
+    let result = apply_pending_chain(conn, current_version, &pending);
+    let restore_legacy = conn.pragma_update(None, "legacy_alter_table", legacy_alter);
+    let restore_foreign_keys = conn.pragma_update(None, "foreign_keys", foreign_keys);
+    restore_legacy?;
+    restore_foreign_keys?;
+    result?;
     Ok(())
 }
 
@@ -110,6 +130,11 @@ fn apply_pending_chain(
         [applied_version],
     )?;
     tx.pragma_update(None, "user_version", applied_version)?;
+    if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
+        return Err(PersistenceError::Other(
+            "Migration would leave invalid references".into(),
+        ));
+    }
     tx.commit()?;
     Ok(())
 }

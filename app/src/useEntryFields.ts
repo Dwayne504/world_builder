@@ -10,6 +10,8 @@ export function valueDraft(value: FieldValue | null): FieldDraft {
 }
 export function parseFieldDraft(field: EntryField, draft: FieldDraft): FieldValue | null {
   switch (field.definition.kind) {
+    case "relationship":
+      throw new Error("Relationship Fields are edited through their connections.");
     case "short_text":
       return draft === "" ? null : { kind: "text", value: String(draft) };
     case "number": {
@@ -34,6 +36,7 @@ export function useEntryFields(
   entryRevision: number | string,
   onRevision: (revision: number) => void,
   getRevision?: () => number,
+  onCommitted?: (revision: number) => void,
 ) {
   const [snapshot, setSnapshot] = useState<EntryFields | null>(null);
   const [drafts, setDrafts] = useState<Record<string, FieldDraft>>({});
@@ -46,6 +49,8 @@ export function useEntryFields(
   revisionRef.current = onRevision;
   const getRevisionRef = useRef(getRevision);
   getRevisionRef.current = getRevision;
+  const committedRef = useRef(onCommitted);
+  committedRef.current = onCommitted;
   const inFlight = useRef<Promise<SubmitOutcome> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generation = useRef(0);
@@ -80,10 +85,11 @@ export function useEntryFields(
   const previousEntryRevision = useRef(entryRevision);
   useEffect(() => {
     if (previousEntryRevision.current === entryRevision) return;
-    previousEntryRevision.current = entryRevision;
     // Never silently rebase unsaved field edits onto newer authoritative data.
-    if (!inFlight.current && !Object.keys(draftsRef.current).length) void reload();
-  }, [entryRevision, reload]);
+    if (state !== "saved" || inFlight.current || Object.keys(draftsRef.current).length) return;
+    previousEntryRevision.current = entryRevision;
+    void reload();
+  }, [entryRevision, state, configurationPending, reload]);
 
   const run = useCallback(
     (
@@ -102,6 +108,7 @@ export function useEntryFields(
       )
         .then((updated): SubmitOutcome => {
           accept(updated);
+          committedRef.current?.(updated.globalRevision);
           const outcome: SubmitOutcome = afterCommit?.() ?? { kind: "committed" };
           setState(outcome.kind === "committed-stale" ? "dirty" : "saved");
           return outcome;

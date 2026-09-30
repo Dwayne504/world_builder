@@ -269,7 +269,7 @@ cargo tauri build                 # full desktop bundle; requires a display/wind
                                    # not expected to succeed in a headless CI/sandbox
 ```
 
-### Current implemented slice: Fields Foundation (Milestone 01, Task 02B)
+### Implemented foundations and current slice
 
 This slice proves the desktop stack starts, a real self-contained `.wcproj`
 package can be created/opened/renamed/closed, Project identity (UUIDv7) is
@@ -367,9 +367,26 @@ This is session navigation; full tabs, pins, indexed search, and restart restora
 still deferred. See the [desktop navigation note](docs/milestones/MILESTONE_01_DESKTOP_NAVIGATION.md)
 for storage rules, verification, and the Windows checklist.
 
+Relationship Fields add schema 7 and configurable views of existing connections.
+Choose **Relationship** when adding a Field or Category/Type default, select the
+relationship definition, and choose its meaning from this Entry's side. For
+example, **Current owner** on an object can show the inverse of **owns**. Editing
+the connected Entry changes that same relationship and preserves its note and
+identity. Multiple current connections remain visible; choose the particular
+connection to change rather than silently replacing another one. Missing targets
+can be created inline as stub Entries.
+
+Visible Relationship Fields replace duplicate rows in the Entry's normal
+Relationships section. **Show all relationships, including those in Fields**
+reveals the complete list; the Project Relationships page also remains complete.
+**Hide** and **Remove from Fields** only change presentation and retain the
+connections. Scalar Field deletion and duplicate merging do not apply to these
+Fields. See the [Relationship Fields note](docs/milestones/MILESTONE_01_RELATIONSHIP_FIELDS.md)
+for the exact scope, verification status, and disposable-Project checklist.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
-Entry Reference Fields, semantic field-kind conversion, advanced field metadata,
-Capabilities, relationship-backed Fields and advanced relationship constraints,
+plain navigational Entry Reference Fields, semantic field-kind conversion,
+advanced field metadata, Capabilities and advanced relationship constraints,
 Spatial, Chapters/Story Units, TipTap prose
 editing and rich descriptions, search/FTS, Tags/Roles/Statuses, aliases,
 Archive/Trash, shared-definition permanent deletion, final Recent/Pinned navigation, and any

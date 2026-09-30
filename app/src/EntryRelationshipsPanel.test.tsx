@@ -81,6 +81,70 @@ function openActions() {
   fireEvent.click(screen.getByLabelText("Note and actions · has note"));
 }
 
+it("deduplicates only presented current relationships and offers an explicit full view", async () => {
+  const past = { ...relationship, id: "past", ended: true };
+  vi.mocked(readRelationships).mockResolvedValue({
+    ...snapshot(),
+    relationships: [relationship, past],
+  });
+  const props = {
+    projectId: "project",
+    entryId: "thron",
+    categories: [],
+    disabled: false,
+    onController: vi.fn(),
+    onRevision: vi.fn(),
+    getRevision: () => 3,
+    onNavigate: navigate,
+  };
+  const { rerender } = render(
+    <EntryRelationshipsPanel {...props} presentedRelationships={["r1"]} />,
+  );
+  const toggle = await screen.findByLabelText("Show all relationships, including those in Fields");
+  expect(
+    screen.getAllByRole("button", { name: "Show owns relationships", hidden: true }),
+  ).toHaveLength(1);
+  fireEvent.click(toggle);
+  expect(
+    screen.getAllByRole("button", { name: "Show owns relationships", hidden: true }),
+  ).toHaveLength(2);
+  fireEvent.click(toggle);
+  rerender(<EntryRelationshipsPanel {...props} presentedRelationships={[]} />);
+  expect(
+    screen.queryByLabelText("Show all relationships, including those in Fields"),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getAllByRole("button", { name: "Show owns relationships", hidden: true }),
+  ).toHaveLength(2);
+});
+
+it("refreshes after a companion commit without rebasing an unfinished note", async () => {
+  const committed = vi.fn();
+  const props = {
+    projectId: "project",
+    entryId: "thron",
+    categories: [],
+    disabled: false,
+    onController: vi.fn(),
+    onRevision: vi.fn(),
+    getRevision: () => 3,
+    onNavigate: navigate,
+    onCommitted: committed,
+  };
+  const { rerender } = render(<EntryRelationshipsPanel {...props} refreshKey={0} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Show owns relationships" }));
+  openActions();
+  vi.mocked(applyRelationships).mockRejectedValueOnce(new Error("Write failed"));
+  change("Note: owns Singularity Blade", "Keep this draft");
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  await screen.findAllByText(/Write failed/);
+  const reads = vi.mocked(readRelationships).mock.calls.length;
+  rerender(<EntryRelationshipsPanel {...props} refreshKey={1} />);
+  expect(readRelationships).toHaveBeenCalledTimes(reads);
+  expect(screen.getByLabelText("Note: owns Singularity Blade")).toHaveValue("Keep this draft");
+  expect(committed).not.toHaveBeenCalled();
+});
+
 it("shows the inverse from the other Entry and navigates by stable ID", async () => {
   await mount("blade");
   expect(screen.getByText("is owned by")).toBeInTheDocument();

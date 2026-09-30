@@ -38,6 +38,52 @@ beforeEach(() => {
 });
 
 describe("Field save contract", () => {
+  it("notifies companion views only after a successful write, never a read or failure", async () => {
+    const committed = vi.fn();
+    const { result } = renderHook(() =>
+      useEntryFields("project", "entry", 1, vi.fn(), undefined, committed),
+    );
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    expect(committed).not.toHaveBeenCalled();
+    vi.mocked(applyFields).mockRejectedValueOnce(new Error("Revision conflict"));
+    await act(async () => {
+      await result.current.command({ kind: "set_hidden", fieldId: "field", hidden: true });
+    });
+    expect(committed).not.toHaveBeenCalled();
+    vi.mocked(applyFields).mockResolvedValueOnce({ ...snapshot, globalRevision: 4 });
+    await act(async () => {
+      await result.current.command({ kind: "set_hidden", fieldId: "field", hidden: true });
+    });
+    expect(committed).toHaveBeenCalledExactlyOnceWith(4);
+  });
+  it("defers companion refresh while a failed draft needs explicit review", async () => {
+    const { result, rerender } = renderHook(
+      ({ revision }) => useEntryFields("project", "entry", revision, vi.fn()),
+      { initialProps: { revision: 1 } },
+    );
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    vi.mocked(applyFields).mockRejectedValueOnce(new Error("Revision conflict"));
+    act(() => result.current.change("field", "49"));
+    await act(async () => {
+      await result.current.submit();
+    });
+    const reads = vi.mocked(readFields).mock.calls.length;
+    rerender({ revision: 2 });
+    expect(readFields).toHaveBeenCalledTimes(reads);
+    expect(result.current.state).toBe("failed");
+    expect(result.current.drafts.field).toBe("49");
+  });
+  it("never serializes a projected target into scalar Field values", () => {
+    expect(() =>
+      parseFieldDraft(
+        {
+          ...snapshot.fields[0],
+          definition: { ...snapshot.fields[0].definition, kind: "relationship" },
+        },
+        "target-id",
+      ),
+    ).toThrow(/connections/);
+  });
   it("preserves a newer edit if an earlier value finishes saving", async () => {
     const pending = deferred<EntryFields>();
     vi.mocked(applyFields).mockReturnValueOnce(pending.promise);

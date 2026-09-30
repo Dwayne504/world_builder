@@ -1654,3 +1654,71 @@ dialog::after {
   padding: 3px 8px;
   font-size: 12px;
 }
+
+.projection-value {
+  grid-column: 2 / -1;
+  min-width: 0;
+  font-size: 14px;
+}
+.projection-target + .projection-target {
+  border-top: 1px solid var(--line);
+  margin-top: 5px;
+  padding-top: 5px;
+}
+.projection-target > .row {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.projection-value .quiet-button {
+  min-height: 30px;
+  padding: 3px 7px;
+  font-size: 13px;
+}
+.projection-value .relationship-entry-link {
+  padding-left: 0;
+  font-size: 14px;
+}
+.projection-note {
+  margin: 2px 0 4px;
+  font-size: 12px;
+}
+.projection-note p {
+  margin: 5px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.projection-editor {
+  min-width: 0;
+  padding: 10px;
+  margin: 8px 0 2px;
+}
+.projection-editor legend,
+.projection-editor label {
+  font-size: 12px;
+}
+.projection-editor label {
+  margin: 5px 0 8px;
+}
+.projection-results {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.projection-results button {
+  width: 100%;
+  text-align: left;
+  min-height: 34px;
+  padding: 5px 9px;
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.projection-results small {
+  color: var(--muted);
+  margin-left: 5px;
+}
+.projection-view-toggle {
+  font-size: 12px;
+  color: var(--muted);
+}

@@ -49,6 +49,13 @@ impl ProjectService {
         if !snapshot.fields.iter().any(|f| f.definition.id == field) {
             return Err(PersistenceError::Other("Field is no longer on this Entry".into()).into());
         }
+        if snapshot
+            .fields
+            .iter()
+            .any(|f| f.definition.id == field && f.definition.projection.is_some())
+        {
+            return Err(PersistenceError::Other("Remove the Field display or explicitly end its connections; scalar deletion cannot delete a relationship".into()).into());
+        }
         let backup = crate::backup_recovery::create_backup(worker, &open.paths, backup_root)?;
         let snapshot = worker.delete_entry_field(entry, field, expected)?;
         Ok(crate::domain::fields::EntryFieldDeleteOutcome {
@@ -859,7 +866,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TABLE entry_field_presentation;
+             DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
              DROP TABLE relationship_definition;
@@ -962,7 +969,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TABLE entry_field_presentation;
+             DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
              DROP TABLE relationship_definition;

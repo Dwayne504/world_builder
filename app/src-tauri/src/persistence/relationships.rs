@@ -283,10 +283,25 @@ pub(super) fn apply(
         });
     }
     let now = Utc::now().to_rfc3339();
+    apply_in_transaction(&tx, entry, command, &now)?;
+    tx.execute("UPDATE project_meta SET last_committed_revision=last_committed_revision+1,updated_at=?1 WHERE id=1",[now])?;
+    let updated = read(&tx, entry)?;
+    tx.commit()?;
+    Ok(updated)
+}
+
+/// Shares the caller's revision-checked transaction; never commits a second store.
+pub(super) fn apply_in_transaction(
+    conn: &Connection,
+    entry: EntryId,
+    command: RelationshipCommand,
+    now: &str,
+) -> Result<(), PersistenceError> {
+    let snapshot = read(conn, entry)?;
     match command {
         RelationshipCommand::CreateDefinition { draft } => {
             let d = draft.validated().map_err(invalid)?;
-            tx.execute("INSERT INTO relationship_definition(id,name,forward_label,inverse_label,directed,expected_targets_per_source,expected_sources_per_target,created_at,updated_at,revision) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,1)",params![RelationshipDefinitionId::new().to_string(),d.name,d.forward_label,d.inverse_label,d.directed,d.expected_targets_per_source,d.expected_sources_per_target,now])?;
+            conn.execute("INSERT INTO relationship_definition(id,name,forward_label,inverse_label,directed,expected_targets_per_source,expected_sources_per_target,created_at,updated_at,revision) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,1)",params![RelationshipDefinitionId::new().to_string(),d.name,d.forward_label,d.inverse_label,d.directed,d.expected_targets_per_source,d.expected_sources_per_target,now])?;
         }
         RelationshipCommand::UpdateDefinition {
             definition_id,
@@ -299,14 +314,14 @@ pub(super) fn apply(
                     "Direction cannot change on an existing relationship definition",
                 ));
             }
-            tx.execute("UPDATE relationship_definition SET name=?1,forward_label=?2,inverse_label=?3,expected_targets_per_source=?4,expected_sources_per_target=?5,updated_at=?6,revision=revision+1 WHERE id=?7",params![d.name,d.forward_label,d.inverse_label,d.expected_targets_per_source,d.expected_sources_per_target,now,definition_id.to_string()])?;
+            conn.execute("UPDATE relationship_definition SET name=?1,forward_label=?2,inverse_label=?3,expected_targets_per_source=?4,expected_sources_per_target=?5,updated_at=?6,revision=revision+1 WHERE id=?7",params![d.name,d.forward_label,d.inverse_label,d.expected_targets_per_source,d.expected_sources_per_target,now,definition_id.to_string()])?;
         }
         RelationshipCommand::RetireDefinition {
             definition_id,
             retired,
         } => {
             definition(&snapshot, definition_id)?;
-            tx.execute("UPDATE relationship_definition SET retired_at=?1,updated_at=?2,revision=revision+1 WHERE id=?3",params![retired.then_some(&now),now,definition_id.to_string()])?;
+            conn.execute("UPDATE relationship_definition SET retired_at=?1,updated_at=?2,revision=revision+1 WHERE id=?3",params![retired.then_some(now),now,definition_id.to_string()])?;
         }
         RelationshipCommand::Connect {
             definition_id,
@@ -321,28 +336,8 @@ pub(super) fn apply(
                     "Restore this definition before creating relationships",
                 ));
             }
-            active_entry(&tx, entry)?;
-            let other = match other {
-                OtherEntry::Existing { id } => {
-                    active_entry(&tx, id)?;
-                    id
-                }
-                OtherEntry::Create { name, category_id } => {
-                    let category = match category_id {
-                        Some(id) => id.to_string(),
-                        None => tx.query_row(
-                            "SELECT id FROM category WHERE is_uncategorized=1",
-                            [],
-                            |r| r.get(0),
-                        )?,
-                    };
-                    let name = authored_name(name);
-                    let id = EntryId::new();
-                    tx.execute("INSERT INTO record_identity(record_id,kind,workspace_state,lifecycle_changed_at,created_at) VALUES(?1,'entry','active',?2,?2)",params![id.to_string(),now])?;
-                    tx.execute("INSERT INTO entry(id,category_id,authored_name,created_at,updated_at,revision) VALUES(?1,?2,?3,?4,?4,1)",params![id.to_string(),category,name,now])?;
-                    id
-                }
-            };
+            active_entry(conn, entry)?;
+            let other = resolve_other(conn, other, now)?;
             let mut seen = HashSet::new();
             for id in replace {
                 let r = relationship(&snapshot, id)?;
@@ -359,7 +354,7 @@ pub(super) fn apply(
                         "Choose current relationships on this side to replace",
                     ));
                 }
-                set_ended(&tx, id, true, &now)?;
+                set_ended(conn, id, true, now)?;
             }
             let (mut source, mut target) = match perspective {
                 Perspective::Source => (entry, other),
@@ -368,17 +363,17 @@ pub(super) fn apply(
             if !d.draft.directed && source.to_string() > target.to_string() {
                 std::mem::swap(&mut source, &mut target);
             }
-            ensure_unique(&tx, d, source, target, None)?;
+            ensure_unique(conn, d, source, target, None)?;
             let id = RelationshipId::new().to_string();
-            tx.execute("INSERT INTO record_identity(record_id,kind,workspace_state,lifecycle_changed_at,created_at) VALUES(?1,'relationship_instance','active',?2,?2)",params![id,now])?;
-            tx.execute("INSERT INTO relationship_instance(id,definition_id,semantic_state,note,created_at,updated_at,revision) VALUES(?1,?2,'active',?3,?4,?4,1)",params![id,d.id.to_string(),note,now])?;
+            conn.execute("INSERT INTO record_identity(record_id,kind,workspace_state,lifecycle_changed_at,created_at) VALUES(?1,'relationship_instance','active',?2,?2)",params![id,now])?;
+            conn.execute("INSERT INTO relationship_instance(id,definition_id,semantic_state,note,created_at,updated_at,revision) VALUES(?1,?2,'active',?3,?4,?4,1)",params![id,d.id.to_string(),note,now])?;
             for (slot, record) in [("source", source), ("target", target)] {
-                tx.execute("INSERT INTO relationship_participant(instance_id,slot,record_id,record_kind) VALUES(?1,?2,?3,'entry')",params![id,slot,record.to_string()])?;
+                conn.execute("INSERT INTO relationship_participant(instance_id,slot,record_id,record_kind) VALUES(?1,?2,?3,'entry')",params![id,slot,record.to_string()])?;
             }
         }
         RelationshipCommand::SetNote { id, note } => {
             relationship(&snapshot, id)?;
-            tx.execute("UPDATE relationship_instance SET note=?1,updated_at=?2,revision=revision+1 WHERE id=?3",params![note,now,id.to_string()])?;
+            conn.execute("UPDATE relationship_instance SET note=?1,updated_at=?2,revision=revision+1 WHERE id=?3",params![note,now,id.to_string()])?;
         }
         RelationshipCommand::SetEnded { id, ended } => {
             let r = relationship(&snapshot, id)?;
@@ -395,15 +390,99 @@ pub(super) fn apply(
                     .target
                     .id
                     .ok_or_else(|| invalid("The target Entry is missing"))?;
-                active_entry(&tx, source)?;
-                active_entry(&tx, target)?;
-                ensure_unique(&tx, d, source, target, Some(id))?;
+                active_entry(conn, source)?;
+                active_entry(conn, target)?;
+                ensure_unique(conn, d, source, target, Some(id))?;
             }
-            set_ended(&tx, id, ended, &now)?;
+            set_ended(conn, id, ended, now)?;
         }
     }
-    tx.execute("UPDATE project_meta SET last_committed_revision=last_committed_revision+1,updated_at=?1 WHERE id=1",[now])?;
-    let updated = read(&tx, entry)?;
-    tx.commit()?;
-    Ok(updated)
+    Ok(())
+}
+
+pub(super) fn retarget(
+    conn: &Connection,
+    entry: EntryId,
+    projection: &crate::domain::fields::FieldProjection,
+    id: RelationshipId,
+    other: OtherEntry,
+    now: &str,
+) -> Result<(), PersistenceError> {
+    let snapshot = read(conn, entry)?;
+    let d = definition(&snapshot, projection.relationship_definition_id)?;
+    if d.retired {
+        return Err(invalid(
+            "Restore this relationship definition before changing targets",
+        ));
+    }
+    let r = relationship(&snapshot, id)?;
+    if !r.is_current() || !matches_projection(r, d, entry, projection.perspective) {
+        return Err(invalid(
+            "Choose a current relationship belonging to this Field",
+        ));
+    }
+    active_entry(conn, entry)?;
+    let other = resolve_other(conn, other, now)?;
+    let (mut source, mut target) = match projection.perspective {
+        Perspective::Source => (entry, other),
+        Perspective::Target => (other, entry),
+    };
+    if !d.draft.directed && source.to_string() > target.to_string() {
+        std::mem::swap(&mut source, &mut target);
+    }
+    ensure_unique(conn, d, source, target, Some(id))?;
+    for (slot, record) in [("source", source), ("target", target)] {
+        conn.execute("UPDATE relationship_participant SET record_id=?1,record_kind='entry',unresolved_snapshot=NULL WHERE instance_id=?2 AND slot=?3", params![record.to_string(),id.to_string(),slot])?;
+    }
+    conn.execute(
+        "UPDATE relationship_instance SET updated_at=?1,revision=revision+1 WHERE id=?2",
+        params![now, id.to_string()],
+    )?;
+    Ok(())
+}
+
+pub(super) fn matches_projection(
+    r: &Relationship,
+    d: &RelationshipDefinition,
+    entry: EntryId,
+    perspective: Perspective,
+) -> bool {
+    r.definition_id == d.id
+        && if !d.draft.directed {
+            r.involves(entry)
+        } else {
+            match perspective {
+                Perspective::Source => r.source.id == Some(entry),
+                Perspective::Target => r.target.id == Some(entry),
+            }
+        }
+}
+
+fn resolve_other(
+    conn: &Connection,
+    other: OtherEntry,
+    now: &str,
+) -> Result<EntryId, PersistenceError> {
+    let id = match other {
+        OtherEntry::Existing { id } => {
+            active_entry(conn, id)?;
+            id
+        }
+        OtherEntry::Create { name, category_id } => {
+            let category = match category_id {
+                Some(id) => id.to_string(),
+                None => conn.query_row(
+                    "SELECT id FROM category WHERE is_uncategorized=1",
+                    [],
+                    |r| r.get(0),
+                )?,
+            };
+            let name = authored_name(name);
+            let id = EntryId::new();
+            conn.execute("INSERT INTO record_identity(record_id,kind,workspace_state,lifecycle_changed_at,created_at) VALUES(?1,'entry','active',?2,?2)",params![id.to_string(),now])?;
+            conn.execute("INSERT INTO entry(id,category_id,authored_name,created_at,updated_at,revision) VALUES(?1,?2,?3,?4,?4,1)",params![id.to_string(),category,name,now])?;
+            id
+        }
+    };
+    Ok(id)
 }
