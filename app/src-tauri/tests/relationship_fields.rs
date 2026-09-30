@@ -810,7 +810,7 @@ fn schema_six_upgrade_preserves_populated_children_and_recovers_from_interruptio
         Manifest::read(&paths.manifest_path())
             .unwrap()
             .schema_version,
-        7
+        worldcrafter_lib::persistence::migrations::CURRENT_SCHEMA_VERSION
     );
 }
 

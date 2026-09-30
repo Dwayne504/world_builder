@@ -5,6 +5,8 @@ import { fieldLabel } from "./fieldLabels";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyTemplateFields,
+  applySpatial,
+  readSpatial,
   createCategory,
   createType,
   listCategories,
@@ -49,6 +51,7 @@ export function CategoryManager({
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [types, setTypes] = useState<TypeDef[]>([]);
+  const [spatial, setSpatial] = useState<import("./types").SpatialSnapshot | null>(null);
   const [catalog, setCatalog] = useState<FieldCatalog | null>(null);
   const [categoryId, setCategoryId] = useState("");
   const [typeId, setTypeId] = useState("");
@@ -91,9 +94,10 @@ export function CategoryManager({
     const request = ++generation.current;
     setLoading(true);
     try {
-      const [nextCategories, nextCatalog] = await Promise.all([
+      const [nextCategories, nextCatalog, nextSpatial] = await Promise.all([
         listCategories(projectId),
         readFieldCatalog(projectId),
+        readSpatial(projectId),
       ]);
       const nextTypes = (
         await Promise.all(nextCategories.map((c) => listTypes(projectId, c.id)))
@@ -102,6 +106,7 @@ export function CategoryManager({
       setCategories(nextCategories);
       setTypes(nextTypes);
       setCatalog(nextCatalog);
+      setSpatial(nextSpatial);
       setCategoryId((id) =>
         nextCategories.some((c) => c.id === id) ? id : (nextCategories[0]?.id ?? ""),
       );
@@ -351,6 +356,40 @@ export function CategoryManager({
                     this Type's own defaults.
                   </p>
                 )}
+                <fieldset
+                  className="feature-defaults"
+                  disabled={busy || dirty || loading || !spatial}
+                >
+                  <legend>Features for new {targetLabel} Entries</legend>
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={
+                        spatial?.defaults.some(
+                          (d) => d.kind === provider.kind && d.id === provider.id,
+                        ) ?? false
+                      }
+                      onChange={(e) => {
+                        if (spatial)
+                          perform(() =>
+                            applySpatial(projectId, spatial.globalRevision, {
+                              kind: "set_default",
+                              provider: {
+                                kind: typeId ? "type" : "category",
+                                id: typeId || categoryId,
+                              },
+                              enabled: e.target.checked,
+                            }),
+                          );
+                      }}
+                    />
+                    Spatial — can contain other places
+                  </label>
+                  <p className="muted">
+                    Applies when creating Entries. Existing Entries keep their features. Category
+                    and parent-Type features are inherited at creation.
+                  </p>
+                </fieldset>
                 <ul className="template-fields">
                   {supplied.map((d) => (
                     <li key={d.id}>

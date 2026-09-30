@@ -384,10 +384,19 @@ connections. Scalar Field deletion and duplicate merging do not apply to these
 Fields. See the [Relationship Fields note](docs/milestones/MILESTONE_01_RELATIONSHIP_FIELDS.md)
 for the exact scope, verification status, and disposable-Project checklist.
 
+Spatial structure adds schema 8 and optional Entry-owned features. Open an Entry's
+**Spatial feature** to enable containment without changing its Category or Type.
+**Arrange places** sets its parent, adds an existing Spatial child, or creates a
+child. Breadcrumbs and direct/all-descendant views follow the current hierarchy;
+moving a place preserves its children and direct Relationships. **Related places**
+shows derived paths around directly connected Spatial Entries. Category/Type
+Spatial defaults apply only when creating Entries; changing defaults never rewrites
+existing features. See the [Spatial foundation note](docs/milestones/MILESTONE_01_SPATIAL_FOUNDATION.md).
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 plain navigational Entry Reference Fields, semantic field-kind conversion,
-advanced field metadata, Capabilities and advanced relationship constraints,
-Spatial, Chapters/Story Units, TipTap prose
+advanced field metadata, additional Capabilities and advanced relationship constraints,
+maps, location-specific Explore filters, Chapters/Story Units, TipTap prose
 editing and rich descriptions, search/FTS, Tags/Roles/Statuses, aliases,
 Archive/Trash, shared-definition permanent deletion, final Recent/Pinned navigation, and any
 final visual design system.

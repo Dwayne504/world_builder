@@ -282,3 +282,13 @@ export function openRecentProject(
 ): Promise<ProjectSummary> {
   return call("open_recent_project", { projectId, relocatedPath, forceStaleLockRecovery });
 }
+export function readSpatial(projectId: string): Promise<import("./types").SpatialSnapshot> {
+  return call("read_spatial", { projectId });
+}
+export function applySpatial(
+  projectId: string,
+  expectedRevision: number,
+  command: import("./types").SpatialCommand,
+): Promise<import("./types").SpatialSnapshot> {
+  return call("apply_spatial", { projectId, expectedRevision, command });
+}

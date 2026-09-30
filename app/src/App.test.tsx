@@ -64,6 +64,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  readSpatial: vi.fn().mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] }),
+  applySpatial: vi.fn(),
   listOpenProjects: vi.fn().mockResolvedValue([]),
   getProjectSummary: vi.fn(),
   listRecentProjects: vi.fn().mockResolvedValue([]),
@@ -116,6 +118,8 @@ vi.mock("./api", () => ({
 
 import App from "./App";
 import {
+  readSpatial,
+  applySpatial,
   AppCommandError,
   listOpenProjects,
   getProjectSummary,
@@ -265,6 +269,10 @@ describe("Project screen Saved contract", () => {
   });
 
   beforeEach(() => {
+    vi.mocked(readSpatial)
+      .mockReset()
+      .mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] });
+    vi.mocked(applySpatial).mockReset();
     vi.mocked(readFields)
       .mockReset()
       .mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] });
@@ -966,6 +974,42 @@ describe("Project screen Saved contract", () => {
     await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
     expect(closeProjectMock).not.toHaveBeenCalled();
     await act(async () => pending.resolve({ globalRevision: 2, definitions: [] }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    expect(nativeWindowCloseMock).toHaveBeenCalled();
+  });
+
+  it("native close protects Spatial child drafts and waits for their acknowledged creation", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    closeProjectMock.mockResolvedValue(undefined);
+    const spatial = {
+      globalRevision: 1,
+      defaults: [],
+      entries: [
+        { id: "entry", label: "Thron", workspaceState: "active", spatial: true, parentId: null },
+      ],
+    };
+    vi.mocked(readSpatial).mockResolvedValue(spatial);
+    const pending = deferred<typeof spatial>();
+    vi.mocked(applySpatial).mockReturnValueOnce(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Arrange places" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create child" }));
+    fireEvent.change(screen.getByLabelText("Child name (optional)"), {
+      target: { value: "Chamber" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close Arrange places" }));
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Save and close" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Before you leave" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue Spatial draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create place inside Thron" }));
+    await waitFor(() => expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Saving"));
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ ...spatial, globalRevision: 2 }));
     await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
     expect(nativeWindowCloseMock).toHaveBeenCalled();
   });

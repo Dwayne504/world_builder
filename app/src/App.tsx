@@ -48,6 +48,7 @@ import { useEntryName } from "./useEntryName";
 import { useMutationCoordinator } from "./useMutationCoordinator";
 import { decideClose, type CloseIntent } from "./closeDecision";
 import { EntryFieldsPanel, type FieldsController } from "./EntryFieldsPanel";
+import { SpatialPanel } from "./SpatialPanel";
 import { EntryRelationshipsPanel } from "./EntryRelationshipsPanel";
 import { Dialog } from "./Dialog";
 import { CategoryManager } from "./CategoryManager";
@@ -798,8 +799,30 @@ function EntryEditor({
   }, []);
   // Only acknowledged local mutations trigger the companion read. Read
   // acknowledgements themselves must never create a refresh loop.
-  const fieldCommitted = useCallback(() => setRelationshipsRefreshKey((key) => key + 1), []);
-  const relationshipCommitted = useCallback(() => setFieldsRefreshKey((key) => key + 1), []);
+  const fieldCommitted = useCallback(() => {
+    setRelationshipsRefreshKey((key) => key + 1);
+    setSpatialRefreshKey((key) => key + 1);
+  }, []);
+  const relationshipCommitted = useCallback(() => {
+    setFieldsRefreshKey((key) => key + 1);
+    setSpatialRefreshKey((key) => key + 1);
+  }, []);
+  const [spatialRefreshKey, setSpatialRefreshKey] = useState(0);
+  const [spatialRelations, setSpatialRelations] = useState<
+    import("./types").RelationshipSnapshot | null
+  >(null);
+  const spatialController = useRef<FieldsController | null>(null);
+  const [spatialState, setSpatialState] = useState<SaveState>("saved");
+  const [spatialCanSubmit, setSpatialCanSubmit] = useState(true);
+  const receiveSpatial = useCallback((controller: FieldsController) => {
+    spatialController.current = controller;
+    setSpatialState(controller.state);
+    setSpatialCanSubmit(controller.canSubmit);
+  }, []);
+  const spatialCommitted = useCallback(() => {
+    setFieldsRefreshKey((key) => key + 1);
+    setRelationshipsRefreshKey((key) => key + 1);
+  }, []);
   const relationshipsController = useRef<FieldsController | null>(null);
   const [relationshipsState, setRelationshipsState] = useState<SaveState>("saved");
   const [relationshipsCanSubmit, setRelationshipsCanSubmit] = useState(true);
@@ -821,6 +844,10 @@ function EntryEditor({
     async (applyingStructure = false): Promise<SubmitOutcome> => {
       // Capture pending writes before awaiting another editor. A failure must
       // remain a failure rather than turn into an accidental automatic retry.
+      const spatialOutcome = await (spatialController.current?.submit() ??
+        Promise.resolve({ kind: "no-op" } as SubmitOutcome));
+      if (spatialOutcome.kind === "failed" || spatialOutcome.kind === "committed-stale")
+        return spatialOutcome;
       const pendingName = waitForName();
       const pendingFields = fieldsController.current?.waitForPending?.();
       const relationshipOutcome = await (relationshipsController.current?.submit() ??
@@ -884,17 +911,20 @@ function EntryEditor({
     editor.saveState === "saving" ||
     mutations.state === "saving" ||
     fieldsState === "saving" ||
-    relationshipsState === "saving"
+    relationshipsState === "saving" ||
+    spatialState === "saving"
       ? "saving"
       : editor.saveState === "failed" ||
           mutations.state === "failed" ||
           fieldsState === "failed" ||
-          relationshipsState === "failed"
+          relationshipsState === "failed" ||
+          spatialState === "failed"
         ? "failed"
         : editor.saveState === "dirty" ||
             structureDirty ||
             fieldsState === "dirty" ||
-            relationshipsState === "dirty"
+            relationshipsState === "dirty" ||
+            spatialState === "dirty"
           ? "dirty"
           : "saved";
 
@@ -902,7 +932,7 @@ function EntryEditor({
     onController({
       state: combinedEntryState,
       submit,
-      canSubmit: !structureDirty && fieldsCanSubmit && relationshipsCanSubmit,
+      canSubmit: !structureDirty && fieldsCanSubmit && relationshipsCanSubmit && spatialCanSubmit,
     });
   }, [
     combinedEntryState,
@@ -910,6 +940,7 @@ function EntryEditor({
     structureDirty,
     fieldsCanSubmit,
     relationshipsCanSubmit,
+    spatialCanSubmit,
     submit,
   ]);
 
@@ -982,7 +1013,11 @@ function EntryEditor({
               aria-label="entry-name"
               title="Edit Entry title"
               placeholder="[Unnamed Entry]"
-              disabled={mutations.state === "saving" || relationshipsState === "saving"}
+              disabled={
+                mutations.state === "saving" ||
+                relationshipsState === "saving" ||
+                spatialState !== "saved"
+              }
               value={editor.draftName}
               onChange={(event) => editor.onChangeDraft(event.currentTarget.value)}
               onKeyDown={(event) => {
@@ -1036,7 +1071,11 @@ function EntryEditor({
           Category
           <select
             aria-label="entry-category"
-            disabled={mutations.state === "saving" || relationshipsState === "saving"}
+            disabled={
+              mutations.state === "saving" ||
+              relationshipsState === "saving" ||
+              spatialState !== "saved"
+            }
             value={categoryId}
             onChange={(event) => {
               setTypes([]);
@@ -1057,7 +1096,11 @@ function EntryEditor({
           Type (optional)
           <select
             aria-label="entry-type"
-            disabled={mutations.state === "saving" || relationshipsState === "saving"}
+            disabled={
+              mutations.state === "saving" ||
+              relationshipsState === "saving" ||
+              spatialState !== "saved"
+            }
             value={typeId}
             onChange={(event) => {
               setTypeId(event.currentTarget.value);
@@ -1090,7 +1133,11 @@ function EntryEditor({
         {showTypeCreator && (
           <fieldset
             className="inline-creator"
-            disabled={mutations.state === "saving" || relationshipsState === "saving"}
+            disabled={
+              mutations.state === "saving" ||
+              relationshipsState === "saving" ||
+              spatialState !== "saved"
+            }
           >
             <legend>New Type</legend>
             <label>
@@ -1140,6 +1187,7 @@ function EntryEditor({
             disabled={
               mutations.state === "saving" ||
               relationshipsState === "saving" ||
+              spatialState !== "saved" ||
               !structureDirty ||
               !!newTypeName ||
               (categoryId !== editor.entry.categoryId && !structureTypeChosen)
@@ -1155,6 +1203,26 @@ function EntryEditor({
           <p className="package-preview">Entry ID: {editor.entry.id}</p>
         </details>
       </Dialog>
+      <SpatialPanel
+        projectId={projectId}
+        entryId={editor.entry.id}
+        categories={categories}
+        disabled={
+          mutations.state === "saving" ||
+          editor.saveState !== "saved" ||
+          fieldsState !== "saved" ||
+          relationshipsState !== "saved" ||
+          structureDirty
+        }
+        onController={receiveSpatial}
+        onRevision={receiveRevision}
+        getRevision={getRevision}
+        onNavigate={onNavigate}
+        onEntriesChanged={onEntriesChanged}
+        onCommitted={spatialCommitted}
+        relations={spatialRelations}
+        refreshKey={spatialRefreshKey + templateEpoch + editor.entry.revision}
+      />
       <div className="entry-content">
         <EntryFieldsPanel
           projectId={projectId}
@@ -1162,7 +1230,8 @@ function EntryEditor({
           disabled={
             mutations.state === "saving" ||
             editor.saveState === "saving" ||
-            relationshipsState !== "saved"
+            relationshipsState !== "saved" ||
+            spatialState !== "saved"
           }
           onController={receiveFields}
           onRevision={receiveRevision}
@@ -1184,8 +1253,10 @@ function EntryEditor({
             mutations.state === "saving" ||
             editor.saveState !== "saved" ||
             fieldsState !== "saved" ||
+            spatialState !== "saved" ||
             structureDirty
           }
+          onSnapshot={setSpatialRelations}
           onController={receiveRelationships}
           onRevision={receiveRevision}
           getRevision={getRevision}

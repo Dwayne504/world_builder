@@ -36,6 +36,7 @@ export function EntryRelationshipsPanel({
   onCommitted,
   presentedRelationships = [],
   onEntriesChanged,
+  onSnapshot,
 }: {
   projectId: string;
   restoreFocusKey?: string | null;
@@ -50,8 +51,10 @@ export function EntryRelationshipsPanel({
   onCommitted?: (revision: number) => void;
   presentedRelationships?: string[];
   onEntriesChanged?: () => void;
+  onSnapshot?: (snapshot: import("./types").RelationshipSnapshot | null) => void;
 }) {
   const data = useEntryRelationships(projectId, entryId, onRevision, getRevision, onCommitted);
+  useEffect(() => onSnapshot?.(data.snapshot), [data.snapshot, onSnapshot]);
   const [showAll, setShowAll] = useState(false);
   const { command, wait } = data;
   const [linkOpen, setLinkOpen] = useState(false);

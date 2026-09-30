@@ -21,6 +21,23 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn read_spatial(
+        state: &AppState,
+        project_id: ProjectId,
+    ) -> Result<crate::domain::spatial::SpatialSnapshot, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.read_spatial())
+    }
+    pub fn apply_spatial(
+        state: &AppState,
+        project_id: ProjectId,
+        expected: i64,
+        command: crate::domain::spatial::SpatialCommand,
+    ) -> Result<crate::domain::spatial::SpatialSnapshot, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.apply_spatial(expected, command)
+        })
+    }
+
     pub fn delete_entry_field(
         state: &AppState,
         project: ProjectId,
@@ -866,7 +883,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
+             DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
              DROP TABLE relationship_definition;
@@ -969,7 +986,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
+             DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
              DROP TABLE relationship_definition;
