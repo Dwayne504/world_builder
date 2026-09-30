@@ -15,7 +15,11 @@ import type {
   RecentProject,
 } from "./types";
 import type { EntryFields, FieldCommand, FieldCatalog } from "./types";
-import type { EntryRelationships, RelationshipCommand } from "./types";
+import type { EntryRelationships, RelationshipCommand, RelationshipSnapshot } from "./types";
+
+export function readProjectRelationships(projectId: string): Promise<RelationshipSnapshot> {
+  return call("read_project_relationships", { projectId });
+}
 
 export function readRelationships(projectId: string, entryId: string): Promise<EntryRelationships> {
   return call("read_relationships", { projectId, entryId });

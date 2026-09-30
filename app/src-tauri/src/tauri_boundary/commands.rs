@@ -127,6 +127,15 @@ pub fn apply_template_fields(
 }
 
 #[tauri::command]
+pub fn read_project_relationships(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<crate::domain::relationships::RelationshipSnapshot, AppErrorDto> {
+    ProjectService::read_project_relationships(&state, parse_project_id(&project_id)?)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn read_relationships(
     state: State<'_, AppState>,
     project_id: String,

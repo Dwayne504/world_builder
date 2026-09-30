@@ -122,6 +122,15 @@ impl ProjectService {
         })
     }
 
+    pub fn read_project_relationships(
+        state: &AppState,
+        project_id: ProjectId,
+    ) -> Result<crate::domain::relationships::RelationshipSnapshot, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.read_project_relationships()
+        })
+    }
+
     pub fn read_relationships(
         state: &AppState,
         project_id: ProjectId,

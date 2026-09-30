@@ -150,12 +150,13 @@ export interface Relationship {
   revision: number;
   warnings: string[];
 }
-export interface EntryRelationships {
+export interface RelationshipSnapshot {
   globalRevision: number;
   definitions: RelationshipDefinition[];
   relationships: Relationship[];
   entries: { id: string; label: string; categoryName: string }[];
 }
+export type EntryRelationships = RelationshipSnapshot;
 export type RelationshipCommand =
   | { kind: "create_definition"; draft: RelationshipDraft }
   | { kind: "update_definition"; definitionId: string; draft: RelationshipDraft }

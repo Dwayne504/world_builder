@@ -74,6 +74,9 @@ vi.mock("./api", () => ({
   readRelationships: vi
     .fn()
     .mockResolvedValue({ globalRevision: 1, relationships: [], definitions: [], entries: [] }),
+  readProjectRelationships: vi
+    .fn()
+    .mockResolvedValue({ globalRevision: 1, definitions: [], relationships: [], entries: [] }),
   applyRelationships: vi.fn(),
   readFields: vi.fn().mockResolvedValue({ globalRevision: 1, fields: [], definitions: [] }),
   applyFields: vi.fn(),
@@ -121,6 +124,7 @@ import {
   createBackup,
   readRelationships,
   applyRelationships,
+  readProjectRelationships,
 } from "./api";
 
 function backendError(kind: string, message: string): AppCommandError {
@@ -152,13 +156,13 @@ async function openTheProjectScreen() {
 function projectAction(name: string) {
   const menu = screen.getByText("Project menu").closest("details")!;
   if (!menu.open) fireEvent.click(menu.querySelector("summary")!);
-  fireEvent.click(screen.getByRole("button", { name }));
+  fireEvent.click(within(menu).getByRole("button", { name }));
 }
 
 function closeFromSettings() {
-  if (!screen.queryByRole("dialog", { name: "Project settings" }))
-    projectAction("Project settings");
-  fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+  if (screen.queryByRole("dialog", { name: "Project settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close Project settings" }));
+  projectAction("Close Project");
 }
 
 function visibleInput(label: string) {
@@ -238,11 +242,13 @@ function mockEditableEntry() {
 }
 
 describe("Project screen Saved contract", () => {
-  it("keeps Close Project out of the main toolbar and reachable in settings", async () => {
+  it("keeps Close Project at the bottom of the menu, hidden until opened", async () => {
     await openTheProjectScreen();
-    expect(screen.queryByRole("button", { name: "Close Project" })).not.toBeInTheDocument();
-    projectAction("Project settings");
-    expect(screen.getByRole("button", { name: "Close Project" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Close Project" })).not.toBeVisible();
+    fireEvent.click(screen.getByText("Project menu"));
+    const close = screen.getByRole("button", { name: "Close Project" });
+    expect(close).toBeVisible();
+    expect(close.parentElement?.lastElementChild).toBe(close);
     expect(closeProjectMock).not.toHaveBeenCalled();
   });
 
@@ -304,7 +310,7 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     await act(async () =>
       fireEvent.click(
-        within(screen.getByRole("navigation", { name: "Browse Categories" })).getByRole("button", {
+        within(screen.getByRole("navigation", { name: "Project navigation" })).getByRole("button", {
           name: "Characters",
         }),
       ),
@@ -323,6 +329,116 @@ describe("Project screen Saved contract", () => {
     expect(changeEntryStructureMock).not.toHaveBeenCalled();
   });
 
+  it("counts Entries across filters, collapses Categories, and creates in the chosen Category", async () => {
+    const entry = mockEditableEntry();
+    listEntriesMock.mockResolvedValue([
+      entry,
+      { ...entry, id: "person2" },
+      { ...entry, id: "place", categoryId: "places" },
+    ]);
+    await openTheProjectScreen();
+    const nav = within(screen.getByRole("navigation", { name: "Project navigation" }));
+    expect(nav.getByRole("button", { name: "All Entries" })).toHaveAccessibleDescription(
+      "3 Entries",
+    );
+    expect(nav.getByRole("button", { name: "Characters" })).toHaveAccessibleDescription(
+      "2 Entries",
+    );
+    expect(nav.getByRole("button", { name: "Places" })).toHaveAccessibleDescription("1 Entries");
+    fireEvent.click(nav.getByRole("button", { name: "Categories" }));
+    expect(nav.queryByRole("button", { name: "Characters" })).not.toBeInTheDocument();
+    expect(nav.getByRole("button", { name: "Relationships" })).toBeVisible();
+    fireEvent.click(nav.getByRole("button", { name: "Categories" }));
+    await act(async () =>
+      fireEvent.click(nav.getByRole("button", { name: "Add Entry to Places" })),
+    );
+    expect(screen.getByRole("dialog", { name: "Add Entry" })).toBeVisible();
+    expect(screen.getByLabelText("new-entry-category")).toHaveValue("places");
+    fireEvent.change(screen.getByLabelText("new-entry-name"), { target: { value: "Harbor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Add Entry" }));
+    expect(nav.getByRole("button", { name: "Relationships" })).toBeDisabled();
+    expect(nav.getByRole("button", { name: "Add Entry to Characters" })).toBeDisabled();
+    expect(nav.getByRole("button", { name: "All Entries" })).toHaveAccessibleDescription(
+      "3 Entries",
+    );
+  });
+
+  it("protects Entry drafts on category plus and Relationships navigation", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Thron" })));
+    await act(async () =>
+      fireEvent.change(visibleInput("entry-category"), { target: { value: "places" } }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
+    const nav = within(screen.getByRole("navigation", { name: "Project navigation" }));
+    await act(async () => fireEvent.click(nav.getByRole("button", { name: "Relationships" })));
+    expect(screen.getByRole("button", { name: "Discard and continue" })).toBeVisible();
+    expect(screen.getByLabelText("entry-name")).toHaveValue("Thron");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () =>
+      fireEvent.click(nav.getByRole("button", { name: "Add Entry to Places" })),
+    );
+    expect(screen.queryByRole("dialog", { name: "Add Entry" })).not.toBeInTheDocument();
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Discard and continue" })),
+    );
+    expect(screen.getByLabelText("new-entry-category")).toHaveValue("places");
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+  });
+
+  it("restores Relationships filters after visiting an Entry and reloads committed connections", async () => {
+    const entry = mockEditableEntry();
+    getEntryMock.mockResolvedValue(entry);
+    vi.mocked(readProjectRelationships).mockResolvedValue({
+      globalRevision: 1,
+      definitions: [
+        {
+          id: "allies",
+          name: "Alliance",
+          forwardLabel: "allied with",
+          inverseLabel: "allied with",
+          directed: false,
+          expectedTargetsPerSource: null,
+          expectedSourcesPerTarget: null,
+          retired: false,
+          revision: 1,
+        },
+      ],
+      relationships: [
+        {
+          id: "link",
+          definitionId: "allies",
+          source: { id: "entry", label: "Navigator", workspaceState: "active" },
+          target: { id: "friend", label: "Captain", workspaceState: "active" },
+          note: "",
+          ended: false,
+          workspaceState: "active",
+          revision: 1,
+          warnings: [],
+        },
+      ],
+      entries: [],
+    });
+    await openTheProjectScreen();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Relationships" })));
+    fireEvent.change(screen.getByLabelText("Relationship", { selector: "select" }), {
+      target: { value: "allies" },
+    });
+    fireEvent.change(screen.getByLabelText("State"), { target: { value: "current" } });
+    const participant = screen.getByRole("button", { name: "Navigator" });
+    participant.focus();
+    await act(async () => fireEvent.click(participant));
+    expect(getEntryMock).toHaveBeenCalledWith(project.projectId, "entry");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "← Back" })));
+    expect(screen.getByLabelText("Relationship", { selector: "select" })).toHaveValue("allies");
+    expect(screen.getByLabelText("State")).toHaveValue("current");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Navigator" })).toHaveFocus());
+    expect(vi.mocked(readProjectRelationships)).toHaveBeenCalledTimes(2);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "All Entries" })));
+    expect(screen.getByRole("heading", { name: "Entries" })).toBeVisible();
+  });
+
   it("returns through Back and Forward with the Type filter, scroll and fresh Entry content", async () => {
     const entry = mockEditableEntry();
     getEntryMock.mockResolvedValue({
@@ -334,7 +450,7 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     await act(async () =>
       fireEvent.click(
-        within(screen.getByRole("navigation", { name: "Browse Categories" })).getByRole("button", {
+        within(screen.getByRole("navigation", { name: "Project navigation" })).getByRole("button", {
           name: "Characters",
         }),
       ),
@@ -365,7 +481,7 @@ describe("Project screen Saved contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
     await act(async () =>
       fireEvent.click(
-        within(screen.getByRole("navigation", { name: "Browse Categories" })).getByRole("button", {
+        within(screen.getByRole("navigation", { name: "Project navigation" })).getByRole("button", {
           name: "Places",
         }),
       ),
@@ -432,7 +548,7 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     await act(async () =>
       fireEvent.click(
-        within(screen.getByRole("navigation", { name: "Browse Categories" })).getByRole("button", {
+        within(screen.getByRole("navigation", { name: "Project navigation" })).getByRole("button", {
           name: "Characters",
         }),
       ),
@@ -659,7 +775,12 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Categories", hidden: true })).toBeEnabled(),
+      expect(
+        within(screen.getByText("Project menu").closest("details")!).getByRole("button", {
+          name: "Categories",
+          hidden: true,
+        }),
+      ).toBeEnabled(),
     );
     projectAction("Categories");
     fireEvent.click(await screen.findByRole("button", { name: "Add default field" }));
@@ -2159,7 +2280,7 @@ describe("Inline Category/Type creation forms", () => {
   it("shows a labelled container and lets Cancel discard the draft without submitting", async () => {
     await openTheProjectScreen();
     fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
-    await waitFor(() => screen.getByText("Entries"));
+    await waitFor(() => screen.getByRole("heading", { name: "Entries" }));
     await act(async () => {});
 
     fireEvent.click(screen.getByRole("button", { name: "Create Category inline" }));
@@ -2176,7 +2297,7 @@ describe("Inline Category/Type creation forms", () => {
   it("never submits an empty Category name", async () => {
     await openTheProjectScreen();
     fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
-    await waitFor(() => screen.getByText("Entries"));
+    await waitFor(() => screen.getByRole("heading", { name: "Entries" }));
     await act(async () => {});
 
     fireEvent.click(screen.getByRole("button", { name: "Create Category inline" }));

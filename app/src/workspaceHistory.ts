@@ -1,5 +1,7 @@
 /** Session navigation stores identity and presentation, never copies of authored data. */
 export interface WorkspaceLocation {
+  page: "entries" | "relationships";
+  relationshipView: RelationshipView;
   entryId: string | null;
   categoryId: string;
   typeId: string;
@@ -7,11 +9,25 @@ export interface WorkspaceLocation {
   collapsedGroups: string[];
   focusKey: string | null;
 }
+export interface RelationshipView {
+  entryIds: string[];
+  definitionId: string;
+  state: "all" | "current" | "ended";
+  visibleCount: number;
+}
+export const initialRelationshipView: RelationshipView = {
+  entryIds: [],
+  definitionId: "",
+  state: "all",
+  visibleCount: 5,
+};
 export interface WorkspaceHistory {
   locations: WorkspaceLocation[];
   index: number;
 }
 export const initialLocation: WorkspaceLocation = {
+  page: "entries",
+  relationshipView: initialRelationshipView,
   entryId: null,
   categoryId: "",
   typeId: "",
@@ -39,4 +55,6 @@ export function capture(
 export interface NavigationIntent {
   location: WorkspaceLocation;
   index?: number;
+  createInCategoryId?: string;
+  fromFocusKey?: string | null;
 }

@@ -14,6 +14,12 @@
   --line: #d9cdb9;
   --accent: #775335;
   --tint: #f4edde;
+  /* Resolve at the root so floating panels do not inherit the cover's ink. */
+  --panel-text: var(--text);
+  --panel-muted: var(--muted);
+  --panel-accent: var(--accent);
+  --panel-line: var(--line);
+  --panel-tint: var(--tint);
   --danger: #9f332c;
   --danger-bg: #fff0ed;
   font-synthesis: none;
@@ -88,8 +94,45 @@ body::before {
   background: var(--tint);
   border-color: var(--line);
 }
-.project-sidebar .eyebrow {
-  margin: 20px 12px 4px;
+.sidebar-destination {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.sidebar-destination > span {
+  flex: 1;
+  min-width: 0;
+}
+.sidebar-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.project-sidebar .sidebar-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sidebar-category {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+.project-sidebar .sidebar-add {
+  padding: 4px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 400;
 }
 .navigation-guard {
   container-type: inline-size;
@@ -133,10 +176,18 @@ body::before {
   margin: 0;
   position: relative;
 }
-.project-menu > summary {
+.project-menu > summary,
+.project-menu[open] > summary {
   padding: 8px 12px;
+  margin: 0;
 }
 .project-menu-panel {
+  --text: var(--panel-text);
+  --muted: var(--panel-muted);
+  --accent: var(--panel-accent);
+  --line: var(--panel-line);
+  --tint: var(--panel-tint);
+  color: var(--text);
   position: absolute;
   right: 0;
   top: 100%;
@@ -152,6 +203,11 @@ body::before {
 .project-menu-panel button {
   text-align: left;
 }
+.project-menu-panel .project-menu-close {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  border-radius: 0;
+}
 @media (max-width: 800px) {
   .workspace-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -163,11 +219,16 @@ body::before {
     padding-bottom: 12px;
   }
   .project-sidebar nav {
-    display: flex;
-    flex-wrap: wrap;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .project-sidebar .eyebrow {
-    display: none;
+  .sidebar-section-toggle,
+  #sidebar-categories {
+    grid-column: 1 / -1;
+  }
+  #sidebar-categories:not([hidden]) {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 4px;
   }
 }
 .app-header,
@@ -948,11 +1009,6 @@ textarea {
 .number-value input:focus-visible {
   outline: none;
 }
-.close-project-section {
-  border-top: 1px solid var(--line);
-  padding-top: 20px;
-  margin-top: 24px;
-}
 .appearance-options {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1439,4 +1495,105 @@ dialog::after {
 .container {
   position: relative;
   z-index: 1;
+}
+
+/* Project-wide connections stay readable as cards in either writing style. */
+.relationship-filters {
+  display: flex;
+  align-items: start;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding-block: 16px;
+  border-block: 1px solid var(--line);
+  margin-block: 24px 14px;
+}
+.relationship-filters > label,
+.relationship-entry-filter {
+  flex: 1 1 190px;
+  margin: 0;
+  min-width: 0;
+}
+.relationship-entry-filter > summary {
+  padding: 7px 0;
+  color: var(--accent);
+}
+.relationship-entry-choices {
+  max-height: 220px;
+  overflow: auto;
+}
+.relationship-entry-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 4px 2px;
+  overflow-wrap: anywhere;
+}
+.relationship-entry-choice input {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+}
+.relationship-result-count {
+  font-size: 12px;
+}
+.relationship-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+  gap: 16px;
+}
+.relationship-card-grid > .relationship-card {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input);
+  min-width: 0;
+}
+.relationship-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+.relationship-card-connection {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 2px;
+}
+.relationship-entry-link {
+  padding: 3px 0;
+  min-height: 30px;
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+  font-size: 17px;
+}
+.relationship-card-verb {
+  color: var(--muted);
+  font-size: 13px;
+}
+.relationship-card-verb > span {
+  color: var(--accent);
+  margin-right: 4px;
+}
+.relationship-unavailable {
+  overflow-wrap: anywhere;
+}
+.relationship-card-note {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.relationship-card-note > p {
+  white-space: pre-wrap;
+}
+.relationships-more {
+  margin-top: 20px;
 }

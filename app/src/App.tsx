@@ -1,5 +1,7 @@
 import { RecentProjects } from "./RecentProjects";
 import { WorkspaceFrame } from "./WorkspaceFrame";
+import { RelationshipsBrowser } from "./RelationshipsBrowser";
+import type { RelationshipView } from "./workspaceHistory";
 import {
   capture,
   initialLocation,
@@ -1226,13 +1228,14 @@ function EntryWorkflow({
     let frame = 0;
     function applyPosition() {
       if (!focused) {
-        Array.from(document.querySelectorAll<HTMLElement>("[data-navigation-focus]"))
-          .find((element) => element.dataset.navigationFocus === restore!.focusKey)
-          ?.focus({ preventScroll: true });
-        focused = true;
+        const element = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-navigation-focus]"),
+        ).find((item) => item.dataset.navigationFocus === restore!.focusKey);
+        element?.focus({ preventScroll: true });
+        focused = !restore!.focusKey || !!element;
       }
       window.scrollTo({ top: restore!.scrollY, behavior: "instant" });
-      if (Math.abs(window.scrollY - restore!.scrollY) < 2) observer?.disconnect();
+      if (focused && Math.abs(window.scrollY - restore!.scrollY) < 2) observer?.disconnect();
     }
     function schedule() {
       cancelAnimationFrame(frame);
@@ -1315,10 +1318,10 @@ function EntryWorkflow({
     ]);
     setCategories(nextCategories);
     setEntries(nextEntries);
-    if (!categoryId) {
-      setCategoryId(nextCategories.find((item) => item.isUncategorized)?.id ?? "");
-    }
-  }, [categoryId, projectId]);
+    setCategoryId(
+      (current) => current || nextCategories.find((item) => item.isUncategorized)?.id || "",
+    );
+  }, [projectId]);
 
   useEffect(() => {
     void refresh().catch((reason) => setError(errorMessage(reason)));
@@ -1364,6 +1367,11 @@ function EntryWorkflow({
 
   async function commitNavigation(intent: NavigationIntent, knownEntry?: Entry) {
     if (navigatingRef.current) return;
+    // Disabling the outgoing content blurs its focused link. Capture before any await.
+    const focusKey =
+      intent.fromFocusKey === undefined
+        ? ((document.activeElement as HTMLElement | null)?.dataset.navigationFocus ?? null)
+        : intent.fromFocusKey;
     navigatingRef.current = true;
     setNavigating(true);
     try {
@@ -1371,12 +1379,7 @@ function EntryWorkflow({
       const entry = intent.location.entryId
         ? (knownEntry ?? (await getEntry(projectId, intent.location.entryId)))
         : null;
-      const current = capture(
-        historyRef.current,
-        window.scrollY,
-        collapsedGroups,
-        (document.activeElement as HTMLElement | null)?.dataset.navigationFocus ?? null,
-      );
+      const current = capture(historyRef.current, window.scrollY, collapsedGroups, focusKey);
       const next =
         intent.index === undefined
           ? visit(current, intent.location)
@@ -1390,6 +1393,11 @@ function EntryWorkflow({
       setSelected(entry);
       setPendingNavigation(null);
       setError(null);
+      if (intent.createInCategoryId) {
+        setCategoryId(intent.createInCategoryId);
+        setTypeId("");
+        setCreateOpen(true);
+      }
       if (!entry) void refresh().catch((reason) => setError(errorMessage(reason)));
     } catch (reason) {
       setError(errorMessage(reason));
@@ -1399,8 +1407,12 @@ function EntryWorkflow({
     }
   }
 
-  async function requestNavigation(intent: NavigationIntent, knownEntry?: Entry) {
+  async function requestNavigation(requested: NavigationIntent, knownEntry?: Entry) {
     if (navigatingRef.current || navigationRequestRef.current || creationDirty) return;
+    const intent: NavigationIntent = {
+      ...requested,
+      fromFocusKey: (document.activeElement as HTMLElement | null)?.dataset.navigationFocus ?? null,
+    };
     if (mutations.isPending() || controllerRef.current?.state === "saving") {
       navigationRequestRef.current = true;
       setNavigating(true);
@@ -1453,12 +1465,27 @@ function EntryWorkflow({
   }
   const navigationProps = {
     categories,
+    entries,
+    page: location.page,
     categoryId: location.categoryId,
     collapsed: sidebarCollapsed,
     onToggle: () => setSidebarCollapsed((value) => !value),
     onBrowse: (id: string) => {
-      if (!selected && location.categoryId === id && !location.typeId) return;
+      if (
+        !selected &&
+        location.page === "entries" &&
+        location.categoryId === id &&
+        !location.typeId
+      )
+        return;
       void requestNavigation({ location: destination(null, id, "") });
+    },
+    onRelationships: () => {
+      if (!selected && location.page === "relationships") return;
+      void requestNavigation({ location: { ...initialLocation, page: "relationships" } });
+    },
+    onAddEntry: (id: string) => {
+      void requestNavigation({ location: destination(null, id, ""), createInCategoryId: id });
     },
     onBack: () => traverse(history.index - 1),
     onForward: () => traverse(history.index + 1),
@@ -1467,6 +1494,18 @@ function EntryWorkflow({
     busy: navigating,
     browsingDisabled: creationDirty,
   };
+
+  function updateRelationshipView(relationshipView: RelationshipView) {
+    const current = historyRef.current;
+    const next = {
+      ...current,
+      locations: current.locations.map((item, index) =>
+        index === current.index ? { ...item, relationshipView } : item,
+      ),
+    };
+    historyRef.current = next;
+    setHistory(next);
+  }
 
   async function addCategory() {
     const outcome = await mutations.run(
@@ -1572,6 +1611,20 @@ function EntryWorkflow({
             setSelected(updated);
             setEntries((items) => items.map((item) => (item.id === updated.id ? updated : item)));
           }}
+        />
+      </WorkspaceFrame>
+    );
+  }
+
+  if (location.page === "relationships") {
+    return (
+      <WorkspaceFrame {...navigationProps}>
+        {error && <p role="alert">{error}</p>}
+        <RelationshipsBrowser
+          projectId={projectId}
+          view={location.relationshipView}
+          onViewChange={updateRelationshipView}
+          onNavigate={(id) => void requestNavigation({ location: destination(id) })}
         />
       </WorkspaceFrame>
     );
@@ -2167,6 +2220,16 @@ function ProjectScreen({
                 Project settings
               </button>
               <AppearanceButton />
+              <button
+                className="quiet-button project-menu-close"
+                disabled={busy}
+                onClick={() => {
+                  if (projectMenuRef.current) projectMenuRef.current.open = false;
+                  handleClose();
+                }}
+              >
+                Close Project
+              </button>
             </div>
           </details>
         </nav>
@@ -2224,15 +2287,6 @@ function ProjectScreen({
           </p>
         )}
 
-        <div className="close-project-section">
-          <h3>Leave this Project</h3>
-          <p className="muted">
-            Return to the opening screen. Your saved work stays in its Project.
-          </p>
-          <button disabled={busy} onClick={handleClose}>
-            Close Project
-          </button>
-        </div>
         <details className="technical-details">
           <summary>Project information</summary>
           <dl>

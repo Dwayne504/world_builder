@@ -41,6 +41,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             tauri_boundary::read_relationships,
+            tauri_boundary::read_project_relationships,
             tauri_boundary::apply_relationships,
             tauri_boundary::preview_field_merge,
             tauri_boundary::merge_fields,
