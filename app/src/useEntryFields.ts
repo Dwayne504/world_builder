@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { applyFields, readFields } from "./api";
+import { applyFields, readFields, deleteEntryField } from "./api";
 import type { EntryField, EntryFields, FieldCommand, FieldValue, SaveState } from "./types";
 import type { SubmitOutcome } from "./useProjectRename";
 
@@ -38,6 +38,7 @@ export function useEntryFields(
   const [snapshot, setSnapshot] = useState<EntryFields | null>(null);
   const [drafts, setDrafts] = useState<Record<string, FieldDraft>>({});
   const [state, setState] = useState<SaveState>("saved");
+  const [configurationPending, setConfigurationPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const snapshotRef = useRef(snapshot);
   const draftsRef = useRef(drafts);
@@ -84,18 +85,20 @@ export function useEntryFields(
     if (!inFlight.current && !Object.keys(draftsRef.current).length) void reload();
   }, [entryRevision, reload]);
 
-  const command = useCallback(
-    (operation: FieldCommand, afterCommit?: () => SubmitOutcome): Promise<SubmitOutcome> => {
+  const run = useCallback(
+    (
+      action: (expected: number) => Promise<EntryFields>,
+      afterCommit?: () => SubmitOutcome,
+      configuring = false,
+    ): Promise<SubmitOutcome> => {
       if (inFlight.current) return inFlight.current;
       if (!snapshotRef.current) return Promise.resolve({ kind: "failed" });
       ++generation.current;
       setState("saving");
+      setConfigurationPending(configuring);
       setError(null);
-      const request = applyFields(
-        projectId,
-        entryId,
+      const request = action(
         Math.max(snapshotRef.current.globalRevision, getRevisionRef.current?.() ?? 0),
-        operation,
       )
         .then((updated): SubmitOutcome => {
           accept(updated);
@@ -110,11 +113,35 @@ export function useEntryFields(
         })
         .finally(() => {
           inFlight.current = null;
+          setConfigurationPending(false);
         });
       inFlight.current = request;
       return request;
     },
-    [projectId, entryId, accept],
+    [accept],
+  );
+  const command = useCallback(
+    (operation: FieldCommand, afterCommit?: () => SubmitOutcome) =>
+      run(
+        (expected) => applyFields(projectId, entryId, expected, operation),
+        afterCommit,
+        operation.kind !== "set_values",
+      ),
+    [run, projectId, entryId],
+  );
+  const deleteLocal = useCallback(
+    (fieldId: string, expected: number, onBackup?: (path: string) => void) =>
+      run(
+        async () => {
+          // Use the reviewed revision, never silently rebase destructive intent.
+          const result = await deleteEntryField(projectId, entryId, fieldId, expected);
+          onBackup?.(result.backupPath);
+          return result.snapshot;
+        },
+        undefined,
+        true,
+      ),
+    [run, projectId, entryId],
   );
 
   const submit = useCallback((): Promise<SubmitOutcome> => {
@@ -168,5 +195,16 @@ export function useEntryFields(
     },
     [submit],
   );
-  return { snapshot, drafts, state, error, reload, command, submit, change };
+  return {
+    snapshot,
+    drafts,
+    state,
+    error,
+    configurationPending,
+    reload,
+    command,
+    deleteLocal,
+    submit,
+    change,
+  };
 }

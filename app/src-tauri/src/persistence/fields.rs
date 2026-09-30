@@ -127,17 +127,30 @@ fn read_snapshot(
             bindings,
         };
         if let Some(entry) = entry {
-            let available = !retired
-                && definition.bindings.iter().any(|b| match b.provider.kind {
-                    ProviderKind::Category => b.provider.id == category,
-                    ProviderKind::Type => ancestor_ids.contains(&b.provider.id),
-                    ProviderKind::Entry => b.provider.id == entry.to_string(),
-                });
+            let (hidden, removed): (bool, bool) = conn.query_row(
+                "SELECT hidden, removed FROM entry_field_presentation WHERE entry_id=?1 AND field_id=?2",
+                params![entry.to_string(), id], |r| Ok((r.get(0)?, r.get(1)?))
+            ).optional()?.unwrap_or((false, false));
+            let applicable = |b: &FieldBinding| match b.provider.kind {
+                ProviderKind::Category => b.provider.id == category,
+                ProviderKind::Type => ancestor_ids.contains(&b.provider.id),
+                ProviderKind::Entry => b.provider.id == entry.to_string(),
+            };
+            let default_sources = definition
+                .bindings
+                .iter()
+                .filter(|b| applicable(b))
+                .filter(|b| b.provider.kind != ProviderKind::Entry)
+                .cloned()
+                .collect();
+            let available = !retired && !removed && definition.bindings.iter().any(applicable);
             let value = read_value(conn, entry, &definition)?;
             if available || value.is_some() {
                 fields.push(EntryField {
                     definition: definition.clone(),
                     available,
+                    hidden,
+                    default_sources,
                     value,
                 });
             }
@@ -251,6 +264,13 @@ fn apply_operation(
     }
     let now = Utc::now().to_rfc3339();
     match command {
+        FieldCommand::SetHidden { field_id, hidden } => {
+            let entry = entry.ok_or_else(|| invalid("Choose an Entry for local visibility"))?;
+            if !snapshot.fields.iter().any(|f| f.definition.id == field_id) {
+                return Err(invalid("Field is not on this Entry"));
+            }
+            tx.execute("INSERT INTO entry_field_presentation (entry_id,field_id,hidden,removed,created_at,updated_at,revision) VALUES (?1,?2,?3,0,?4,?4,1) ON CONFLICT(entry_id,field_id) DO UPDATE SET hidden=excluded.hidden,updated_at=excluded.updated_at,revision=entry_field_presentation.revision+1", params![entry.to_string(),field_id.to_string(),hidden,now])?;
+        }
         FieldCommand::Create {
             name: raw,
             field_kind,
@@ -331,6 +351,9 @@ fn apply_operation(
                 ));
             }
             bind(&tx, field_id, &provider)?;
+            if provider.kind == ProviderKind::Entry {
+                tx.execute("UPDATE entry_field_presentation SET hidden=0,removed=0,updated_at=?1,revision=revision+1 WHERE entry_id=?2 AND field_id=?3", params![now,provider.id,field_id.to_string()])?;
+            }
             touch(&tx, field_id, &now)?;
         }
         FieldCommand::Unbind { field_id, provider } => {
@@ -541,7 +564,13 @@ pub(super) fn preview_merge(
         let fields = read_snapshot(conn, Some(entry))?;
         let src = fields.fields.iter().find(|f| f.definition.id == source.id);
         let dst = fields.fields.iter().find(|f| f.definition.id == target.id);
-        if src.is_none() && dst.is_none() {
+        // Local removals still change identity during a merge, even when both
+        // Fields are currently absent from the reading surface.
+        let has_presentation: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM entry_field_presentation WHERE entry_id=?1 AND field_id IN (?2,?3))",
+            params![id, source.id.to_string(), target.id.to_string()], |r| r.get(0)
+        )?;
+        if src.is_none() && dst.is_none() && !has_presentation {
             continue;
         }
         let source_value = src.and_then(|f| f.value.clone());
@@ -608,6 +637,11 @@ pub(super) fn merge(
         "DELETE FROM field_availability WHERE field_id=?1",
         [source.to_string()],
     )?;
+    tx.execute("INSERT INTO entry_field_presentation (entry_id,field_id,hidden,removed,created_at,updated_at,revision) SELECT entry_id,?1,hidden,removed,created_at,?2,revision+1 FROM entry_field_presentation WHERE field_id=?3 ON CONFLICT(entry_id,field_id) DO NOTHING", params![target.to_string(),now,source.to_string()])?;
+    tx.execute(
+        "DELETE FROM entry_field_presentation WHERE field_id=?1",
+        [source.to_string()],
+    )?;
     tx.execute(
         "DELETE FROM field_definition WHERE id=?1",
         [source.to_string()],
@@ -616,4 +650,37 @@ pub(super) fn merge(
     tx.execute("UPDATE project_meta SET last_committed_revision=last_committed_revision+1, updated_at=?1 WHERE id=1", [now])?;
     tx.commit()?;
     Ok(expected + 1)
+}
+
+/// The application service creates a recovery snapshot before calling this.
+/// Removal opts out of defaults locally; it never edits a shared definition.
+pub(super) fn delete_local(
+    conn: &mut Connection,
+    entry: EntryId,
+    field: FieldId,
+    expected: i64,
+) -> Result<EntryFields, PersistenceError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let snapshot = read(&tx, entry)?;
+    if snapshot.global_revision != expected {
+        return Err(PersistenceError::StaleRevision {
+            expected,
+            current: snapshot.global_revision,
+        });
+    }
+    if !snapshot.fields.iter().any(|f| f.definition.id == field) {
+        return Err(invalid("Field is no longer on this Entry"));
+    }
+    let now = Utc::now().to_rfc3339();
+    tx.execute("DELETE FROM field_choice_value WHERE value_id IN (SELECT id FROM field_value WHERE entry_id=?1 AND field_id=?2)", params![entry.to_string(),field.to_string()])?;
+    tx.execute(
+        "DELETE FROM field_value WHERE entry_id=?1 AND field_id=?2",
+        params![entry.to_string(), field.to_string()],
+    )?;
+    tx.execute("DELETE FROM field_availability WHERE provider_kind='entry' AND provider_id=?1 AND field_id=?2", params![entry.to_string(),field.to_string()])?;
+    tx.execute("INSERT INTO entry_field_presentation (entry_id,field_id,hidden,removed,created_at,updated_at,revision) VALUES (?1,?2,0,1,?3,?3,1) ON CONFLICT(entry_id,field_id) DO UPDATE SET hidden=0,removed=1,updated_at=excluded.updated_at,revision=entry_field_presentation.revision+1", params![entry.to_string(),field.to_string(),now])?;
+    tx.execute("UPDATE project_meta SET last_committed_revision=last_committed_revision+1,updated_at=?1 WHERE id=1", [now])?;
+    let updated = read(&tx, entry)?;
+    tx.commit()?;
+    Ok(updated)
 }

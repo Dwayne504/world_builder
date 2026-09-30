@@ -64,6 +64,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  automaticBackupDirectory: vi.fn().mockResolvedValue("/Recovery"),
+  deleteEntryField: vi.fn(),
   getAppearance: vi.fn().mockResolvedValue("storybook"),
   setAppearance: vi.fn().mockImplementation((appearance: string) => Promise.resolve(appearance)),
   readRelationships: vi
@@ -107,6 +109,7 @@ vi.mock("./api", () => ({
 import App from "./App";
 import {
   AppCommandError,
+  deleteEntryField,
   readFieldCatalog,
   applyTemplateFields,
   createProject,
@@ -2055,6 +2058,45 @@ describe("Focused workspace", () => {
     expect(screen.getByLabelText("entry-category")).not.toBeVisible();
     expect(screen.getByLabelText("new-field-name")).not.toBeVisible();
     expect(screen.getByRole("button", { name: "Manage fields" })).toBeVisible();
+  });
+
+  it("keeps deletion simple and puts the automatic recovery receipt under Backups", async () => {
+    mockEditableEntry();
+    const definition = {
+      id: "age",
+      name: "Age",
+      kind: "number" as const,
+      unit: "years",
+      options: [],
+      bindings: [],
+      revision: 1,
+      retired: false,
+    };
+    vi.mocked(readFields).mockResolvedValueOnce({
+      globalRevision: 1,
+      definitions: [definition],
+      fields: [{ definition, available: true, value: { kind: "number", value: 48 } }],
+    });
+    vi.mocked(deleteEntryField).mockResolvedValueOnce({
+      snapshot: { globalRevision: 2, definitions: [definition], fields: [] },
+      backupPath: "/Recovery/entry-copy.wcbackup",
+    });
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByLabelText("Value: Age");
+    fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete from Entry: Age" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await screen.findByRole("button", { name: "Add to Entry: Age" });
+    expect(deleteEntryField).toHaveBeenCalledWith(project.projectId, "entry", "age", 1);
+    expect(screen.queryByText(/Field deleted · recovery backup/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Manage fields" }));
+    fireEvent.click(screen.getByRole("button", { name: "Backups" }));
+    fireEvent.click(await screen.findByText("Automatic recovery copies"));
+    expect(await screen.findByText("Folder: /Recovery")).toBeVisible();
+    expect(
+      screen.getByText("Latest copy this session: /Recovery/entry-copy.wcbackup"),
+    ).toBeVisible();
   });
 
   it("keeps a failed Project rename visible and editable after closing Settings", async () => {

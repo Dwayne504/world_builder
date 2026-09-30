@@ -864,3 +864,477 @@ fn scalar_merges_keep_false_and_text_while_choice_and_retired_definitions_block(
             .is_empty()
     );
 }
+
+#[test]
+fn hidden_fields_are_local_persisted_and_inherited_defaults_are_identified() {
+    let f = Fixture::new();
+    let parent =
+        ProjectService::create_type(&f.state, f.project, f.entry.category_id, None, "Human")
+            .unwrap();
+    let child = ProjectService::create_type(
+        &f.state,
+        f.project,
+        f.entry.category_id,
+        Some(parent.id),
+        "Scholar",
+    )
+    .unwrap();
+    let other = ProjectService::create_entry(
+        &f.state,
+        f.project,
+        Some(f.entry.category_id),
+        Some(child.id),
+        None,
+    )
+    .unwrap();
+    let id = f.create(FieldKind::Number, Some(FieldValue::Number(48.0)));
+    f.apply(FieldCommand::Bind {
+        field_id: id,
+        provider: FieldProvider {
+            kind: ProviderKind::Type,
+            id: parent.id.to_string(),
+        },
+    });
+    let inherited = ProjectService::read_fields(&f.state, f.project, other.id).unwrap();
+    assert_eq!(inherited.fields[0].default_sources[0].label, "Human");
+    assert!(f.read().fields[0].default_sources.is_empty());
+    let before = f.read();
+    f.apply(FieldCommand::SetHidden {
+        field_id: id,
+        hidden: true,
+    });
+    let hidden = f.read();
+    assert!(hidden.fields[0].hidden);
+    assert_eq!(hidden.fields[0].value, before.fields[0].value);
+    assert_eq!(hidden.definitions, before.definitions);
+    assert!(
+        !ProjectService::read_fields(&f.state, f.project, other.id)
+            .unwrap()
+            .fields[0]
+            .hidden
+    );
+    ProjectService::close_project(&f.state, f.project).unwrap();
+    ProjectService::open_project(&f.state, std::path::Path::new(&f.path), false).unwrap();
+    assert_eq!(f.read(), hidden);
+    let backup =
+        ProjectService::create_backup(&f.state, f.project, &f.dir.path().join("Backups")).unwrap();
+    let restored = ProjectService::restore_backup_as_copy(
+        &f.state,
+        &backup,
+        &f.dir.path().join("Copies"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        ProjectService::read_fields(&f.state, restored.project_id, f.entry.id)
+            .unwrap()
+            .fields,
+        hidden.fields
+    );
+    ProjectService::close_project(&f.state, restored.project_id).unwrap();
+    f.apply(FieldCommand::SetHidden {
+        field_id: id,
+        hidden: false,
+    });
+    assert!(!f.read().fields[0].hidden);
+    assert_eq!(f.read().fields[0].value, before.fields[0].value);
+}
+
+#[test]
+fn hiding_rejects_stale_or_unavailable_fields_without_mutation() {
+    let f = Fixture::new();
+    let id = f.create(FieldKind::ShortText, None);
+    let before = f.read();
+    for (field_id, revision) in [
+        (id, before.global_revision - 1),
+        (FieldId::new(), before.global_revision),
+    ] {
+        assert!(ProjectService::apply_fields(
+            &f.state,
+            f.project,
+            f.entry.id,
+            revision,
+            FieldCommand::SetHidden {
+                field_id,
+                hidden: true
+            }
+        )
+        .is_err());
+        assert_eq!(f.read(), before);
+    }
+    f.apply(FieldCommand::Unbind {
+        field_id: id,
+        provider: FieldProvider {
+            kind: ProviderKind::Entry,
+            id: f.entry.id.to_string(),
+        },
+    });
+    assert!(ProjectService::apply_fields(
+        &f.state,
+        f.project,
+        f.entry.id,
+        f.read().global_revision,
+        FieldCommand::SetHidden {
+            field_id: id,
+            hidden: true
+        }
+    )
+    .is_err());
+}
+
+#[test]
+fn delete_is_entry_local_suppresses_defaults_and_readd_is_empty() {
+    let f = Fixture::new();
+    let id = f.create(FieldKind::Number, Some(FieldValue::Number(48.0)));
+    let default = FieldProvider {
+        kind: ProviderKind::Category,
+        id: f.entry.category_id.to_string(),
+    };
+    f.apply(FieldCommand::Bind {
+        field_id: id,
+        provider: default.clone(),
+    });
+    let other =
+        ProjectService::create_entry(&f.state, f.project, Some(f.entry.category_id), None, None)
+            .unwrap();
+    ProjectService::apply_fields(
+        &f.state,
+        f.project,
+        other.id,
+        f.read().global_revision,
+        FieldCommand::SetValues {
+            edits: vec![FieldEdit {
+                field_id: id,
+                value: Some(FieldValue::Number(17.0)),
+            }],
+        },
+    )
+    .unwrap();
+    f.apply(FieldCommand::SetHidden {
+        field_id: id,
+        hidden: true,
+    });
+    let before = f.read();
+    let other_before = ProjectService::read_fields(&f.state, f.project, other.id).unwrap();
+    let outcome = ProjectService::delete_entry_field(
+        &f.state,
+        f.project,
+        f.entry.id,
+        id,
+        before.global_revision,
+        &f.dir.path().join("Backups"),
+    )
+    .unwrap();
+    assert!(outcome.snapshot.fields.is_empty());
+    assert_eq!(outcome.snapshot.global_revision, before.global_revision + 1);
+    assert_eq!(outcome.snapshot.definitions.len(), 1);
+    assert_eq!(outcome.snapshot.definitions[0].bindings.len(), 1);
+    assert_eq!(
+        ProjectService::read_fields(&f.state, f.project, other.id)
+            .unwrap()
+            .fields[0]
+            .value,
+        other_before.fields[0].value
+    );
+    // A shared default change must not silently undo a local removal.
+    f.apply(FieldCommand::Unbind {
+        field_id: id,
+        provider: default.clone(),
+    });
+    f.apply(FieldCommand::Bind {
+        field_id: id,
+        provider: default,
+    });
+    ProjectService::close_project(&f.state, f.project).unwrap();
+    ProjectService::open_project(&f.state, std::path::Path::new(&f.path), false).unwrap();
+    assert!(f.read().fields.is_empty());
+    let copy = ProjectService::restore_backup_as_copy(
+        &f.state,
+        std::path::Path::new(&outcome.backup_path),
+        &f.dir.path().join("Copies"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        ProjectService::read_fields(&f.state, copy.project_id, f.entry.id)
+            .unwrap()
+            .fields,
+        before.fields
+    );
+    ProjectService::close_project(&f.state, copy.project_id).unwrap();
+    f.apply(FieldCommand::Bind {
+        field_id: id,
+        provider: FieldProvider {
+            kind: ProviderKind::Entry,
+            id: f.entry.id.to_string(),
+        },
+    });
+    assert_eq!(f.read().fields[0].value, None);
+    assert!(!f.read().fields[0].hidden);
+    assert_eq!(f.read().fields[0].default_sources.len(), 1);
+}
+
+#[test]
+fn delete_cleans_choice_selections_without_removing_options_or_other_values() {
+    let f = Fixture::new();
+    let created = f.apply(FieldCommand::Create {
+        name: "Colours".into(),
+        field_kind: FieldKind::MultiChoice,
+        unit: None,
+        provider: FieldProvider {
+            kind: ProviderKind::Category,
+            id: f.entry.category_id.to_string(),
+        },
+        options: vec!["Blue".into(), "Green".into()],
+        value: None,
+    });
+    let id = created.definitions[0].id;
+    let choices = created.definitions[0]
+        .options
+        .iter()
+        .map(|o| o.id)
+        .collect();
+    f.set(id, Some(FieldValue::Choices(choices)));
+    let outcome = ProjectService::delete_entry_field(
+        &f.state,
+        f.project,
+        f.entry.id,
+        id,
+        f.read().global_revision,
+        &f.dir.path().join("Backups"),
+    )
+    .unwrap();
+    assert!(outcome.snapshot.fields.is_empty());
+    assert_eq!(outcome.snapshot.definitions[0].options.len(), 2);
+    let db =
+        Connection::open(worldcrafter_lib::package::PackagePaths::new(&f.path).db_path()).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM field_choice_value", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn delete_rejects_stale_review_bad_backup_and_rolls_back_transaction_failure() {
+    let f = Fixture::new();
+    let id = f.create(FieldKind::Number, Some(FieldValue::Number(48.0)));
+    let before = f.read();
+    let backups = f.dir.path().join("Backups");
+    assert!(ProjectService::delete_entry_field(
+        &f.state,
+        f.project,
+        f.entry.id,
+        id,
+        before.global_revision - 1,
+        &backups
+    )
+    .is_err());
+    assert!(ProjectService::delete_entry_field(
+        &f.state,
+        f.project,
+        f.entry.id,
+        FieldId::new(),
+        before.global_revision,
+        &backups
+    )
+    .is_err());
+    assert!(!backups.exists());
+    let file = f.dir.path().join("not-a-directory");
+    std::fs::write(&file, b"preserve").unwrap();
+    assert!(ProjectService::delete_entry_field(
+        &f.state,
+        f.project,
+        f.entry.id,
+        id,
+        before.global_revision,
+        &file
+    )
+    .is_err());
+    assert_eq!(f.read(), before);
+    let db =
+        Connection::open(worldcrafter_lib::package::PackagePaths::new(&f.path).db_path()).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_local_delete BEFORE INSERT ON entry_field_presentation BEGIN SELECT RAISE(ABORT, 'injected deletion failure'); END;").unwrap();
+    assert!(ProjectService::delete_entry_field(
+        &f.state,
+        f.project,
+        f.entry.id,
+        id,
+        before.global_revision,
+        &backups
+    )
+    .is_err());
+    assert_eq!(f.read(), before);
+    assert_eq!(
+        std::fs::read_dir(backups.join(f.project.to_string()))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn concurrent_entry_deletions_commit_and_back_up_once() {
+    let f = Fixture::new();
+    let id = f.create(FieldKind::Boolean, Some(FieldValue::Boolean(false)));
+    let revision = f.read().global_revision;
+    let backups = f.dir.path().join("Backups");
+    let results = std::thread::scope(|scope| {
+        let a = scope.spawn(|| {
+            ProjectService::delete_entry_field(
+                &f.state, f.project, f.entry.id, id, revision, &backups,
+            )
+        });
+        let b = scope.spawn(|| {
+            ProjectService::delete_entry_field(
+                &f.state, f.project, f.entry.id, id, revision, &backups,
+            )
+        });
+        [a.join().unwrap(), b.join().unwrap()]
+    });
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(f.read().global_revision, revision + 1);
+    assert_eq!(
+        std::fs::read_dir(backups.join(f.project.to_string()))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn duplicate_merge_carries_local_visibility_and_respects_existing_target_choice() {
+    for target_choice in [None, Some(false), Some(true)] {
+        let f = Fixture::new();
+        let source = duplicate_number(&f, Some("years"), Some(48.0));
+        let target = duplicate_number(&f, Some("years"), None);
+        f.apply(FieldCommand::SetHidden {
+            field_id: source,
+            hidden: true,
+        });
+        if let Some(hidden) = target_choice {
+            f.apply(FieldCommand::SetHidden {
+                field_id: target,
+                hidden,
+            });
+        }
+        ProjectService::merge_fields(
+            &f.state,
+            f.project,
+            source,
+            target,
+            f.read().global_revision,
+            &f.dir.path().join("Backups"),
+        )
+        .unwrap();
+        let after = f.read();
+        assert_eq!(after.fields.len(), 1);
+        assert_eq!(after.fields[0].value, Some(FieldValue::Number(48.0)));
+        assert_eq!(after.fields[0].hidden, target_choice.unwrap_or(true));
+    }
+}
+
+#[test]
+fn version_five_upgrade_is_recoverable_and_does_not_rewrite_values() {
+    let f = Fixture::new();
+    f.create(FieldKind::Number, Some(FieldValue::Number(48.0)));
+    let before = f.read();
+    ProjectService::close_project(&f.state, f.project).unwrap();
+    let paths = worldcrafter_lib::package::PackagePaths::new(&f.path);
+    let db = Connection::open(paths.db_path()).unwrap();
+    db.execute_batch("DROP TABLE entry_field_presentation; PRAGMA user_version=5; UPDATE project_meta SET schema_version=5; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT, 'injected upgrade failure'); END;").unwrap();
+    let mut manifest = Manifest::read(&paths.manifest_path()).unwrap();
+    manifest.schema_version = 5;
+    manifest.write(&paths.manifest_path()).unwrap();
+    assert!(ProjectService::open_project(&f.state, std::path::Path::new(&f.path), false).is_err());
+    assert_eq!(
+        db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        5
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name='entry_field_presentation'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    db.execute_batch("DROP TRIGGER fail_upgrade;").unwrap();
+    drop(db);
+    ProjectService::open_project(&f.state, std::path::Path::new(&f.path), false).unwrap();
+    assert_eq!(f.read().fields, before.fields);
+    assert!(f
+        .dir
+        .path()
+        .join(".worldcrafter-migration-recovery")
+        .exists());
+}
+
+#[test]
+fn merge_reviews_removed_fields_and_preserves_the_kept_local_removal() {
+    let f = Fixture::new();
+    let source = duplicate_number(&f, None, None);
+    let target = duplicate_number(&f, None, None);
+    let backups = f.dir.path().join("Backups");
+    for field in [source, target] {
+        ProjectService::delete_entry_field(
+            &f.state,
+            f.project,
+            f.entry.id,
+            field,
+            f.read().global_revision,
+            &backups,
+        )
+        .unwrap();
+    }
+    let preview = ProjectService::preview_field_merge(&f.state, f.project, source, target).unwrap();
+    assert_eq!(preview.entries.len(), 1);
+    assert_eq!(preview.entries[0].entry_id, f.entry.id);
+    ProjectService::merge_fields(
+        &f.state,
+        f.project,
+        source,
+        target,
+        preview.global_revision,
+        &backups,
+    )
+    .unwrap();
+    f.apply(FieldCommand::Bind {
+        field_id: target,
+        provider: FieldProvider {
+            kind: ProviderKind::Category,
+            id: f.entry.category_id.to_string(),
+        },
+    });
+    assert!(f.read().fields.is_empty());
+    assert_eq!(f.read().definitions.len(), 1);
+    let db =
+        Connection::open(worldcrafter_lib::package::PackagePaths::new(&f.path).db_path()).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT COUNT(*) FROM entry_field_presentation WHERE field_id=?1",
+            [source.to_string()],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert!(db
+        .query_row(
+            "SELECT removed FROM entry_field_presentation WHERE field_id=?1",
+            [target.to_string()],
+            |r| r.get::<_, bool>(0)
+        )
+        .unwrap());
+}

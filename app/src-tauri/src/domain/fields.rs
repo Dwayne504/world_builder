@@ -92,6 +92,10 @@ pub enum FieldCommand {
         options: Vec<String>,
         value: Option<FieldValue>,
     },
+    SetHidden {
+        field_id: FieldId,
+        hidden: bool,
+    },
     SetValues {
         edits: Vec<FieldEdit>,
     },
@@ -158,6 +162,8 @@ pub struct FieldDefinition {
 pub struct EntryField {
     pub definition: FieldDefinition,
     pub available: bool,
+    pub hidden: bool,
+    pub default_sources: Vec<FieldBinding>,
     pub value: Option<FieldValue>,
 }
 
@@ -209,5 +215,12 @@ pub struct FieldMergePreview {
 #[serde(rename_all = "camelCase")]
 pub struct FieldMergeOutcome {
     pub global_revision: i64,
+    pub backup_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryFieldDeleteOutcome {
+    pub snapshot: EntryFields,
     pub backup_path: String,
 }

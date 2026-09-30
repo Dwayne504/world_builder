@@ -1,5 +1,6 @@
+import { FieldManagerTables } from "./FieldManagerTables";
+import { DeleteEntryFieldDialog } from "./DeleteEntryFieldDialog";
 import { FieldSuggestions } from "./FieldSuggestions";
-import { fieldLabel } from "./fieldLabels";
 import { useCallback, useEffect, useId, useState } from "react";
 import type { Entry, EntryField, FieldCommand, FieldKind, FieldProvider, SaveState } from "./types";
 import type { SubmitOutcome } from "./useProjectRename";
@@ -109,6 +110,7 @@ export function EntryFieldsPanel({
   onRevision,
   getRevision,
   templateEpoch = 0,
+  onRecoveryBackup,
 }: {
   projectId: string;
   entry: Entry;
@@ -117,6 +119,7 @@ export function EntryFieldsPanel({
   onRevision: (revision: number) => void;
   getRevision?: () => number;
   templateEpoch?: number;
+  onRecoveryBackup?: (path: string) => void;
 }) {
   const fields = useEntryFields(
     projectId,
@@ -126,6 +129,11 @@ export function EntryFieldsPanel({
     getRevision,
   );
   const [manageOpen, setManageOpen] = useState(false);
+  const [definitionOpen, setDefinitionOpen] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
+  const [deleteReview, setDeleteReview] = useState<{ field: EntryField; revision: number } | null>(
+    null,
+  );
   const [createOpen, setCreateOpen] = useState(false);
   const { submit: submitValues } = fields;
   const [newName, setNewName] = useState("");
@@ -229,9 +237,20 @@ export function EntryFieldsPanel({
       <div className="section-heading">
         <div>
           <h3>Fields</h3>
-          <p className="muted">Add only what helps tell this Entry's story.</p>
         </div>
-        <div className="row">
+        <div className="row panel-actions">
+          {!!fields.snapshot?.fields.some((f) => f.hidden) && (
+            <button
+              className="quiet-button"
+              aria-pressed={showHidden}
+              disabled={configDisabled || formDirty}
+              onClick={() => setShowHidden(!showHidden)}
+            >
+              {showHidden
+                ? "Hide hidden fields"
+                : `Show hidden fields (${fields.snapshot.fields.filter((f) => f.hidden).length})`}
+            </button>
+          )}
           <button
             disabled={configDisabled || !!renamed || !!optionLabel}
             onClick={() => setCreateOpen(true)}
@@ -256,9 +275,9 @@ export function EntryFieldsPanel({
           Reload fields (keep drafts)
         </button>
       )}
-      {hasValueDraft && (
+      {hasValueDraft && fields.state === "failed" && (
         <button disabled={busy} onClick={() => void fields.submit()}>
-          Save field values
+          Retry saving fields
         </button>
       )}
       {fields.snapshot?.fields.length === 0 && (
@@ -267,7 +286,13 @@ export function EntryFieldsPanel({
       {!manageOpen && (renamed || optionLabel) && (
         <p className="field-note">
           You have unfinished definition edits.{" "}
-          <button className="quiet-button" onClick={() => setManageOpen(true)}>
+          <button
+            className="quiet-button"
+            onClick={() => {
+              setManageOpen(true);
+              setDefinitionOpen(true);
+            }}
+          >
             Continue definition edits
           </button>
         </p>
@@ -281,35 +306,41 @@ export function EntryFieldsPanel({
         </p>
       )}
       <div className="field-grid">
-        {fields.snapshot?.fields.map((field) => (
-          <div className="field-value" key={field.definition.id}>
-            <label>{field.definition.name}</label>
-            {!field.available && (
-              <p className="field-note">
-                {field.definition.retired
-                  ? "Retired field — authored value retained."
-                  : "Detached from the current templates — authored value retained."}
-              </p>
-            )}
-            <ValueInput
-              field={field}
-              draft={fields.drafts[field.definition.id] ?? valueDraft(field.value)}
-              disabled={disabled || formDirty}
-              onChange={(draft) => fields.change(field.definition.id, draft)}
-              onBlur={() => void fields.submit()}
-            />
-            {(field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
-              <button
-                className="quiet-button clear-field"
-                aria-label={`Clear value: ${field.definition.name}`}
-                disabled={disabled || formDirty}
-                onClick={() => fields.change(field.definition.id, "")}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        ))}
+        {fields.snapshot?.fields
+          .filter((field) => showHidden || !field.hidden)
+          .map((field) => (
+            <div
+              className={`field-value${field.hidden ? " hidden-field-preview" : ""}`}
+              key={field.definition.id}
+            >
+              <div className="field-value-label">
+                <label>{field.definition.name}</label>
+                {field.hidden && <small>Hidden</small>}
+                {!field.available && (
+                  <small title="This value is kept even though its shared default is no longer active.">
+                    Retained value
+                  </small>
+                )}
+              </div>
+              <ValueInput
+                field={field}
+                draft={fields.drafts[field.definition.id] ?? valueDraft(field.value)}
+                disabled={disabled || formDirty || fields.configurationPending}
+                onChange={(draft) => fields.change(field.definition.id, draft)}
+                onBlur={() => void fields.submit()}
+              />
+              {(field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
+                <button
+                  className="quiet-button clear-field"
+                  aria-label={`Clear value: ${field.definition.name}`}
+                  disabled={disabled || formDirty || fields.configurationPending}
+                  onClick={() => fields.change(field.definition.id, "")}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          ))}
       </div>
       <Dialog open={createOpen} title="Add field" onClose={() => setCreateOpen(false)}>
         <p>Create an optional Field for this Entry, or share it with its Category or Type.</p>
@@ -444,48 +475,95 @@ export function EntryFieldsPanel({
           </div>
         </fieldset>
       </Dialog>
-      <Dialog open={manageOpen} title="Manage fields" onClose={() => setManageOpen(false)}>
-        <p>
-          Definition changes affect every Entry using that field. Detaching or retiring preserves
-          existing values. To combine duplicates, open Categories → Combine duplicate fields.
+      <Dialog
+        open={manageOpen}
+        title="Manage fields"
+        onClose={() => setManageOpen(false)}
+        className="field-manager-dialog"
+      >
+        <p className="muted">
+          Hide Fields to focus without losing values. Delete affects only this Entry. Click a Field
+          name to edit its shared definition.
         </p>
-        {manageOpen && (fields.error || formError) && (
-          <p role="alert" className="error-banner">
-            {fields.error || formError}
+        {manageOpen && !definitionOpen && !deleteReview && (fields.error || formError) && (
+          <p role="alert">
+            {fields.error || formError}{" "}
+            <button disabled={busy} onClick={() => void fields.reload()}>
+              Reload fields (keep drafts)
+            </button>
           </p>
         )}
-        {manageOpen && fields.error && (
-          <button disabled={busy} onClick={() => void fields.reload()}>
-            Reload fields (keep drafts)
-          </button>
+        {(renamed || optionLabel) && (
+          <button onClick={() => setDefinitionOpen(true)}>Continue definition edits</button>
         )}
-        <select
-          aria-label="field-definition"
-          disabled={configDisabled || formDirty}
-          value={manageId}
-          onChange={(e) => {
-            setManageId(e.target.value);
-            setOptionId("");
-          }}
-        >
-          <option value="">Choose a definition</option>
-          {[true, false].map((onEntry) => (
-            <optgroup
-              key={String(onEntry)}
-              label={onEntry ? "Fields on this Entry" : "Other project fields"}
-            >
-              {fields.snapshot?.definitions
-                .filter(
-                  (d) => fields.snapshot!.fields.some((f) => f.definition.id === d.id) === onEntry,
-                )
-                .map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {fieldLabel(d, fields.snapshot!.definitions)}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
-        </select>
+        {manageOpen && (
+          <FieldManagerTables
+            entry={entry}
+            fields={fields.snapshot?.fields ?? []}
+            definitions={fields.snapshot?.definitions ?? []}
+            disabled={configDisabled || formDirty}
+            onEdit={(d) => {
+              setManageId(d.id);
+              setOptionId("");
+              setDefinitionOpen(true);
+            }}
+            onHide={(field) =>
+              void configure({
+                kind: "set_hidden",
+                fieldId: field.definition.id,
+                hidden: !field.hidden,
+              })
+            }
+            onDelete={(field) => {
+              setFormError(null);
+              setDeleteReview({
+                field,
+                revision: Math.max(fields.snapshot!.globalRevision, getRevision?.() ?? 0),
+              });
+            }}
+            onAdd={(d) =>
+              void configure({ kind: "bind", fieldId: d.id, provider: provider("entry") })
+            }
+          />
+        )}
+      </Dialog>
+      {deleteReview && (
+        <DeleteEntryFieldDialog
+          field={deleteReview.field}
+          entryName={entry.displayName}
+          busy={busy}
+          error={fields.error}
+          onClose={() => setDeleteReview(null)}
+          onDelete={() =>
+            void fields
+              .deleteLocal(
+                deleteReview.field.definition.id,
+                deleteReview.revision,
+                onRecoveryBackup,
+              )
+              .then((result) => {
+                if (result.kind === "committed") setDeleteReview(null);
+              })
+          }
+        />
+      )}
+      <Dialog
+        open={definitionOpen && manageOpen}
+        title="Edit field definition"
+        onClose={() => setDefinitionOpen(false)}
+      >
+        <p className="muted">
+          Changes here affect every Entry using this definition. To combine duplicates, open
+          Categories → Combine duplicate fields.
+        </p>
+        {manageOpen && definitionOpen && (fields.error || formError) && (
+          <p role="alert">
+            {fields.error || formError}{" "}
+            <button disabled={busy} onClick={() => void fields.reload()}>
+              Reload fields (keep drafts)
+            </button>
+          </p>
+        )}
         {selected && (
           <fieldset disabled={configDisabled || !!newName || !!String(newValue) || !!newOptions}>
             <legend>Shared definition: {selected.name}</legend>
@@ -563,14 +641,14 @@ export function EntryFieldsPanel({
             <ul>
               {selected.bindings.map((b) => (
                 <li key={`${b.provider.kind}:${b.provider.id}`}>
-                  {b.provider.kind}: {b.label}{" "}
+                  {b.label}{" "}
                   <button
                     disabled={!!renamed || !!optionLabel}
                     onClick={() =>
                       void configure({ kind: "unbind", fieldId: selected.id, provider: b.provider })
                     }
                   >
-                    Detach from {b.provider.kind}: {b.label}
+                    Detach from {b.label}
                   </button>
                 </li>
               ))}

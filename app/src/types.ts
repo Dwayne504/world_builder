@@ -85,6 +85,8 @@ export type FieldValue =
 export interface EntryField {
   definition: FieldDefinition;
   available: boolean;
+  hidden?: boolean;
+  defaultSources?: FieldDefinition["bindings"];
   value: FieldValue | null;
 }
 export interface EntryFields {
@@ -102,6 +104,7 @@ export type FieldCommand =
       options: string[];
       value: FieldValue | null;
     }
+  | { kind: "set_hidden"; fieldId: string; hidden: boolean }
   | { kind: "set_values"; edits: { fieldId: string; value: FieldValue | null }[] }
   | { kind: "rename"; fieldId: string; name: string }
   | { kind: "set_retired"; fieldId: string; retired: boolean }
@@ -181,5 +184,10 @@ export interface FieldMergePreview {
 }
 export interface FieldMergeOutcome {
   globalRevision: number;
+  backupPath: string;
+}
+
+export interface EntryFieldDeleteOutcome {
+  snapshot: EntryFields;
   backupPath: string;
 }

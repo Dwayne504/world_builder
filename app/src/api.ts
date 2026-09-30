@@ -239,3 +239,16 @@ export function mergeFields(
 ): Promise<import("./types").FieldMergeOutcome> {
   return call("merge_fields", { projectId, sourceId, targetId, expectedRevision, backupDir });
 }
+
+export function deleteEntryField(
+  projectId: string,
+  entryId: string,
+  fieldId: string,
+  expectedRevision: number,
+): Promise<import("./types").EntryFieldDeleteOutcome> {
+  return call("delete_entry_field", { projectId, entryId, fieldId, expectedRevision });
+}
+
+export function automaticBackupDirectory(): Promise<string> {
+  return call("automatic_backup_directory", {});
+}

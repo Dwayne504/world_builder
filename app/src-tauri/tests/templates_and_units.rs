@@ -363,7 +363,7 @@ fn schema_four_upgrade_preserves_plain_numbers_and_is_retryable() {
     .unwrap();
     ProjectService::close_project(&f.state, f.project).unwrap();
     let conn = f.db();
-    conn.execute_batch("DROP TRIGGER field_unit_preserve_values; ALTER TABLE field_definition DROP COLUMN unit; PRAGMA user_version=4; UPDATE project_meta SET schema_version=4; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected upgrade failure'); END;").unwrap();
+    conn.execute_batch("DROP TABLE entry_field_presentation; DROP TRIGGER field_unit_preserve_values; ALTER TABLE field_definition DROP COLUMN unit; PRAGMA user_version=4; UPDATE project_meta SET schema_version=4; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected upgrade failure'); END;").unwrap();
     let manifest_path = std::path::Path::new(&f.path).join("manifest.json");
     let mut manifest = Manifest::read(&manifest_path).unwrap();
     manifest.schema_version = 4;
