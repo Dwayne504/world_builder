@@ -147,9 +147,12 @@ pub struct RelationshipEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EntryRelationships {
+pub struct RelationshipSnapshot {
     pub global_revision: i64,
     pub definitions: Vec<RelationshipDefinition>,
     pub relationships: Vec<Relationship>,
     pub entries: Vec<RelationshipEntry>,
 }
+
+/// The Entry view has the same snapshot shape, restricted to its incident relationships.
+pub type EntryRelationships = RelationshipSnapshot;

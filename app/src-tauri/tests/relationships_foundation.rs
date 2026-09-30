@@ -577,3 +577,141 @@ fn schema_three_upgrade_is_backed_up_and_failed_upgrade_can_be_retried() {
         "Thron"
     );
 }
+
+#[test]
+fn project_browser_reads_each_canonical_connection_once_including_past_and_conflicts() {
+    let f = Fixture::new();
+    let d = f.definition(ownership());
+    let owner2 = f.new_entry("Another owner");
+    let target = f.new_entry("Object");
+    f.connect(
+        f.entry.id,
+        d,
+        OtherEntry::Existing { id: target.id },
+        vec![],
+    );
+    f.connect(owner2.id, d, OtherEntry::Existing { id: target.id }, vec![]);
+    let ended = f
+        .connect(
+            owner2.id,
+            d,
+            OtherEntry::Existing { id: f.entry.id },
+            vec![],
+        )
+        .relationships
+        .into_iter()
+        .find(|r| r.target.id == Some(f.entry.id))
+        .unwrap()
+        .id;
+    f.apply(
+        owner2.id,
+        RelationshipCommand::SetEnded {
+            id: ended,
+            ended: true,
+        },
+    );
+    let symmetric = f
+        .apply(
+            f.entry.id,
+            RelationshipCommand::CreateDefinition {
+                draft: DefinitionDraft {
+                    name: "Alliance".into(),
+                    forward_label: "allied with".into(),
+                    inverse_label: "allied with".into(),
+                    directed: false,
+                    expected_sources_per_target: None,
+                    expected_targets_per_source: None,
+                },
+            },
+        )
+        .definitions
+        .into_iter()
+        .find(|d| d.draft.name == "Alliance")
+        .unwrap()
+        .id;
+    f.connect(
+        f.entry.id,
+        symmetric,
+        OtherEntry::Existing { id: owner2.id },
+        vec![],
+    );
+    f.connect(
+        f.entry.id,
+        symmetric,
+        OtherEntry::Existing { id: f.entry.id },
+        vec![],
+    );
+    let before = f.read(f.entry.id);
+    let snapshot = ProjectService::read_project_relationships(&f.state, f.project).unwrap();
+    assert_eq!(snapshot.global_revision, before.global_revision);
+    assert_eq!(snapshot.relationships.len(), 5);
+    assert_eq!(
+        snapshot
+            .relationships
+            .iter()
+            .map(|r| r.id)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        5
+    );
+    assert_eq!(
+        snapshot
+            .relationships
+            .iter()
+            .filter(|r| !r.warnings.is_empty())
+            .count(),
+        2
+    );
+    assert_eq!(snapshot.relationships.iter().filter(|r| r.ended).count(), 1);
+    for entry in [f.entry.id, owner2.id, target.id] {
+        let projected: Vec<_> = snapshot
+            .relationships
+            .iter()
+            .filter(|r| r.involves(entry))
+            .cloned()
+            .collect();
+        assert_eq!(projected, f.read(entry).relationships);
+    }
+    assert_eq!(
+        f.read(f.entry.id),
+        before,
+        "Browsing must not write or advance revisions"
+    );
+}
+
+#[test]
+fn project_browser_preserves_unavailable_participants_and_is_project_scoped() {
+    let f = Fixture::new();
+    let d = f.definition(ownership());
+    let r = f
+        .connect(f.entry.id, d, stub(), vec![])
+        .relationships
+        .remove(0);
+    // Disposable future-deletion fixture; keep missing participants visible.
+    f.db().execute("UPDATE relationship_participant SET record_id=NULL,unresolved_snapshot=?1 WHERE instance_id=?2 AND slot='target'",
+        params![r#"{"label":"Former object"}"#, r.id.to_string()]).unwrap();
+    f.apply(
+        f.entry.id,
+        RelationshipCommand::RetireDefinition {
+            definition_id: d,
+            retired: true,
+        },
+    );
+    let snapshot = ProjectService::read_project_relationships(&f.state, f.project).unwrap();
+    assert_eq!(snapshot.relationships[0].target.label, "Former object");
+    assert_eq!(snapshot.relationships[0].target.id, None);
+    assert_eq!(snapshot.relationships[0].target.workspace_state, "missing");
+    assert!(snapshot.definitions[0].retired);
+    let other = ProjectService::create_project(&f.state, f.dir.path(), "Empty Project").unwrap();
+    let empty = ProjectService::read_project_relationships(&f.state, other.project_id).unwrap();
+    assert!(empty.relationships.is_empty());
+    assert!(empty.entries.is_empty());
+    assert!(empty.definitions.is_empty());
+    ProjectService::close_project(&f.state, other.project_id).unwrap();
+    assert!(ProjectService::read_project_relationships(&f.state, other.project_id).is_err());
+    assert!(ProjectService::read_project_relationships(&f.state, ProjectId::new()).is_err());
+    assert_eq!(
+        ProjectService::read_project_relationships(&f.state, f.project).unwrap(),
+        snapshot
+    );
+}

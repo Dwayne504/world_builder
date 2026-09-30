@@ -62,7 +62,11 @@ async function mount(entryId = "thron") {
       onNavigate={navigate}
     />,
   );
-  await screen.findByRole("button", { name: entryId === "thron" ? "Singularity Blade" : "Thron" });
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: entryId === "thron" ? "Show owns relationships" : "Show is owned by relationships",
+    }),
+  );
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -277,6 +281,7 @@ it("ends and restores the same relationship identity", async () => {
   );
   await screen.findByText("Past and inactive relationships (1)");
   fireEvent.click(screen.getByText("Past and inactive relationships (1)"));
+  fireEvent.click(screen.getByRole("button", { name: "Show owns relationships" }));
   openActions();
   fireEvent.click(screen.getByRole("button", { name: "Restore relationship" }));
   await waitFor(() =>
@@ -286,4 +291,28 @@ it("ends and restores the same relationship identity", async () => {
       ended: false,
     }),
   );
+});
+
+it("groups targets, searches within a group, and preserves separate notes while collapsing", async () => {
+  const data = snapshot();
+  data.relationships.push({
+    ...relationship,
+    id: "r2",
+    target: { id: "second", label: "Second object", workspaceState: "active" },
+    note: "Separate note",
+  });
+  vi.mocked(readRelationships).mockResolvedValue(data);
+  await mount();
+  expect(screen.getAllByRole("button", { name: "Hide owns relationships" })).toHaveLength(1);
+  fireEvent.change(screen.getByLabelText("Find an Entry in owns"), { target: { value: "second" } });
+  expect(screen.queryByRole("button", { name: "Singularity Blade" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Note and actions · has note"));
+  expect(screen.getByLabelText("Note: owns Second object")).toHaveValue("Separate note");
+  fireEvent.click(screen.getByRole("button", { name: "Hide owns relationships" }));
+  expect(screen.getByLabelText("Note: owns Second object")).not.toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Show owns relationships" }));
+  expect(screen.getByLabelText("Note: owns Second object")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Find an Entry in owns"), { target: { value: "nobody" } });
+  expect(screen.getByText("No Entries match this search.")).toBeVisible();
+  expect(applyRelationships).not.toHaveBeenCalled();
 });

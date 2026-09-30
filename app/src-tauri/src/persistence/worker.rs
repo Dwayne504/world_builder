@@ -52,10 +52,13 @@ pub struct ExistingProjectPreflight {
 
 type Reply<T> = Sender<Result<T, PersistenceError>>;
 use crate::domain::fields::{EntryFields, FieldCatalog, FieldCommand, FieldMergePreview};
-use crate::domain::relationships::{EntryRelationships, RelationshipCommand};
+use crate::domain::relationships::{EntryRelationships, RelationshipCommand, RelationshipSnapshot};
 use crate::domain::structure::FieldId;
 
 enum Job {
+    ReadProjectRelationships {
+        reply: Reply<RelationshipSnapshot>,
+    },
     DeleteEntryField {
         entry: EntryId,
         field: FieldId,
@@ -312,6 +315,9 @@ impl ProjectDbWorker {
         let mut conn = conn;
         for job in jobs {
             match job {
+                Job::ReadProjectRelationships { reply } => {
+                    let _ = reply.send(super::relationships::read_project(&conn));
+                }
                 Job::ReadFieldCatalog { reply } => {
                     let _ = reply.send(super::fields::read_catalog(&conn));
                 }
@@ -490,6 +496,9 @@ impl ProjectDbWorker {
         entry: EntryId,
     ) -> Result<EntryRelationships, PersistenceError> {
         self.call(|reply| Job::ReadRelationships { entry, reply })
+    }
+    pub fn read_project_relationships(&self) -> Result<RelationshipSnapshot, PersistenceError> {
+        self.call(|reply| Job::ReadProjectRelationships { reply })
     }
     pub fn apply_relationships(
         &self,

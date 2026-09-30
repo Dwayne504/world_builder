@@ -23,6 +23,8 @@ pub struct OpenProject {
 /// operations (insert/remove/lookup), never a blocking SQLite call.
 #[derive(Default)]
 pub struct AppState {
+    /// Serializes open/create/close without holding the registry during database work.
+    pub(crate) lifecycle: Mutex<()>,
     pub open_projects: Mutex<HashMap<ProjectId, Arc<OpenProject>>>,
 }
 

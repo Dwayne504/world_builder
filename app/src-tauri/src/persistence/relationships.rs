@@ -85,6 +85,17 @@ pub(super) fn read(
         [entry.to_string()],
         |_| Ok(()),
     )?;
+    read_snapshot(conn, Some(entry))
+}
+
+pub(super) fn read_project(conn: &Connection) -> Result<RelationshipSnapshot, PersistenceError> {
+    read_snapshot(conn, None)
+}
+
+fn read_snapshot(
+    conn: &Connection,
+    entry: Option<EntryId>,
+) -> Result<RelationshipSnapshot, PersistenceError> {
     let global_revision = conn.query_row(
         "SELECT last_committed_revision FROM project_meta WHERE id=1",
         [],
@@ -120,7 +131,7 @@ pub(super) fn read(
     let connections = all(conn)?;
     let mut relationships: Vec<_> = connections
         .iter()
-        .filter(|r| r.involves(entry))
+        .filter(|r| entry.is_none_or(|id| r.involves(id)))
         .cloned()
         .collect();
     for r in &mut relationships {

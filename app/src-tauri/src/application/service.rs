@@ -122,6 +122,15 @@ impl ProjectService {
         })
     }
 
+    pub fn read_project_relationships(
+        state: &AppState,
+        project_id: ProjectId,
+    ) -> Result<crate::domain::relationships::RelationshipSnapshot, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.read_project_relationships()
+        })
+    }
+
     pub fn read_relationships(
         state: &AppState,
         project_id: ProjectId,
@@ -170,6 +179,7 @@ impl ProjectService {
         base_dir: &Path,
         working_name_raw: &str,
     ) -> Result<ProjectSummary, AppError> {
+        let _lifecycle = state.lifecycle.lock().expect("lifecycle mutex poisoned");
         let working_name = WorkingName::new(working_name_raw)?;
         let project_id = ProjectId::new();
         let root = layout::single_candidate_package_path(base_dir, working_name.as_str());
@@ -222,8 +232,58 @@ impl ProjectService {
         package_root: &Path,
         force_stale_lock_recovery: bool,
     ) -> Result<ProjectSummary, AppError> {
+        Self::open_expected_project(state, package_root, force_stale_lock_recovery, None)
+    }
+
+    /// Recent-project repair must never open or migrate a different Project.
+    pub fn open_expected_project(
+        state: &AppState,
+        package_root: &Path,
+        force_stale_lock_recovery: bool,
+        expected: Option<ProjectId>,
+    ) -> Result<ProjectSummary, AppError> {
+        let _lifecycle = state.lifecycle.lock().expect("lifecycle mutex poisoned");
+        let canonical_root = std::fs::canonicalize(package_root)?;
+        let live = state
+            .open_projects
+            .lock()
+            .expect("registry mutex poisoned")
+            .iter()
+            .map(|(id, open)| (*id, open.clone()))
+            .collect::<Vec<_>>();
+        for (id, open) in &live {
+            if std::fs::canonicalize(&open.paths.root).is_ok_and(|path| path == canonical_root) {
+                if expected.is_some_and(|expected| expected != *id) {
+                    return Err(AppError::RecentProjectMismatch);
+                }
+                // Only a worker owned by this AppState can be resumed. Never infer
+                // ownership from lock.json's PID or remove/reacquire its live lock.
+                ProjectDbWorker::preflight_existing(open.paths.db_path(), *id)?;
+                return Self::get_summary(state, *id);
+            }
+        }
+        if let Some(expected) = expected {
+            // Structure validation can recover an interrupted manifest publication.
+            // Verify a recent shortcut's identity read-only before touching that file.
+            ProjectDbWorker::preflight_existing(
+                PackagePaths::new(package_root).db_path(),
+                expected,
+            )
+            .map_err(|error| match error {
+                PersistenceError::ProjectIdMismatch { .. } => AppError::RecentProjectMismatch,
+                other => other.into(),
+            })?;
+        }
         let paths = package::layout::validate_structure(package_root)?;
         let mut manifest = Manifest::read(&paths.manifest_path())?;
+        if let Some(expected) = expected {
+            if expected != manifest.project_id {
+                return Err(AppError::RecentProjectMismatch);
+            }
+        }
+        if live.iter().any(|(id, _)| *id == manifest.project_id) {
+            return Err(AppError::DuplicateOpenProject);
+        }
         ensure_manifest_is_writable(&manifest)?;
         let preflight = ProjectDbWorker::preflight_existing(paths.db_path(), manifest.project_id)?;
         if manifest.schema_version > preflight.schema_version {
@@ -331,6 +391,7 @@ impl ProjectService {
     /// ensuring no pending/dirty UI work is discarded before calling this
     /// (see the frontend Saved-state contract).
     pub fn close_project(state: &AppState, project_id: ProjectId) -> Result<(), AppError> {
+        let _lifecycle = state.lifecycle.lock().expect("lifecycle mutex poisoned");
         let open = {
             let mut registry = state.open_projects.lock().expect("registry mutex poisoned");
             registry
@@ -345,6 +406,25 @@ impl ProjectService {
             lock.release();
         }
         Ok(())
+    }
+
+    /// Renderer reloads do not close Rust workers. Reconnect to their committed
+    /// state rather than making the Home screen try to acquire their locks again.
+    pub fn list_open_projects(state: &AppState) -> Result<Vec<ProjectSummary>, AppError> {
+        let _lifecycle = state.lifecycle.lock().expect("lifecycle mutex poisoned");
+        let ids = state
+            .open_projects
+            .lock()
+            .expect("registry mutex poisoned")
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        let mut summaries = ids
+            .into_iter()
+            .map(|id| Self::get_summary(state, id))
+            .collect::<Result<Vec<_>, _>>()?;
+        summaries.sort_by_key(|summary| summary.project_id.to_string());
+        Ok(summaries)
     }
 
     /// Reads the current summary of an open Project without mutating it.

@@ -1,3 +1,5 @@
+import { RelationshipGroup } from "./RelationshipGroup";
+import { groupRelationships } from "./relationshipPresentation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "./Dialog";
 import type { FieldsController } from "./EntryFieldsPanel";
@@ -22,6 +24,7 @@ const emptyDefinition: RelationshipDraft = {
 
 export function EntryRelationshipsPanel({
   projectId,
+  restoreFocusKey,
   entryId,
   categories,
   disabled,
@@ -31,6 +34,7 @@ export function EntryRelationshipsPanel({
   onNavigate,
 }: {
   projectId: string;
+  restoreFocusKey?: string | null;
   entryId: string;
   categories: Category[];
   disabled: boolean;
@@ -162,16 +166,17 @@ export function EntryRelationshipsPanel({
     data.snapshot?.relationships.filter((r) => !r.ended && r.workspaceState === "active") ?? [];
   const history =
     data.snapshot?.relationships.filter((r) => r.ended || r.workspaceState !== "active") ?? [];
+  const restores = (r: Relationship) => restoreFocusKey === `relationship-${describe(r).other.id}`;
   function connection(r: Relationship) {
     const view = describe(r);
     return (
       <li key={r.id} className="relationship-card">
         <div className="relationship-heading">
-          <span>{view.label}</span>
           {view.other.id ? (
             <button
               className="relationship-target"
               disabled={busy}
+              data-navigation-focus={`relationship-${view.other.id}`}
               onClick={() => onNavigate(view.other.id!)}
             >
               {view.other.label}
@@ -192,11 +197,6 @@ export function EntryRelationshipsPanel({
             </small>
           )}
         </div>
-        {r.warnings.map((warning) => (
-          <p key={warning} className="relationship-warning" role="status">
-            {warning}
-          </p>
-        ))}
         <details className="relationship-details">
           <summary aria-label={`Note and actions${r.note ? " · has note" : ""}`}>
             {r.note ? "Note •" : "Details"}
@@ -231,6 +231,19 @@ export function EntryRelationshipsPanel({
           </div>
         </details>
       </li>
+    );
+  }
+  function groups(relationships: Relationship[]) {
+    return groupRelationships(relationships, data.snapshot?.definitions ?? [], entryId).map(
+      ({ key, ...group }) => (
+        <RelationshipGroup
+          key={key}
+          {...group}
+          entryId={entryId}
+          initialOpen={group.relationships.some(restores)}
+          connection={connection}
+        />
+      ),
     );
   }
   return (
@@ -270,11 +283,11 @@ export function EntryRelationshipsPanel({
           </p>
         )
       )}
-      <ul className="relationship-list">{current.map(connection)}</ul>
+      <ul className="relationship-list">{groups(current)}</ul>
       {!!history.length && (
-        <details className="disclosure">
+        <details className="disclosure" open={history.some(restores) || undefined}>
           <summary>Past and inactive relationships ({history.length})</summary>
-          <ul className="relationship-list">{history.map(connection)}</ul>
+          <ul className="relationship-list">{groups(history)}</ul>
         </details>
       )}
       <Dialog open={linkOpen} title="Add relationship" onClose={() => setLinkOpen(false)}>
