@@ -8,13 +8,14 @@ export function useEntryRelationships(
   entryId: string,
   onRevision: (revision: number) => void,
   getRevision: () => number,
+  onCommitted?: (revision: number) => void,
 ) {
   const [snapshot, setSnapshot] = useState<EntryRelationships | null>(null);
   const [state, setState] = useState<SaveState>("saved");
   const [error, setError] = useState<string | null>(null);
   const snapshotRef = useRef(snapshot);
-  const callbacks = useRef({ onRevision, getRevision });
-  callbacks.current = { onRevision, getRevision };
+  const callbacks = useRef({ onRevision, getRevision, onCommitted });
+  callbacks.current = { onRevision, getRevision, onCommitted };
   const inFlight = useRef<Promise<SubmitOutcome> | null>(null);
   const generation = useRef(0);
   const accept = useCallback((updated: EntryRelationships) => {
@@ -59,6 +60,7 @@ export function useEntryRelationships(
       const request = applyRelationships(projectId, entryId, expected, operation)
         .then((updated): SubmitOutcome => {
           accept(updated);
+          callbacks.current.onCommitted?.(updated.globalRevision);
           setState("saved");
           return { kind: "committed" };
         })

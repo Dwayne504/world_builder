@@ -1,4 +1,5 @@
 import { FieldSuggestions } from "./FieldSuggestions";
+import { ProjectionConfiguration } from "./ProjectionConfiguration";
 import { FieldMergeReview } from "./FieldMergeReview";
 import { fieldLabel } from "./fieldLabels";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -18,6 +19,7 @@ import type {
   FieldCommand,
   FieldKind,
   FieldProvider,
+  FieldProjection,
   SaveState,
   TypeDef,
 } from "./types";
@@ -29,6 +31,7 @@ const kinds: Record<FieldKind, string> = {
   boolean: "Boolean",
   choice: "Choice",
   multi_choice: "Multi-choice",
+  relationship: "Relationship",
 };
 
 export function CategoryManager({
@@ -54,6 +57,10 @@ export function CategoryManager({
   const [parentId, setParentId] = useState("");
   const [fieldName, setFieldName] = useState("");
   const [fieldKind, setFieldKind] = useState<FieldKind>("short_text");
+  const [projection, setProjection] = useState<FieldProjection>({
+    relationshipDefinitionId: "",
+    perspective: "source",
+  });
   const [unit, setUnit] = useState("");
   const [options, setOptions] = useState("");
   const [existingField, setExistingField] = useState("");
@@ -66,7 +73,7 @@ export function CategoryManager({
   const generation = useRef(0);
   const changedRef = useRef(onChanged);
   changedRef.current = onChanged;
-  const fieldDirty = !!(fieldName || unit || options);
+  const fieldDirty = !!(fieldName || unit || options || projection.relationshipDefinitionId);
   const dirty = !!(categoryName || typeName || fieldDirty);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -138,6 +145,7 @@ export function CategoryManager({
     setFieldName("");
     setUnit("");
     setOptions("");
+    setProjection({ relationshipDefinitionId: "", perspective: "source" });
     dirtyRef.current = false;
     setError(null);
   }
@@ -465,6 +473,7 @@ export function CategoryManager({
                 setFieldKind(e.target.value as FieldKind);
                 setOptions("");
                 setUnit("");
+                setProjection({ relationshipDefinitionId: "", perspective: "source" });
               }}
             >
               {Object.entries(kinds).map(([kind, label]) => (
@@ -485,6 +494,13 @@ export function CategoryManager({
               />
             </label>
           )}
+          {fieldKind === "relationship" && (
+            <ProjectionConfiguration
+              projectId={projectId}
+              value={projection}
+              onChange={setProjection}
+            />
+          )}
           {(fieldKind === "choice" || fieldKind === "multi_choice") && (
             <label>
               Options (one per line)
@@ -501,20 +517,27 @@ export function CategoryManager({
             onReuse={(d) => apply({ kind: "bind", fieldId: d.id, provider })}
           />
           <button
-            disabled={!fieldName.trim()}
+            disabled={
+              !fieldName.trim() ||
+              (fieldKind === "relationship" && !projection.relationshipDefinitionId)
+            }
             onClick={() =>
-              apply({
-                kind: "create",
-                name: fieldName,
-                fieldKind,
-                ...(fieldKind === "number" && unit.trim() ? { unit: unit.trim() } : {}),
-                provider,
-                options: options
-                  .split("\n")
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-                value: null,
-              })
+              apply(
+                fieldKind === "relationship"
+                  ? { kind: "create_projection", name: fieldName, ...projection, provider }
+                  : {
+                      kind: "create",
+                      name: fieldName,
+                      fieldKind,
+                      ...(fieldKind === "number" && unit.trim() ? { unit: unit.trim() } : {}),
+                      provider,
+                      options: options
+                        .split("\n")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                      value: null,
+                    },
+              )
             }
           >
             Create default field
@@ -533,7 +556,7 @@ export function CategoryManager({
             {formFeedback}
             <FieldMergeReview
               projectId={projectId}
-              definitions={definitions}
+              definitions={definitions.filter((definition) => definition.kind !== "relationship")}
               disabled={busy || loading || dirty}
               onCommit={(action) =>
                 perform(async () => {

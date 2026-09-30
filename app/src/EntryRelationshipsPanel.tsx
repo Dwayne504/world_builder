@@ -32,6 +32,10 @@ export function EntryRelationshipsPanel({
   onRevision,
   getRevision,
   onNavigate,
+  refreshKey = 0,
+  onCommitted,
+  presentedRelationships = [],
+  onEntriesChanged,
 }: {
   projectId: string;
   restoreFocusKey?: string | null;
@@ -42,8 +46,13 @@ export function EntryRelationshipsPanel({
   onRevision: (revision: number) => void;
   getRevision: () => number;
   onNavigate: (id: string) => void;
+  refreshKey?: number;
+  onCommitted?: (revision: number) => void;
+  presentedRelationships?: string[];
+  onEntriesChanged?: () => void;
 }) {
-  const data = useEntryRelationships(projectId, entryId, onRevision, getRevision);
+  const data = useEntryRelationships(projectId, entryId, onRevision, getRevision, onCommitted);
+  const [showAll, setShowAll] = useState(false);
   const { command, wait } = data;
   const [linkOpen, setLinkOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
@@ -108,6 +117,15 @@ export function EntryRelationshipsPanel({
       : formDirty || noteDraft
         ? "dirty"
         : "saved";
+  const previousRefresh = useRef(refreshKey);
+  const { reload } = data;
+  useEffect(() => {
+    // A companion Field write can refresh clean relationship views, but must
+    // not silently rebase a note draft or clear a failed write.
+    if (previousRefresh.current === refreshKey || state !== "saved") return;
+    previousRefresh.current = refreshKey;
+    void reload();
+  }, [refreshKey, state, reload]);
   useEffect(
     () => onController({ state, submit, canSubmit: !formDirty }),
     [state, submit, formDirty, onController],
@@ -132,7 +150,10 @@ export function EntryRelationshipsPanel({
   }
   async function run(operation: RelationshipCommand, committed?: () => void) {
     setFormError(null);
-    if ((await command(operation)).kind === "committed") committed?.();
+    if ((await command(operation)).kind === "committed") {
+      if (operation.kind === "connect" && operation.other.kind === "create") onEntriesChanged?.();
+      committed?.();
+    }
   }
   function updateDraft(update: Partial<RelationshipDraft>) {
     setDraft({ ...draft, ...update });
@@ -164,6 +185,10 @@ export function EntryRelationshipsPanel({
   const configDisabled = busy || !!noteDraft || !data.snapshot;
   const current =
     data.snapshot?.relationships.filter((r) => !r.ended && r.workspaceState === "active") ?? [];
+  const visibleCurrent = showAll
+    ? current
+    : current.filter((r) => !presentedRelationships.includes(r.id));
+  const presentedCount = current.filter((r) => presentedRelationships.includes(r.id)).length;
   const history =
     data.snapshot?.relationships.filter((r) => r.ended || r.workspaceState !== "active") ?? [];
   const restores = (r: Relationship) => restoreFocusKey === `relationship-${describe(r).other.id}`;
@@ -283,7 +308,17 @@ export function EntryRelationshipsPanel({
           </p>
         )
       )}
-      <ul className="relationship-list">{groups(current)}</ul>
+      {presentedCount > 0 && (
+        <label className="checkbox-row projection-view-toggle">
+          <input
+            type="checkbox"
+            checked={showAll}
+            onChange={(event) => setShowAll(event.target.checked)}
+          />
+          Show all relationships, including those in Fields
+        </label>
+      )}
+      <ul className="relationship-list">{groups(visibleCurrent)}</ul>
       {!!history.length && (
         <details className="disclosure" open={history.some(restores) || undefined}>
           <summary>Past and inactive relationships ({history.length})</summary>

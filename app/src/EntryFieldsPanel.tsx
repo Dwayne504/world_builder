@@ -1,8 +1,18 @@
 import { FieldManagerTables } from "./FieldManagerTables";
 import { DeleteEntryFieldDialog } from "./DeleteEntryFieldDialog";
 import { FieldSuggestions } from "./FieldSuggestions";
+import { ProjectionConfiguration } from "./ProjectionConfiguration";
+import { ProjectionFieldValue } from "./ProjectionFieldValue";
 import { useCallback, useEffect, useId, useState } from "react";
-import type { Entry, EntryField, FieldCommand, FieldKind, FieldProvider, SaveState } from "./types";
+import type {
+  Entry,
+  EntryField,
+  FieldCommand,
+  FieldKind,
+  FieldProjection,
+  FieldProvider,
+  SaveState,
+} from "./types";
 import type { SubmitOutcome } from "./useProjectRename";
 import { parseFieldDraft, useEntryFields, valueDraft, type FieldDraft } from "./useEntryFields";
 import { Dialog } from "./Dialog";
@@ -19,6 +29,7 @@ const kinds: Record<FieldKind, string> = {
   boolean: "Boolean",
   choice: "Choice",
   multi_choice: "Multi-choice",
+  relationship: "Relationship",
 };
 
 function ValueInput({
@@ -112,6 +123,11 @@ export function EntryFieldsPanel({
   getRevision,
   templateEpoch = 0,
   onRecoveryBackup,
+  refreshKey = 0,
+  onCommitted,
+  onPresentedRelationships,
+  onNavigate,
+  onEntriesChanged,
 }: {
   projectId: string;
   entry: Entry;
@@ -121,13 +137,19 @@ export function EntryFieldsPanel({
   getRevision?: () => number;
   templateEpoch?: number;
   onRecoveryBackup?: (path: string) => void;
+  refreshKey?: number;
+  onCommitted?: (revision: number) => void;
+  onPresentedRelationships?: (ids: string[]) => void;
+  onNavigate?: (id: string) => void;
+  onEntriesChanged?: () => void;
 }) {
   const fields = useEntryFields(
     projectId,
     entry.id,
-    `${entry.revision}:${templateEpoch}`,
+    `${entry.revision}:${templateEpoch}:${refreshKey}`,
     onRevision,
     getRevision,
+    onCommitted,
   );
   const [manageOpen, setManageOpen] = useState(false);
   const [definitionOpen, setDefinitionOpen] = useState(false);
@@ -136,10 +158,40 @@ export function EntryFieldsPanel({
     null,
   );
   const [createOpen, setCreateOpen] = useState(false);
-  const { submit: submitValues, waitForPending } = fields;
+  const { submit: submitValues, waitForPending, command: commandFields } = fields;
+  const editProjection = useCallback(
+    async (command: FieldCommand): Promise<SubmitOutcome> => {
+      const result = await commandFields(command);
+      if (
+        result.kind === "committed" &&
+        command.kind === "edit_projection" &&
+        command.other.kind === "create"
+      ) {
+        onEntriesChanged?.();
+      }
+      return result;
+    },
+    [commandFields, onEntriesChanged],
+  );
   const [newName, setNewName] = useState("");
   const [newUnit, setNewUnit] = useState("");
   const [newKind, setNewKind] = useState<FieldKind>("short_text");
+  const [projection, setProjection] = useState<FieldProjection>({
+    relationshipDefinitionId: "",
+    perspective: "source",
+  });
+  const [projectionDrafts, setProjectionDrafts] = useState<string[]>([]);
+  const updateProjectionDirty = useCallback((id: string, dirty: boolean) => {
+    setProjectionDrafts((current) =>
+      dirty
+        ? current.includes(id)
+          ? current
+          : [...current, id]
+        : current.includes(id)
+          ? current.filter((fieldId) => fieldId !== id)
+          : current,
+    );
+  }, []);
   const [newScope, setNewScope] = useState<FieldProvider["kind"]>("entry");
   const [newValue, setNewValue] = useState<FieldDraft>("");
   const [newOptions, setNewOptions] = useState("");
@@ -153,6 +205,8 @@ export function EntryFieldsPanel({
     String(newValue) ||
     newOptions ||
     newUnit ||
+    projection.relationshipDefinitionId ||
+    projectionDrafts.length ||
     renamed ||
     optionLabel
   );
@@ -177,6 +231,20 @@ export function EntryFieldsPanel({
   const hasValueDraft = Object.keys(fields.drafts).length > 0;
   const configDisabled = busy || hasValueDraft || !fields.snapshot;
   const selected = fields.snapshot?.definitions.find((d) => d.id === manageId);
+  const presentedIds = [
+    ...new Set(
+      fields.snapshot?.fields
+        .filter((field) => showHidden || !field.hidden)
+        .flatMap(
+          (field) => field.projectedRelationships?.map((relationship) => relationship.id) ?? [],
+        ) ?? [],
+    ),
+  ]
+    .sort()
+    .join("\n");
+  useEffect(() => {
+    onPresentedRelationships?.(presentedIds ? presentedIds.split("\n") : []);
+  }, [presentedIds, onPresentedRelationships]);
   const provider = (kind: FieldProvider["kind"]): FieldProvider => ({
     kind,
     id: kind === "entry" ? entry.id : kind === "category" ? entry.categoryId : entry.typeId!,
@@ -193,10 +261,18 @@ export function EntryFieldsPanel({
     setNewUnit("");
     setNewValue("");
     setNewOptions("");
+    setProjection({ relationshipDefinitionId: "", perspective: "source" });
     setFormError(null);
   }
   async function create() {
     try {
+      if (newKind === "relationship") {
+        await configure(
+          { kind: "create_projection", name: newName, ...projection, provider: provider(newScope) },
+          cancelNew,
+        );
+        return;
+      }
       const value = parseFieldDraft(
         {
           definition: {
@@ -253,14 +329,21 @@ export function EntryFieldsPanel({
             </button>
           )}
           <button
-            disabled={configDisabled || !!renamed || !!optionLabel}
+            disabled={configDisabled || !!renamed || !!optionLabel || !!projectionDrafts.length}
             onClick={() => setCreateOpen(true)}
           >
             Add field
           </button>
           <button
             className="quiet-button"
-            disabled={!!newName || !!String(newValue) || !!newOptions || !!newUnit}
+            disabled={
+              !!newName ||
+              !!String(newValue) ||
+              !!newOptions ||
+              !!newUnit ||
+              !!projection.relationshipDefinitionId ||
+              !!projectionDrafts.length
+            }
             onClick={() => setManageOpen(true)}
           >
             Manage fields
@@ -298,14 +381,19 @@ export function EntryFieldsPanel({
           </button>
         </p>
       )}
-      {!createOpen && (newName || String(newValue) || newOptions || newUnit) && (
-        <p className="field-note">
-          You have an unfinished Field.{" "}
-          <button className="quiet-button" onClick={() => setCreateOpen(true)}>
-            Continue Field draft
-          </button>
-        </p>
-      )}
+      {!createOpen &&
+        (newName ||
+          String(newValue) ||
+          newOptions ||
+          newUnit ||
+          projection.relationshipDefinitionId) && (
+          <p className="field-note">
+            You have an unfinished Field.{" "}
+            <button className="quiet-button" onClick={() => setCreateOpen(true)}>
+              Continue Field draft
+            </button>
+          </p>
+        )}
       <div className="field-grid">
         {fields.snapshot?.fields
           .filter((field) => showHidden || !field.hidden)
@@ -323,23 +411,47 @@ export function EntryFieldsPanel({
                   </small>
                 )}
               </div>
-              <ValueInput
-                field={field}
-                draft={fields.drafts[field.definition.id] ?? valueDraft(field.value)}
-                disabled={disabled || formDirty || fields.configurationPending}
-                onChange={(draft) => fields.change(field.definition.id, draft)}
-                onBlur={() => void fields.submit()}
-              />
-              {(field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
-                <button
-                  className="quiet-button clear-field"
-                  aria-label={`Clear value: ${field.definition.name}`}
+              {field.definition.kind === "relationship" ? (
+                <ProjectionFieldValue
+                  projectId={projectId}
+                  entryId={entry.id}
+                  field={field}
+                  disabled={
+                    busy ||
+                    hasValueDraft ||
+                    !!newName ||
+                    !!String(newValue) ||
+                    !!newOptions ||
+                    !!newUnit ||
+                    !!projection.relationshipDefinitionId ||
+                    !!renamed ||
+                    !!optionLabel ||
+                    projectionDrafts.some((id) => id !== field.definition.id)
+                  }
+                  onCommand={editProjection}
+                  onDirty={updateProjectionDirty}
+                  onNavigate={onNavigate}
+                />
+              ) : (
+                <ValueInput
+                  field={field}
+                  draft={fields.drafts[field.definition.id] ?? valueDraft(field.value)}
                   disabled={disabled || formDirty || fields.configurationPending}
-                  onClick={() => fields.change(field.definition.id, "")}
-                >
-                  Clear
-                </button>
+                  onChange={(draft) => fields.change(field.definition.id, draft)}
+                  onBlur={() => void fields.submit()}
+                />
               )}
+              {field.definition.kind !== "relationship" &&
+                (field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
+                  <button
+                    className="quiet-button clear-field"
+                    aria-label={`Clear value: ${field.definition.name}`}
+                    disabled={disabled || formDirty || fields.configurationPending}
+                    onClick={() => fields.change(field.definition.id, "")}
+                  >
+                    Clear
+                  </button>
+                )}
             </div>
           ))}
       </div>
@@ -375,6 +487,7 @@ export function EntryFieldsPanel({
                 setNewValue("");
                 setNewOptions("");
                 setNewUnit("");
+                setProjection({ relationshipDefinitionId: "", perspective: "source" });
               }}
             >
               {Object.entries(kinds).map(([kind, label]) => (
@@ -417,7 +530,13 @@ export function EntryFieldsPanel({
               </select>
             </label>
           </details>
-          {newKind === "choice" || newKind === "multi_choice" ? (
+          {newKind === "relationship" ? (
+            <ProjectionConfiguration
+              projectId={projectId}
+              value={projection}
+              onChange={setProjection}
+            />
+          ) : newKind === "choice" || newKind === "multi_choice" ? (
             <label>
               Options (one per line)
               <textarea
@@ -467,7 +586,11 @@ export function EntryFieldsPanel({
           )}
           <div className="row">
             <button
-              disabled={!newName.trim() || (newScope === "type" && !entry.typeId)}
+              disabled={
+                !newName.trim() ||
+                (newScope === "type" && !entry.typeId) ||
+                (newKind === "relationship" && !projection.relationshipDefinitionId)
+              }
               onClick={() => void create()}
             >
               Create field
@@ -484,7 +607,7 @@ export function EntryFieldsPanel({
       >
         <p className="muted">
           Hide Fields to focus without losing values. Delete affects only this Entry. Click a Field
-          name to edit its shared definition.
+          name to edit its shared definition. Removing a relationship Field keeps its connections.
         </p>
         {manageOpen && !definitionOpen && !deleteReview && (fields.error || formError) && (
           <p role="alert">
@@ -517,6 +640,10 @@ export function EntryFieldsPanel({
             }
             onDelete={(field) => {
               setFormError(null);
+              if (field.definition.kind === "relationship") {
+                void configure({ kind: "remove_projection", fieldId: field.definition.id });
+                return;
+              }
               setDeleteReview({
                 field,
                 revision: Math.max(fields.snapshot!.globalRevision, getRevision?.() ?? 0),

@@ -768,6 +768,7 @@ function EntryEditor({
   mutations,
   templateEpoch,
   onRecoveryBackup,
+  onEntriesChanged,
 }: {
   projectId: string;
   restoreFocusKey: string | null;
@@ -780,6 +781,7 @@ function EntryEditor({
   mutations: MutationCoordinator;
   templateEpoch: number;
   onRecoveryBackup: (path: string) => void;
+  onEntriesChanged: () => void;
 }) {
   const editor = useEntryName(projectId, initialEntry);
   const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
@@ -788,6 +790,16 @@ function EntryEditor({
   const committedRevision = useRef(initialEntry.globalRevision);
   committedRevision.current = Math.max(committedRevision.current, editor.entry.globalRevision);
   const getRevision = useCallback(() => committedRevision.current, []);
+  const [fieldsRefreshKey, setFieldsRefreshKey] = useState(0);
+  const [relationshipsRefreshKey, setRelationshipsRefreshKey] = useState(0);
+  const [presentedRelationships, setPresentedRelationships] = useState<string[]>([]);
+  const receivePresentedRelationships = useCallback((ids: string[]) => {
+    setPresentedRelationships((current) => (current.join("\n") === ids.join("\n") ? current : ids));
+  }, []);
+  // Only acknowledged local mutations trigger the companion read. Read
+  // acknowledgements themselves must never create a refresh loop.
+  const fieldCommitted = useCallback(() => setRelationshipsRefreshKey((key) => key + 1), []);
+  const relationshipCommitted = useCallback(() => setFieldsRefreshKey((key) => key + 1), []);
   const relationshipsController = useRef<FieldsController | null>(null);
   const [relationshipsState, setRelationshipsState] = useState<SaveState>("saved");
   const [relationshipsCanSubmit, setRelationshipsCanSubmit] = useState(true);
@@ -1150,12 +1162,17 @@ function EntryEditor({
           disabled={
             mutations.state === "saving" ||
             editor.saveState === "saving" ||
-            relationshipsState === "saving"
+            relationshipsState !== "saved"
           }
           onController={receiveFields}
           onRevision={receiveRevision}
           getRevision={getRevision}
           templateEpoch={templateEpoch}
+          refreshKey={fieldsRefreshKey}
+          onCommitted={fieldCommitted}
+          onPresentedRelationships={receivePresentedRelationships}
+          onNavigate={onNavigate}
+          onEntriesChanged={onEntriesChanged}
           onRecoveryBackup={onRecoveryBackup}
         />
         <EntryRelationshipsPanel
@@ -1173,6 +1190,10 @@ function EntryEditor({
           onRevision={receiveRevision}
           getRevision={getRevision}
           onNavigate={onNavigate}
+          refreshKey={relationshipsRefreshKey}
+          onCommitted={relationshipCommitted}
+          presentedRelationships={presentedRelationships}
+          onEntriesChanged={onEntriesChanged}
         />
       </div>
     </section>
@@ -1331,6 +1352,10 @@ function EntryWorkflow({
       (current) => current || nextCategories.find((item) => item.isUncategorized)?.id || "",
     );
   }, [projectId]);
+
+  const refreshAfterQuickCreate = useCallback(() => {
+    void refresh().catch((reason) => setError(errorMessage(reason)));
+  }, [refresh]);
 
   useEffect(() => {
     void refresh().catch((reason) => setError(errorMessage(reason)));
@@ -1612,6 +1637,7 @@ function EntryWorkflow({
           initialEntry={selected}
           templateEpoch={templateEpoch}
           onRecoveryBackup={onRecoveryBackup}
+          onEntriesChanged={refreshAfterQuickCreate}
           categories={categories}
           mutations={mutations}
           onController={receiveController}

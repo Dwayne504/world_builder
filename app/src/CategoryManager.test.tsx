@@ -8,6 +8,7 @@ import {
   listCategories,
   listTypes,
   readFieldCatalog,
+  readProjectRelationships,
   getPreferences,
   previewFieldMerge,
   mergeFields,
@@ -25,6 +26,7 @@ vi.mock("./api", () => ({
   listCategories: vi.fn(),
   listTypes: vi.fn(),
   readFieldCatalog: vi.fn(),
+  readProjectRelationships: vi.fn(),
 }));
 const weapons = {
   id: "weapons",
@@ -75,6 +77,46 @@ async function show() {
   await screen.findByText("Types in Weapons");
   return view;
 }
+it("configures a relationship Field as a Type default without storing a separate value", async () => {
+  vi.mocked(readProjectRelationships).mockResolvedValue({
+    globalRevision: 1,
+    entries: [],
+    relationships: [],
+    definitions: [
+      {
+        id: "ownership",
+        name: "Ownership",
+        forwardLabel: "owns",
+        inverseLabel: "is owned by",
+        directed: true,
+        expectedSourcesPerTarget: 1,
+        expectedTargetsPerSource: null,
+        revision: 1,
+        retired: false,
+      },
+    ],
+  });
+  await show();
+  fireEvent.change(screen.getByLabelText("Default field scope"), { target: { value: "sword" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+  change("Default field name", "Current owner");
+  change("Default field kind", "relationship");
+  expect(screen.getByRole("button", { name: "Create default field" })).toBeDisabled();
+  await screen.findByRole("option", { name: "Ownership · owns / is owned by" });
+  change("Field relationship", "ownership");
+  change("Field relationship direction", "target");
+  fireEvent.click(screen.getByRole("button", { name: "Create default field" }));
+  await waitFor(() =>
+    expect(applyTemplateFields).toHaveBeenCalledWith("project", 1, {
+      kind: "create_projection",
+      name: "Current owner",
+      relationshipDefinitionId: "ownership",
+      perspective: "target",
+      provider: { kind: "type", id: "sword" },
+    }),
+  );
+  await waitFor(() => expect(controller.state).toBe("saved"));
+});
 function change(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }

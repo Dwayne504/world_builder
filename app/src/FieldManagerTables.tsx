@@ -85,10 +85,15 @@ export function FieldManagerTables({
                       <button
                         className="quiet-button"
                         disabled={disabled}
-                        aria-label={`Delete from Entry: ${field.definition.name}`}
+                        aria-label={`${field.definition.kind === "relationship" ? "Remove from Fields" : "Delete from Entry"}: ${field.definition.name}`}
+                        title={
+                          field.definition.kind === "relationship"
+                            ? "Remove this display only; keep the relationships."
+                            : undefined
+                        }
                         onClick={() => onDelete(field)}
                       >
-                        Delete
+                        {field.definition.kind === "relationship" ? "Remove from Fields" : "Delete"}
                       </button>
                     </div>
                   </td>

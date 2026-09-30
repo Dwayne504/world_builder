@@ -6,6 +6,7 @@ export const fieldKinds = {
   boolean: "Yes / no",
   choice: "Choice",
   multi_choice: "Multi-choice",
+  relationship: "Relationship",
 };
 export function matchingFields(definitions: FieldDefinition[], name: string) {
   return definitions.filter(

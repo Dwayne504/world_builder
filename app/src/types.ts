@@ -66,7 +66,15 @@ export interface Preferences {
   defaultBackupsDirExists: boolean;
 }
 
-export type FieldKind = "short_text" | "number" | "boolean" | "choice" | "multi_choice";
+export type FieldKind =
+  "short_text" | "number" | "boolean" | "choice" | "multi_choice" | "relationship";
+export interface FieldProjection {
+  relationshipDefinitionId: string;
+  perspective: "source" | "target";
+}
+export type OtherEntry =
+  | { kind: "existing"; id: string }
+  | { kind: "create"; name: string | null; categoryId: string | null };
 export interface FieldProvider {
   kind: "category" | "type" | "entry";
   id: string;
@@ -81,6 +89,7 @@ export interface FieldDefinition {
   name: string;
   kind: FieldKind;
   unit?: string | null;
+  projection?: FieldProjection | null;
   retired: boolean;
   revision: number;
   options: ChoiceOption[];
@@ -97,6 +106,7 @@ export interface EntryField {
   hidden?: boolean;
   defaultSources?: FieldDefinition["bindings"];
   value: FieldValue | null;
+  projectedRelationships?: Relationship[];
 }
 export interface EntryFields {
   globalRevision: number;
@@ -104,6 +114,15 @@ export interface EntryFields {
   definitions: FieldDefinition[];
 }
 export type FieldCommand =
+  | {
+      kind: "create_projection";
+      name: string;
+      relationshipDefinitionId: string;
+      perspective: "source" | "target";
+      provider: FieldProvider;
+    }
+  | { kind: "edit_projection"; fieldId: string; other: OtherEntry; instanceId: string | null }
+  | { kind: "remove_projection"; fieldId: string }
   | {
       kind: "create";
       name: string;
@@ -165,9 +184,7 @@ export type RelationshipCommand =
       kind: "connect";
       definitionId: string;
       perspective: "source" | "target";
-      other:
-        | { kind: "existing"; id: string }
-        | { kind: "create"; name: string | null; categoryId: string | null };
+      other: OtherEntry;
       note: string;
       replace: string[];
     }

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Preferences, ProjectSummary } from "./types";
+import type { Preferences, ProjectSummary, EntryFields, RelationshipSnapshot } from "./types";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -277,6 +277,9 @@ describe("Project screen Saved contract", () => {
       .mockReset()
       .mockResolvedValue({ globalRevision: 1, definitions: [], relationships: [], entries: [] });
     vi.mocked(applyRelationships).mockReset();
+    vi.mocked(readProjectRelationships)
+      .mockReset()
+      .mockResolvedValue({ globalRevision: 1, definitions: [], relationships: [], entries: [] });
     closeProjectMock.mockReset();
     renameProjectMock.mockReset();
     openProjectMock.mockReset();
@@ -310,6 +313,129 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("keeps projected Fields and full Relationships synchronized after acknowledged edits", async () => {
+    const currentEntry = mockEditableEntry();
+    const definition = {
+      id: "owned",
+      name: "Possession",
+      kind: "relationship" as const,
+      retired: false,
+      revision: 1,
+      options: [],
+      bindings: [],
+      projection: { relationshipDefinitionId: "ownership", perspective: "source" as const },
+    };
+    let relationships: RelationshipSnapshot = {
+      globalRevision: 1,
+      definitions: [
+        {
+          id: "ownership",
+          name: "Ownership",
+          forwardLabel: "owns",
+          inverseLabel: "owned by",
+          directed: true,
+          retired: false,
+          revision: 1,
+          expectedTargetsPerSource: null,
+          expectedSourcesPerTarget: 1,
+        },
+      ],
+      entries: [{ id: "blade", label: "Blade", categoryName: "Objects" }],
+      relationships: [
+        {
+          id: "r1",
+          definitionId: "ownership",
+          source: { id: "entry", label: "Thron", workspaceState: "active" },
+          target: { id: "blade", label: "Blade", workspaceState: "active" },
+          note: "Inherited",
+          ended: false,
+          workspaceState: "active",
+          revision: 1,
+          warnings: [],
+        },
+      ],
+    };
+    const fieldSnapshot = (): EntryFields => ({
+      globalRevision: relationships.globalRevision,
+      definitions: [definition],
+      fields: [
+        {
+          definition,
+          value: null,
+          available: true,
+          projectedRelationships: relationships.relationships.filter(
+            (relationship) => !relationship.ended,
+          ),
+        },
+      ],
+    });
+    vi.mocked(readFields).mockImplementation(async () => fieldSnapshot());
+    vi.mocked(readRelationships).mockImplementation(async () => relationships);
+    vi.mocked(readProjectRelationships).mockImplementation(async () => relationships);
+    vi.mocked(applyFields).mockImplementation(async () => {
+      listEntriesMock.mockResolvedValue([
+        currentEntry,
+        { ...currentEntry, id: "ship", displayName: "Ship", authoredName: "Ship" },
+      ]);
+      relationships = {
+        ...relationships,
+        globalRevision: 2,
+        relationships: [
+          {
+            ...relationships.relationships[0],
+            target: { id: "ship", label: "Ship", workspaceState: "active" },
+            revision: 2,
+          },
+        ],
+      };
+      return fieldSnapshot();
+    });
+    vi.mocked(applyRelationships).mockImplementation(async () => {
+      relationships = {
+        ...relationships,
+        globalRevision: 3,
+        relationships: [{ ...relationships.relationships[0], ended: true, revision: 3 }],
+      };
+      return relationships;
+    });
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Change Possession: Blade" }));
+    fireEvent.change(await screen.findByLabelText("Find Entry for Possession"), {
+      target: { value: "Ship" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Create “Ship”" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create and connect" }));
+    await screen.findByRole("button", { name: "Change Possession: Ship" });
+    expect(applyFields).toHaveBeenCalledWith(project.projectId, "entry", 1, {
+      kind: "edit_projection",
+      fieldId: "owned",
+      instanceId: "r1",
+      other: { kind: "create", name: "Ship", categoryId: null },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "All Entries" })).toHaveTextContent("2"),
+    );
+    const all = await screen.findByLabelText("Show all relationships, including those in Fields");
+    fireEvent.click(all);
+    fireEvent.click(await screen.findByRole("button", { name: "Show owns relationships" }));
+    fireEvent.click(screen.getByLabelText("Note and actions · has note"));
+    expect(screen.getByLabelText("Note: owns Ship")).toHaveValue("Inherited");
+    fireEvent.click(screen.getByRole("button", { name: "End relationship" }));
+    await screen.findByRole("button", { name: "Choose Possession" });
+    expect(applyRelationships).toHaveBeenCalledWith(project.projectId, "entry", 2, {
+      kind: "set_ended",
+      id: "r1",
+      ended: true,
+    });
+    expect(
+      screen.queryByRole("button", { name: "Change Possession: Ship" }),
+    ).not.toBeInTheDocument();
+    // Reads must not trigger a Field/Relationship refresh feedback loop.
+    expect(readFields).toHaveBeenCalledTimes(2);
+    expect(readRelationships).toHaveBeenCalledTimes(2);
   });
 
   it("filters by Category and exact Type, including untyped Entries, without changing their data", async () => {

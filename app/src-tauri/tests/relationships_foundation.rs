@@ -529,7 +529,7 @@ fn schema_three_upgrade_is_backed_up_and_failed_upgrade_can_be_retried() {
     let f = Fixture::new();
     ProjectService::close_project(&f.state, f.project).unwrap();
     let conn = f.db();
-    conn.execute_batch("DROP TABLE entry_field_presentation; DROP TRIGGER field_unit_preserve_values; ALTER TABLE field_definition DROP COLUMN unit; DROP TABLE relationship_participant; DROP TABLE relationship_instance; DROP TABLE relationship_definition; PRAGMA user_version=3; UPDATE project_meta SET schema_version=3;").unwrap();
+    conn.execute_batch("DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation; DROP TRIGGER field_unit_preserve_values; ALTER TABLE field_definition DROP COLUMN unit; DROP TABLE relationship_participant; DROP TABLE relationship_instance; DROP TABLE relationship_definition; PRAGMA user_version=3; UPDATE project_meta SET schema_version=3;").unwrap();
     let manifest_path = std::path::Path::new(&f.path).join("manifest.json");
     let mut manifest = Manifest::read(&manifest_path).unwrap();
     manifest.schema_version = 3;

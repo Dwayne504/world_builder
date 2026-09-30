@@ -69,9 +69,28 @@ fn read_snapshot(
     })?;
     let mut definitions = Vec::new();
     let mut fields = Vec::new();
+    let has_projections: bool =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM field_projection)", [], |r| {
+            r.get(0)
+        })?;
+    let relationships = entry
+        .filter(|_| has_projections)
+        .map(|entry| super::relationships::read(conn, entry))
+        .transpose()?;
     for row in rows {
         let (id, name, kind, retired, revision, unit) = row?;
         let field_id = FieldId::parse(&id).map_err(invalid)?;
+        let projection = conn.query_row("SELECT relationship_definition_id,perspective FROM field_projection WHERE field_id=?1", [&id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).optional()?
+            .map(|(definition, perspective)| -> Result<_, PersistenceError> { Ok(FieldProjection {
+                relationship_definition_id: crate::domain::structure::RelationshipDefinitionId::parse(&definition).map_err(invalid)?,
+                perspective: serde_json::from_value(serde_json::Value::String(perspective)).map_err(invalid)?,
+            }) }).transpose()?;
+        let kind = parse_kind(kind)?;
+        if (kind == FieldKind::Relationship) != projection.is_some() {
+            return Err(invalid(
+                "Relationship Field projection metadata is missing or invalid",
+            ));
+        }
         let mut options = conn.prepare("SELECT id, label, retired_at IS NOT NULL FROM choice_option WHERE field_id = ?1 ORDER BY created_at, id")?;
         let options = options
             .query_map([&id], |r| {
@@ -119,12 +138,13 @@ fn read_snapshot(
         let definition = FieldDefinition {
             id: field_id,
             name,
-            kind: parse_kind(kind)?,
+            kind,
             unit,
             retired,
             revision,
             options,
             bindings,
+            projection,
         };
         if let Some(entry) = entry {
             let (hidden, removed): (bool, bool) = conn.query_row(
@@ -145,13 +165,41 @@ fn read_snapshot(
                 .collect();
             let available = !retired && !removed && definition.bindings.iter().any(applicable);
             let value = read_value(conn, entry, &definition)?;
-            if available || value.is_some() {
+            let projected_relationships: Vec<_> = match (&definition.projection, &relationships) {
+                (Some(projection), Some(relationships)) => {
+                    let relationship_definition = relationships
+                        .definitions
+                        .iter()
+                        .find(|d| d.id == projection.relationship_definition_id)
+                        .ok_or_else(|| invalid("Relationship definition for Field is missing"))?;
+                    relationships
+                        .relationships
+                        .iter()
+                        .filter(|r| {
+                            r.is_current()
+                                && super::relationships::matches_projection(
+                                    r,
+                                    relationship_definition,
+                                    entry,
+                                    projection.perspective,
+                                )
+                        })
+                        .cloned()
+                        .collect()
+                }
+                _ => vec![],
+            };
+            let retained_projection = !removed
+                && definition.bindings.iter().any(applicable)
+                && !projected_relationships.is_empty();
+            if available || value.is_some() || retained_projection {
                 fields.push(EntryField {
                     definition: definition.clone(),
                     available,
                     hidden,
                     default_sources,
                     value,
+                    projected_relationships,
                 });
             }
         }
@@ -197,6 +245,9 @@ fn read_value(
             );
             values
         }
+        FieldKind::Relationship => {
+            return Err(invalid("Relationship Fields cannot contain scalar values"))
+        }
     }))
 }
 
@@ -223,6 +274,7 @@ pub(super) fn apply_template(
                 value: None,
                 ..
             }
+            | FieldCommand::CreateProjection { provider, .. }
             | FieldCommand::Bind { provider, .. }
             | FieldCommand::Unbind { provider, .. } => provider,
             _ => return Err(invalid(
@@ -264,6 +316,79 @@ fn apply_operation(
     }
     let now = Utc::now().to_rfc3339();
     match command {
+        FieldCommand::CreateProjection {
+            name: raw,
+            relationship_definition_id,
+            perspective,
+            provider,
+        } => {
+            let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM relationship_definition WHERE id=?1 AND retired_at IS NULL)", [relationship_definition_id.to_string()], |r| r.get(0))?;
+            if !exists {
+                return Err(invalid(
+                    "Choose an active relationship definition in this Project",
+                ));
+            }
+            let field = FieldId::new();
+            tx.execute("INSERT INTO field_definition(id,name,value_kind,created_at,updated_at,revision) VALUES(?1,?2,'relationship',?3,?3,1)",params![field.to_string(),name(&raw)?,now])?;
+            tx.execute("INSERT INTO field_projection(field_id,relationship_definition_id,perspective,created_at,updated_at,revision) VALUES(?1,?2,?3,?4,?4,1)",params![field.to_string(),relationship_definition_id.to_string(),match perspective {crate::domain::relationships::Perspective::Source => "source",crate::domain::relationships::Perspective::Target => "target"},now])?;
+            bind(&tx, field, &provider)?;
+        }
+        FieldCommand::EditProjection {
+            field_id,
+            other,
+            instance_id,
+        } => {
+            let entry =
+                entry.ok_or_else(|| invalid("Choose an Entry to edit a relationship Field"))?;
+            let field = snapshot
+                .fields
+                .iter()
+                .find(|f| f.definition.id == field_id && f.available)
+                .ok_or_else(|| invalid("Relationship Field is not available on this Entry"))?;
+            let projection = field
+                .definition
+                .projection
+                .as_ref()
+                .ok_or_else(|| invalid("Choose a relationship Field"))?;
+            let selected = match instance_id {
+                Some(id) if field.projected_relationships.iter().any(|r| r.id == id) => Some(id),
+                Some(_) => return Err(invalid("Selected relationship is not current in this Field")),
+                None => match field.projected_relationships.as_slice() {
+                    [] => None,
+                    [relationship] => Some(relationship.id),
+                    _ => return Err(invalid("Multiple current relationships: choose an instance to edit, Replace, or Keep both")),
+                },
+            };
+            if let Some(id) = selected {
+                super::relationships::retarget(&tx, entry, projection, id, other, &now)?;
+            } else {
+                super::relationships::apply_in_transaction(
+                    &tx,
+                    entry,
+                    crate::domain::relationships::RelationshipCommand::Connect {
+                        definition_id: projection.relationship_definition_id,
+                        perspective: projection.perspective,
+                        other,
+                        note: String::new(),
+                        replace: vec![],
+                    },
+                    &now,
+                )?;
+            }
+        }
+        FieldCommand::RemoveProjection { field_id } => {
+            let entry =
+                entry.ok_or_else(|| invalid("Choose an Entry to remove a Field display"))?;
+            if !snapshot
+                .fields
+                .iter()
+                .any(|f| f.definition.id == field_id && f.definition.projection.is_some())
+            {
+                return Err(invalid("Relationship Field is not on this Entry"));
+            }
+            tx.execute("DELETE FROM field_availability WHERE provider_kind='entry' AND provider_id=?1 AND field_id=?2",params![entry.to_string(),field_id.to_string()])?;
+            tx.execute("INSERT INTO entry_field_presentation(entry_id,field_id,hidden,removed,created_at,updated_at,revision) VALUES(?1,?2,0,1,?3,?3,1) ON CONFLICT(entry_id,field_id) DO UPDATE SET hidden=0,removed=1,updated_at=excluded.updated_at,revision=entry_field_presentation.revision+1",params![entry.to_string(),field_id.to_string(),now])?;
+        }
         FieldCommand::SetHidden { field_id, hidden } => {
             let entry = entry.ok_or_else(|| invalid("Choose an Entry for local visibility"))?;
             if !snapshot.fields.iter().any(|f| f.definition.id == field_id) {
@@ -279,6 +404,11 @@ fn apply_operation(
             options,
             value,
         } => {
+            if field_kind == FieldKind::Relationship {
+                return Err(invalid(
+                    "Create relationship Fields with their projection configuration",
+                ));
+            }
             let field = FieldId::new();
             let label = name(&raw)?;
             let unit = unit
@@ -438,6 +568,11 @@ fn set_value(
 ) -> Result<(), PersistenceError> {
     let snapshot = read(tx, entry)?;
     let d = definition(&snapshot, edit.field_id)?;
+    if d.projection.is_some() {
+        return Err(invalid(
+            "Relationship Fields edit canonical relationships, not scalar values",
+        ));
+    }
     let field = snapshot
         .fields
         .iter()
@@ -537,6 +672,9 @@ pub(super) fn preview_merge(
     let source = definition(&snapshot, source)?.clone();
     let target = definition(&snapshot, target)?.clone();
     let mut blockers = Vec::new();
+    if source.projection.is_some() || target.projection.is_some() {
+        blockers.push("Relationship Fields cannot be merged as scalar values. Their connections remain independently authored.".into());
+    }
     if source.name.trim().to_lowercase() != target.name.trim().to_lowercase() {
         blockers.push("Only same-name duplicates can be merged. Rename deliberately before reviewing a merge.".into());
     }
@@ -670,6 +808,9 @@ pub(super) fn delete_local(
     }
     if !snapshot.fields.iter().any(|f| f.definition.id == field) {
         return Err(invalid("Field is no longer on this Entry"));
+    }
+    if definition(&snapshot, field)?.projection.is_some() {
+        return Err(invalid("Remove the Field display or explicitly end its connections; scalar deletion cannot delete a relationship"));
     }
     let now = Utc::now().to_rfc3339();
     tx.execute("DELETE FROM field_choice_value WHERE value_id IN (SELECT id FROM field_value WHERE entry_id=?1 AND field_id=?2)", params![entry.to_string(),field.to_string()])?;

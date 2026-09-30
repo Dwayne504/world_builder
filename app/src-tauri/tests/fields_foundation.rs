@@ -1251,7 +1251,7 @@ fn version_five_upgrade_is_recoverable_and_does_not_rewrite_values() {
     ProjectService::close_project(&f.state, f.project).unwrap();
     let paths = worldcrafter_lib::package::PackagePaths::new(&f.path);
     let db = Connection::open(paths.db_path()).unwrap();
-    db.execute_batch("DROP TABLE entry_field_presentation; PRAGMA user_version=5; UPDATE project_meta SET schema_version=5; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT, 'injected upgrade failure'); END;").unwrap();
+    db.execute_batch("DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation; PRAGMA user_version=5; UPDATE project_meta SET schema_version=5; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT, 'injected upgrade failure'); END;").unwrap();
     let mut manifest = Manifest::read(&paths.manifest_path()).unwrap();
     manifest.schema_version = 5;
     manifest.write(&paths.manifest_path()).unwrap();
