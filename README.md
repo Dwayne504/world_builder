@@ -357,7 +357,13 @@ Entry in that Category. **Relationships** opens a card view with five connection
 initially and **Show more** for the rest. Filter by participating Entries, the
 relationship definition, and current/ended state. Maintenance actions and
 **Close Project** are under **Project menu**.
-This is session navigation; full tabs, pins, search, and restart restoration are
+Entry relationships now group by meaning and direction, with an ellipsized
+preview, expandable participants/notes and search within each group. The Project
+Relationships picker shows bounded search results and eight recent session
+choices. Selected participants appear first on cards with the correct inverse
+wording. If the desktop interface reloads while its backend survives, it resumes
+the live Project instead of becoming stranded on Home behind its own lock.
+This is session navigation; full tabs, pins, indexed search, and restart restoration are
 still deferred. See the [desktop navigation note](docs/milestones/MILESTONE_01_DESKTOP_NAVIGATION.md)
 for storage rules, verification, and the Windows checklist.
 

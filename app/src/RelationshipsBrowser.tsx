@@ -9,7 +9,11 @@ export function RelationshipsBrowser({
   view,
   onViewChange,
   onNavigate,
+  recentEntryIds = [],
+  onRememberEntry,
 }: {
+  recentEntryIds?: string[];
+  onRememberEntry?: (id: string) => void;
   projectId: string;
   view: RelationshipView;
   onViewChange: (view: RelationshipView) => void;
@@ -19,6 +23,7 @@ export function RelationshipsBrowser({
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [entrySearch, setEntrySearch] = useState("");
+  const [choiceLimit, setChoiceLimit] = useState(10);
   useEffect(() => {
     let current = true;
     setSnapshot(null);
@@ -68,6 +73,16 @@ export function RelationshipsBrowser({
   const choices = [...participants].sort(
     (a, b) => a[1].label.localeCompare(b[1].label) || a[0].localeCompare(b[0]),
   );
+  const query = entrySearch.trim().toLocaleLowerCase();
+  const searchResults = choices.filter(([, entry]) =>
+    `${entry.label} ${entry.detail}`.toLocaleLowerCase().includes(query),
+  );
+  const visibleChoices = query
+    ? searchResults.slice(0, choiceLimit)
+    : recentEntryIds.slice(0, 8).flatMap((id) => {
+        const entry = participants.get(id);
+        return entry ? [[id, entry] as const] : [];
+      });
   const matching = (snapshot?.relationships ?? []).filter(
     (relation) =>
       (!view.definitionId || relation.definitionId === view.definitionId) &&
@@ -99,54 +114,79 @@ export function RelationshipsBrowser({
       ) : (
         <>
           <div className="relationship-filters">
-            <details className="relationship-entry-filter">
-              <summary>
-                Entries{view.entryIds.length ? ` (${view.entryIds.length} selected)` : " · All"}
-              </summary>
+            <div className="relationship-entry-filter">
               <label>
                 Find an Entry
                 <input
                   type="search"
                   value={entrySearch}
-                  onChange={(event) => setEntrySearch(event.currentTarget.value)}
+                  onChange={(event) => {
+                    setEntrySearch(event.currentTarget.value);
+                    setChoiceLimit(10);
+                  }}
                 />
               </label>
               <p className="field-note">
-                Include connections involving any selected Entry, on either side.
+                Include either side of a connection. Selected Entries appear first.
               </p>
-              <div className="relationship-entry-choices">
-                {choices
-                  .filter(([, entry]) =>
-                    `${entry.label} ${entry.detail}`
-                      .toLocaleLowerCase()
-                      .includes(entrySearch.toLocaleLowerCase()),
-                  )
-                  .map(([id, entry]) => (
-                    <label className="relationship-entry-choice" key={id}>
-                      <input
-                        type="checkbox"
-                        checked={view.entryIds.includes(id)}
-                        onChange={(event) =>
-                          filter({
-                            entryIds: event.currentTarget.checked
-                              ? [...view.entryIds, id]
-                              : view.entryIds.filter((chosen) => chosen !== id),
-                          })
-                        }
-                      />
-                      <span>
-                        {entry.label} <small className="muted">· {entry.detail}</small>
-                      </span>
-                    </label>
+              {view.entryIds.length > 0 && (
+                <div className="relationship-selected" aria-label="Selected Entries">
+                  {view.entryIds.map((id) => (
+                    <button
+                      key={id}
+                      className="quiet-button"
+                      aria-label={`Remove ${participants.get(id)?.label ?? "Entry"} filter`}
+                      onClick={() =>
+                        filter({ entryIds: view.entryIds.filter((chosen) => chosen !== id) })
+                      }
+                    >
+                      {participants.get(id)?.label ?? "Unavailable Entry"}{" "}
+                      <span aria-hidden="true">×</span>
+                    </button>
                   ))}
+                </div>
+              )}
+              <p className="field-note">{query ? "Search results" : "Recent Entries"}</p>
+              <div className="relationship-entry-choices">
+                {visibleChoices.map(([id, entry]) => (
+                  <label className="relationship-entry-choice" key={id}>
+                    <input
+                      type="checkbox"
+                      checked={view.entryIds.includes(id)}
+                      onChange={(event) => {
+                        if (event.currentTarget.checked) onRememberEntry?.(id);
+                        filter({
+                          entryIds: event.currentTarget.checked
+                            ? [...view.entryIds, id]
+                            : view.entryIds.filter((chosen) => chosen !== id),
+                        });
+                      }}
+                    />
+                    <span>
+                      {entry.label} <small className="muted">· {entry.detail}</small>
+                    </span>
+                  </label>
+                ))}
               </div>
-              {choices.length === 0 && <p>No Entries yet.</p>}
+              {!visibleChoices.length && (
+                <p className="field-note">
+                  {query ? "No Entries match this search." : "Search for an Entry to get started."}
+                </p>
+              )}
+              {query && searchResults.length > choiceLimit && (
+                <button
+                  className="quiet-button"
+                  onClick={() => setChoiceLimit((count) => count + 10)}
+                >
+                  Show more Entry results
+                </button>
+              )}
               {view.entryIds.length > 0 && (
                 <button className="quiet-button" onClick={() => filter({ entryIds: [] })}>
                   All Entries
                 </button>
               )}
-            </details>
+            </div>
             <label>
               Relationship
               <select
@@ -205,11 +245,23 @@ export function RelationshipsBrowser({
               const definition = snapshot.definitions.find(
                 (item) => item.id === relation.definitionId,
               );
+              // Change the reading perspective, never the canonical participants.
+              const preferred = view.entryIds.find(
+                (id) => id === relation.source.id || id === relation.target.id,
+              );
+              const reverse =
+                preferred === relation.target.id && relation.source.id !== relation.target.id;
+              const first = reverse ? relation.target : relation.source;
+              const second = reverse ? relation.source : relation.target;
+              const label =
+                (reverse && definition?.directed
+                  ? definition.inverseLabel
+                  : definition?.forwardLabel) ?? "connects to";
               return (
                 <article
                   className="relationship-card"
                   key={relation.id}
-                  aria-label={`${relation.source.label} ${definition?.forwardLabel ?? "connects to"} ${relation.target.label}`}
+                  aria-label={`${first.label} ${label} ${second.label}`}
                 >
                   <div className="relationship-card-heading">
                     <span>{definition?.name ?? "Relationship"}</span>
@@ -220,12 +272,11 @@ export function RelationshipsBrowser({
                     </small>
                   </div>
                   <div className="relationship-card-connection">
-                    {participant(relation.source, `${relation.id}:source`)}
+                    {participant(first, `${relation.id}:${reverse ? "target" : "source"}`)}
                     <span className="relationship-card-verb">
-                      <span aria-hidden="true">{definition?.directed ? "→" : "↔"}</span>{" "}
-                      {definition?.forwardLabel ?? "connects to"}
+                      <span aria-hidden="true">{definition?.directed ? "→" : "↔"}</span> {label}
                     </span>
-                    {participant(relation.target, `${relation.id}:target`)}
+                    {participant(second, `${relation.id}:${reverse ? "source" : "target"}`)}
                   </div>
                   {relation.note && (
                     <details className="relationship-card-note">

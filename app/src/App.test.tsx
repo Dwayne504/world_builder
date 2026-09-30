@@ -64,6 +64,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  listOpenProjects: vi.fn().mockResolvedValue([]),
+  getProjectSummary: vi.fn(),
   listRecentProjects: vi.fn().mockResolvedValue([]),
   openRecentProject: vi.fn(),
   forgetRecentProject: vi.fn(),
@@ -115,6 +117,8 @@ vi.mock("./api", () => ({
 import App from "./App";
 import {
   AppCommandError,
+  listOpenProjects,
+  getProjectSummary,
   deleteEntryField,
   readFieldCatalog,
   applyTemplateFields,
@@ -127,13 +131,21 @@ import {
   readProjectRelationships,
 } from "./api";
 
+async function renderApp() {
+  const result = render(<App />);
+  await waitFor(() =>
+    expect(screen.queryByText("Restoring open Projects…")).not.toBeInTheDocument(),
+  );
+  return result;
+}
+
 function backendError(kind: string, message: string): AppCommandError {
   return new AppCommandError({ kind, message });
 }
 
 async function renderHomeAndFailOpen(kind: string) {
   openProjectMock.mockRejectedValueOnce(backendError(kind, `${kind} diagnostic detail`));
-  render(<App />);
+  await renderApp();
   fireEvent.change(visibleInput("open-project-path"), {
     target: { value: "/tmp/Tortuga.wcproj" },
   });
@@ -143,7 +155,7 @@ async function renderHomeAndFailOpen(kind: string) {
 
 async function openTheProjectScreen() {
   openProjectMock.mockResolvedValueOnce(project);
-  const view = render(<App />);
+  const view = await renderApp();
   fireEvent.change(visibleInput("open-project-path"), {
     target: { value: "/tmp/Tortuga.wcproj" },
   });
@@ -557,12 +569,15 @@ describe("Project screen Saved contract", () => {
       fireEvent.change(screen.getByLabelText("Filter by Type"), { target: { value: "human" } }),
     );
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Thron" })));
+    fireEvent.click(await screen.findByRole("button", { name: "Show commands relationships" }));
+    screen.getByRole("button", { name: "Survey Ship" }).focus();
     await act(async () =>
       fireEvent.click(await screen.findByRole("button", { name: "Survey Ship" })),
     );
     expect(screen.getByLabelText("entry-name")).toHaveValue("Survey Ship");
     await act(async () => fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true }));
     expect(screen.getByLabelText("entry-name")).toHaveValue("Thron");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Survey Ship" })).toHaveFocus());
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "← Back" })));
     expect(screen.getByLabelText("Filter by Type")).toHaveValue("human");
     expect(screen.getByRole("button", { name: "Forward →" })).toBeEnabled();
@@ -1892,7 +1907,7 @@ describe("Home screen stale-lock recovery", () => {
         rejectOpen = reject;
       }),
     );
-    render(<App />);
+    await renderApp();
     const path = visibleInput("open-project-path");
     fireEvent.change(path, { target: { value: "/tmp/Old.wcproj" } });
     fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
@@ -1930,7 +1945,7 @@ describe("Home screen stale-lock recovery", () => {
     openProjectMock.mockRejectedValueOnce(
       backendError("lock_recovery_required", "stale lock diagnostic"),
     );
-    render(<App />);
+    await renderApp();
     fireEvent.change(visibleInput("open-project-path"), {
       target: { value: "/tmp/Tortuga.wcproj" },
     });
@@ -1998,7 +2013,7 @@ describe("Home screen preferences and native pickers", () => {
   it("preserves manual input when the initial preferences request resolves late", async () => {
     const pending = deferred<Preferences>();
     getPreferencesMock.mockReturnValueOnce(pending.promise);
-    render(<App />);
+    await renderApp();
     fireEvent.change(visibleInput("new-project-location"), {
       target: { value: "/manual" },
     });
@@ -2021,7 +2036,7 @@ describe("Home screen preferences and native pickers", () => {
       defaultProjectsDir: "/new",
       defaultProjectsDirExists: true,
     });
-    render(<App />);
+    await renderApp();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Choose…" })[0]);
     await waitFor(() => expect(visibleInput("new-project-location")).toHaveValue("/new"));
@@ -2033,7 +2048,7 @@ describe("Home screen preferences and native pickers", () => {
 
   it("reports native chooser failures without changing the selected location", async () => {
     pickDirectoryMock.mockRejectedValueOnce(new Error("Picker unavailable"));
-    render(<App />);
+    await renderApp();
     fireEvent.change(visibleInput("new-project-location"), {
       target: { value: "/manual" },
     });
@@ -2046,7 +2061,7 @@ describe("Home screen preferences and native pickers", () => {
     const updated = { ...defaults, defaultBackupsDir: "/backups", defaultBackupsDirExists: true };
     pickDirectoryMock.mockResolvedValueOnce("/backups");
     setDefaultBackupsDirMock.mockResolvedValueOnce(updated);
-    render(<App />);
+    await renderApp();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Choose…" })[1]);
     await screen.findByText("/backups");
@@ -2076,7 +2091,7 @@ describe("Home screen preferences and native pickers", () => {
 
   it("warns about a missing configured Projects folder without using it", async () => {
     getPreferencesMock.mockResolvedValueOnce({ ...defaults, defaultProjectsDir: "/missing" });
-    render(<App />);
+    await renderApp();
     expect(await screen.findByRole("alert")).toHaveTextContent(/missing or inaccessible/);
     expect(visibleInput("new-project-location")).toHaveValue("");
   });
@@ -2088,7 +2103,7 @@ describe("Home screen preferences and native pickers", () => {
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
     });
-    render(<App />);
+    await renderApp();
     await waitFor(() =>
       expect(visibleInput("new-project-location")).toHaveValue("/home/writer/Projects"),
     );
@@ -2096,7 +2111,7 @@ describe("Home screen preferences and native pickers", () => {
 
   it("lets the native chooser cancellation leave the location unchanged", async () => {
     pickDirectoryMock.mockResolvedValueOnce(null);
-    render(<App />);
+    await renderApp();
     fireEvent.change(visibleInput("new-project-location"), {
       target: { value: "/kept/as/is" },
     });
@@ -2109,7 +2124,7 @@ describe("Home screen preferences and native pickers", () => {
     (createProject as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       backendError("already_exists", "a Project package already exists at '/p/Tortuga.wcproj'"),
     );
-    render(<App />);
+    await renderApp();
     fireEvent.change(visibleInput("new-project-location"), {
       target: { value: "/p" },
     });
@@ -2125,7 +2140,7 @@ describe("Home screen preferences and native pickers", () => {
 
   it("shows the resulting package location immediately after creation", async () => {
     (createProject as ReturnType<typeof vi.fn>).mockResolvedValueOnce(project);
-    render(<App />);
+    await renderApp();
     fireEvent.change(visibleInput("new-project-location"), {
       target: { value: "/p" },
     });
@@ -2146,7 +2161,7 @@ describe("Home screen preferences and native pickers", () => {
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
     });
-    render(<App />);
+    await renderApp();
     await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
@@ -2175,7 +2190,7 @@ describe("Home screen preferences and native pickers", () => {
     getPreferencesMock.mockRejectedValueOnce(
       backendError("preferences_corrupt", "invalid JSON at line 1"),
     );
-    render(<App />);
+    await renderApp();
 
     await waitFor(() =>
       expect(screen.getByText(/preferences could not be read/i)).toBeInTheDocument(),
@@ -2202,7 +2217,7 @@ describe("Home screen preferences and native pickers", () => {
     getPreferencesMock.mockRejectedValueOnce(
       backendError("unsupported_preferences_version", "found 99, supported 1"),
     );
-    render(<App />);
+    await renderApp();
 
     await waitFor(() =>
       expect(screen.getByText(/different version of Worldcrafter/i)).toBeInTheDocument(),
@@ -2216,7 +2231,7 @@ describe("Home screen preferences and native pickers", () => {
     getPreferencesMock.mockReset();
     getPreferencesMock.mockRejectedValueOnce(backendError("preferences_corrupt", "bad json"));
     resetPreferencesMock.mockRejectedValueOnce(backendError("io_error", "disk full"));
-    render(<App />);
+    await renderApp();
 
     await screen.findByRole("button", { name: "Review settings" });
     fireEvent.click(screen.getByRole("button", { name: "Review settings" }));
@@ -2230,7 +2245,7 @@ describe("Home screen preferences and native pickers", () => {
     setDefaultProjectsDirMock.mockRejectedValueOnce(
       backendError("invalid_directory", "'/blocked/Projects' does not exist or is not a directory"),
     );
-    render(<App />);
+    await renderApp();
     await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
@@ -2243,7 +2258,7 @@ describe("Home screen preferences and native pickers", () => {
   });
 
   it("previews the package path using the backend's authoritative sanitizer", async () => {
-    render(<App />);
+    await renderApp();
     fireEvent.change(visibleInput("new-project-location"), {
       target: { value: "/p" },
     });
@@ -2327,7 +2342,7 @@ describe("Focused workspace", () => {
   });
 
   it("keeps setup out of Home and preserves a Project draft across Settings", async () => {
-    render(<App />);
+    await renderApp();
     await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByLabelText("new-project-location")).not.toBeVisible();
@@ -2346,7 +2361,7 @@ describe("Focused workspace", () => {
     const picked = deferred<string | null>();
     pickDirectoryMock.mockReturnValueOnce(picked.promise);
     setDefaultProjectsDirMock.mockRejectedValueOnce(new Error("Folder unavailable"));
-    render(<App />);
+    await renderApp();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Choose…" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Close Application settings" }));
@@ -2370,7 +2385,7 @@ describe("Focused workspace", () => {
   });
 
   it("preserves the restore form when dismissed and reopened", async () => {
-    render(<App />);
+    await renderApp();
     await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Restore a backup…" }));
     fireEvent.change(screen.getByLabelText("restore-backup-path"), {
@@ -2466,5 +2481,68 @@ describe("Focused workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save and close" }));
     await waitFor(() => expect(screen.queryByTestId("project-id")).not.toBeInTheDocument());
     expect(renameProjectMock).toHaveBeenCalledWith(project.projectId, "Tortuga Prime", 0);
+  });
+});
+
+describe("desktop session recovery", () => {
+  beforeEach(() => {
+    vi.mocked(listOpenProjects).mockReset().mockResolvedValue([]);
+    listCategoriesMock.mockResolvedValue([]);
+    listEntriesMock.mockResolvedValue([]);
+    closeProjectMock.mockResolvedValue(undefined);
+  });
+  it("reattaches after a renderer remount without reopening the package or touching its lock", async () => {
+    vi.mocked(listOpenProjects).mockResolvedValueOnce([project]);
+    const first = await renderApp();
+    await screen.findByTestId("project-id");
+    const opens = openProjectMock.mock.calls.length;
+    first.unmount();
+    vi.mocked(listOpenProjects).mockResolvedValueOnce([
+      { ...project, workingName: "Committed rename", revision: 9 },
+    ]);
+    await renderApp();
+    expect(await screen.findByRole("heading", { name: "Committed rename" })).toBeVisible();
+    expect(openProjectMock.mock.calls.length).toBe(opens);
+    closeFromSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    await waitFor(() => expect(screen.queryByTestId("project-id")).not.toBeInTheDocument());
+    expect(screen.queryByRole("region", { name: "Open Projects" })).not.toBeInTheDocument();
+  });
+  it("offers explicit choices for multiple live Projects and fetches fresh state when resuming", async () => {
+    vi.mocked(listOpenProjects).mockResolvedValueOnce([
+      project,
+      { ...project, projectId: "other", workingName: "Second world" },
+    ]);
+    vi.mocked(getProjectSummary).mockResolvedValueOnce({
+      ...project,
+      projectId: "other",
+      workingName: "Second world",
+      revision: 3,
+    });
+    await renderApp();
+    const choices = screen.getByRole("region", { name: "Open Projects" });
+    fireEvent.click(within(choices).getByRole("button", { name: "Second world" }));
+    expect(await screen.findByTestId("project-id")).toHaveTextContent("other");
+    expect(getProjectSummary).toHaveBeenCalledWith("other");
+  });
+  it("keeps recovery failures visible and allows a retry", async () => {
+    vi.mocked(listOpenProjects).mockRejectedValueOnce(new Error("Session unavailable"));
+    await renderApp();
+    expect(screen.getByRole("alert")).toHaveTextContent("Session unavailable");
+    vi.mocked(listOpenProjects).mockResolvedValueOnce([project]);
+    fireEvent.click(screen.getByRole("button", { name: "Retry session recovery" }));
+    await screen.findByTestId("project-id");
+    expect(screen.queryByText("Session unavailable")).not.toBeInTheDocument();
+  });
+  it("ignores a previous renderer's late session response", async () => {
+    const old = deferred<ProjectSummary[]>();
+    vi.mocked(listOpenProjects).mockReturnValueOnce(old.promise);
+    const first = render(<App />);
+    expect(screen.getByText("Restoring open Projects…")).toBeVisible();
+    first.unmount();
+    await renderApp();
+    await act(async () => old.resolve([project]));
+    expect(screen.queryByTestId("project-id")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Open Project" })).toBeVisible();
   });
 });

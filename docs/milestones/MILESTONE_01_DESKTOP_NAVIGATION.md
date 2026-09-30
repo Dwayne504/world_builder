@@ -39,6 +39,49 @@ or Search/Explore milestone.
 
 There are no new unresolved product decisions in this slice.
 
+## Relationship grouping and live-session recovery follow-up
+
+The Entry editor groups connections by definition ID and reading direction.
+Symmetric connections group across either endpoint; distinct definitions stay
+separate even when their labels match. Current and historical connections remain
+separate. A single-line preview truncates with an ellipsis, and a right-edge
+control expands the complete list. Each group searches related Entry names;
+each connection keeps its own expandable note and End/Restore actions. Conflict
+warnings remain visible while a group is collapsed. Back opens the relevant
+group again so focus can return to the participant link.
+
+The Project Relationships browser searches instead of showing every Entry at
+once. Search results show ten choices at a time, with an explicit Show more.
+Selected filters remain separately removable. An empty search shows up to eight
+recently opened or selected Entries from this Project session, stored as IDs in
+workspace state. This is not the future persisted Recent/Pinned record system.
+A selected participant appears first on each card, using the inverse label for
+a directed target. If both endpoints are selected, the first-selected endpoint
+wins; without a matching selection, canonical source order remains. No stored
+connection is reversed, combined, or rewritten.
+
+A reproducible stranded-session path was identified: reloading/remounting the
+renderer clears React state while the Rust worker and OS lock survive. The old
+Home screen attempted a fresh lock acquisition and rejected its own backend's
+open Project. Startup now queries live backend sessions: one resumes directly;
+multiple offer explicit choices. A failed query stays visible with Retry while
+manual opening remains available. Late responses from a disposed renderer are
+ignored. An explicit Close still returns Home and releases the lock.
+
+Open also safely returns the existing worker's fresh summary when canonical
+package location and Project identity match this AppState. A different instance
+still receives the ordinary lock-held error, even with recovery requested.
+A package copied with the same ID cannot overwrite a different live worker.
+Open/create/close and live-session listing share a lifecycle mutex; the registry
+mutex itself is never held during SQLite work. Reattachment neither removes nor
+reacquires the live lock, and uses read-only identity preflight. No migration is
+introduced.
+
+This fixes the verified renderer-reset failure path. The exact trigger of the
+user's intermittent reset was not independently observed. This does not restore
+uncommitted drafts destroyed by a renderer reload, reopen Projects after a full
+process exit, or persist tabs/Entry history across restarts.
+
 ## Timeline boundary
 
 Concept V0.02 sections 6.3/6.5, 8.9, 11.3, 17.3 and 20.1 explicitly defer
@@ -111,12 +154,12 @@ and a separate verification app identifier isolated the native checks.
 Windows automated checks:
 
 - `npm run typecheck`
-- `npm test -- --run` — 161 tests
+- `npm test -- --run` — 170 tests
 - `npm run lint`
 - `npm run format:check`
 - `npm run build`
 - `cargo fmt --check`
-- `cargo test` — 157 tests
+- `cargo test` — 161 tests
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo check`
 - `git diff --check`
@@ -156,6 +199,24 @@ frontend checks, not new native WebView2/IPC end-to-end verification; the Rust
 suite separately covers the new Project query. Initial sandbox-only filesystem
 failures were rerun successfully with the required test access.
 
+The relationship/session follow-up also passed all checks above. Added tests
+cover same-worker resumption with fresh committed state and an unchanged lock,
+concurrent opening, cross-instance rejection, copied IDs, startup/remount,
+multiple live sessions, recovery retry, stale responses, a thousand-Entry search,
+bounded recent choices, directed/symmetric orientation, grouping by identity,
+per-connection notes, lifecycle actions, and history focus. Existing note
+acknowledgement/focus and failed-save tests pass inside the new groups. No React
+act warnings occurred in the final suite.
+
+A headless Edge check of the production bundle with synthetic IPC passed in both
+themes at widths 640, 1180 and 1600: long previews ellipsize without horizontal
+overflow, the disclosure stays visible, per-group search/notes work, filtered
+cards use the selected perspective, recent choices survive page navigation,
+Back restores the related link's focus, renderer reload resumes a simulated live
+backend session, and Close releases that simulated session. Screenshots were
+inspected. Rust tests separately exercise real workers/locks in disposable
+packages; the native WebView2 window was not controlled during this follow-up.
+
 GitHub secret scanning and push protection are enabled; the repository reported
 zero open secret alerts at review time. No local secret-scanner executable or
 script is configured. CodeQL is not configured, has no available analysis, and
@@ -187,6 +248,17 @@ commit.
    and the same Project reopens without a leftover-lock warning. Check unsaved
    and failed-save close prompts separately.
 
+8. On a disposable Project, add several connections of one meaning. Expand the
+   group, search a name, expand its note, and type through autosave. End and
+   restore one connection; confirm the others and their notes remain unchanged.
+9. Search for a target in Relationships. Check it appears first with the inverse
+   label (or unchanged symmetric label), then clear the search to see recent
+   choices. Clear filters to restore the full browser.
+10. After Saved appears, reload the development app's interface while its backend
+    stays running. Confirm the Project resumes and remains editable. A second
+    separate app instance must still refuse its active lock. Close and reopen
+    normally; this should not request stale-lock recovery.
+
 Not independently verified for this follow-up: native WebView2 rendering and IPC
 of the new Relationships page, actual minimum-size desktop resizing, installer/
 signing, another machine or OS, every display-scaling/accessibility configuration,
@@ -196,6 +268,6 @@ are covered by automated tests.
 
 ## Deferred
 
-Full tabs, pinned/recent Entries, session restoration across app restarts,
+Full tabs, persisted pinned/recent Entries, session restoration across app restarts,
 Search/Explore, relationship graph, full ribbon toolbar, custom colors, further
 cursor-light refinement, Story, Spatial, Timeline, and unrelated milestone work.

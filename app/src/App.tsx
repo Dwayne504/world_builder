@@ -28,6 +28,8 @@ import {
   changeEntryStructure,
   getPreferences,
   listCategories,
+  listOpenProjects,
+  getProjectSummary,
   listEntries,
   getEntry,
   listTypes,
@@ -756,6 +758,7 @@ type MutationCoordinator = ReturnType<typeof useMutationCoordinator>;
 
 function EntryEditor({
   projectId,
+  restoreFocusKey,
   initialEntry,
   categories,
   onChanged,
@@ -767,6 +770,7 @@ function EntryEditor({
   onRecoveryBackup,
 }: {
   projectId: string;
+  restoreFocusKey: string | null;
   initialEntry: Entry;
   categories: Category[];
   onChanged: (entry: Entry) => void;
@@ -1155,6 +1159,7 @@ function EntryEditor({
           onRecoveryBackup={onRecoveryBackup}
         />
         <EntryRelationshipsPanel
+          restoreFocusKey={restoreFocusKey}
           projectId={projectId}
           entryId={editor.entry.id}
           categories={categories}
@@ -1191,6 +1196,10 @@ function EntryWorkflow({
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [recentEntryIds, setRecentEntryIds] = useState<string[]>([]);
+  function rememberEntry(id: string) {
+    setRecentEntryIds((ids) => [id, ...ids.filter((value) => value !== id)].slice(0, 8));
+  }
   const [types, setTypes] = useState<TypeDef[]>([]);
   const [selected, setSelected] = useState<Entry | null>(null);
   const [draftName, setDraftName] = useState("");
@@ -1391,6 +1400,7 @@ function EntryWorkflow({
       controllerRef.current = null;
       onController(null);
       setSelected(entry);
+      if (entry) rememberEntry(entry.id);
       setPendingNavigation(null);
       setError(null);
       if (intent.createInCategoryId) {
@@ -1598,6 +1608,7 @@ function EntryWorkflow({
         <EntryEditor
           key={selected.id}
           projectId={projectId}
+          restoreFocusKey={location.focusKey}
           initialEntry={selected}
           templateEpoch={templateEpoch}
           onRecoveryBackup={onRecoveryBackup}
@@ -1622,6 +1633,8 @@ function EntryWorkflow({
         {error && <p role="alert">{error}</p>}
         <RelationshipsBrowser
           projectId={projectId}
+          recentEntryIds={recentEntryIds}
+          onRememberEntry={rememberEntry}
           view={location.relationshipView}
           onViewChange={updateRelationshipView}
           onNavigate={(id) => void requestNavigation({ location: destination(id) })}
@@ -2404,23 +2417,88 @@ function ProjectScreen({
 function Workspace() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [liveProjects, setLiveProjects] = useState<ProjectSummary[]>([]);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let current = true;
+    setCheckingSession(true);
+    setSessionError(null);
+    void listOpenProjects()
+      .then((projects) => {
+        if (!current) return;
+        setLiveProjects(projects);
+        if (projects.length === 1) setProject(projects[0]);
+      })
+      .catch((error) => {
+        if (current) setSessionError(errorMessage(error));
+      })
+      .finally(() => {
+        if (current) setCheckingSession(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [attempt]);
 
+  async function resume(id: string) {
+    setCheckingSession(true);
+    try {
+      setProject(await getProjectSummary(id));
+      setSessionError(null);
+    } catch (error) {
+      setSessionError(errorMessage(error));
+    } finally {
+      setCheckingSession(false);
+    }
+  }
+
+  if (checkingSession)
+    return (
+      <main>
+        <p role="status">Restoring open Projects…</p>
+      </main>
+    );
   if (!project) {
     return (
-      <HomeScreen
-        notice={notice}
-        onOpened={(opened) => {
-          setNotice(null);
-          setProject(opened);
-        }}
-      />
+      <>
+        {sessionError && (
+          <div className="error-banner" role="alert">
+            Could not restore the open session. {sessionError}
+            <button onClick={() => setAttempt((value) => value + 1)}>Retry session recovery</button>
+          </div>
+        )}
+        {liveProjects.length > 0 && (
+          <section className="panel" aria-label="Open Projects">
+            <h2>Continue an open Project</h2>
+            {liveProjects.map((live) => (
+              <button key={live.projectId} onClick={() => void resume(live.projectId)}>
+                {live.workingName}
+              </button>
+            ))}
+          </section>
+        )}
+        <HomeScreen
+          notice={notice}
+          onOpened={(opened) => {
+            setNotice(null);
+            setSessionError(null);
+            setProject(opened);
+          }}
+        />
+      </>
     );
   }
   return (
     <ProjectScreen
+      key={project.projectId}
       project={project}
       onClosed={(message) => {
         setNotice(message ?? null);
+        setLiveProjects((projects) =>
+          projects.filter((live) => live.projectId !== project.projectId),
+        );
         setProject(null);
       }}
     />

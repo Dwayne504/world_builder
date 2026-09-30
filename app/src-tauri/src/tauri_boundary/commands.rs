@@ -325,6 +325,15 @@ pub fn close_project(state: State<'_, AppState>, project_id: String) -> Result<(
 }
 
 #[tauri::command]
+pub fn list_open_projects(
+    state: State<'_, AppState>,
+) -> Result<Vec<ProjectSummaryDto>, AppErrorDto> {
+    ProjectService::list_open_projects(&state)
+        .map(|projects| projects.into_iter().map(Into::into).collect())
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn get_project_summary(
     state: State<'_, AppState>,
     project_id: String,

@@ -92,6 +92,10 @@ export function closeProject(projectId: string): Promise<void> {
   return call("close_project", { projectId });
 }
 
+export function listOpenProjects(): Promise<ProjectSummary[]> {
+  return call("list_open_projects", {});
+}
+
 export function getProjectSummary(projectId: string): Promise<ProjectSummary> {
   return call("get_project_summary", { projectId });
 }

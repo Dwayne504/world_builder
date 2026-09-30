@@ -52,8 +52,13 @@ function data(): RelationshipSnapshot {
 }
 function Harness({ projectId = "project" }: { projectId?: string }) {
   const [view, setView] = useState(initialRelationshipView);
+  const [recent, setRecent] = useState<string[]>([]);
   return (
     <RelationshipsBrowser
+      recentEntryIds={recent}
+      onRememberEntry={(id) =>
+        setRecent((ids) => [id, ...ids.filter((value) => value !== id)].slice(0, 8))
+      }
       projectId={projectId}
       view={view}
       onViewChange={setView}
@@ -85,10 +90,11 @@ it("shows five cards initially and reveals the rest without duplicating symmetri
 it("filters by either participant, combines selected Entries, and intersects definition and state filters", async () => {
   render(<Harness />);
   await screen.findByText("Showing 5 of 7 relationships");
-  fireEvent.click(screen.getByText("Entries · All"));
+  fireEvent.change(screen.getByLabelText("Find an Entry"), { target: { value: "Object 2" } });
   fireEvent.click(screen.getByRole("checkbox", { name: "Object 2 · active" }));
   expect(screen.getByText("Showing 1 of 1 matching relationships")).toBeVisible();
-  expect(screen.getByRole("article")).toHaveAccessibleName("Navigator owns Object 2");
+  expect(screen.getByRole("article")).toHaveAccessibleName("Object 2 owned by Navigator");
+  fireEvent.change(screen.getByLabelText("Find an Entry"), { target: { value: "Captain" } });
   fireEvent.click(screen.getByRole("checkbox", { name: "Captain · active" }));
   expect(screen.getAllByRole("article")).toHaveLength(2);
   fireEvent.change(screen.getByLabelText("Relationship", { selector: "select" }), {
@@ -155,4 +161,57 @@ it("ignores a late response from a previous Project", async () => {
   await screen.findByText(/No relationships yet/);
   await act(async () => finish(data()));
   expect(screen.queryByRole("article")).not.toBeInTheDocument();
+});
+
+it("bounds suggestions for a thousand Entries and keeps selected and recent choices reachable", async () => {
+  const snapshot = data();
+  snapshot.entries = Array.from({ length: 1000 }, (_, index) => ({
+    id: `entry-${index}`,
+    label: `Person ${index}`,
+    categoryName: "People",
+  }));
+  vi.mocked(readProjectRelationships).mockResolvedValue(snapshot);
+  render(<Harness />);
+  await screen.findByText("Showing 5 of 7 relationships");
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  const search = screen.getByLabelText("Find an Entry");
+  fireEvent.change(search, { target: { value: "Person" } });
+  expect(screen.getAllByRole("checkbox")).toHaveLength(10);
+  fireEvent.click(screen.getByRole("button", { name: "Show more Entry results" }));
+  expect(screen.getAllByRole("checkbox")).toHaveLength(20);
+  for (let index = 100; index < 110; index++) {
+    fireEvent.change(search, { target: { value: `Person ${index}` } });
+    fireEvent.click(screen.getByRole("checkbox", { name: `Person ${index} · People` }));
+  }
+  fireEvent.change(search, { target: { value: "" } });
+  expect(screen.getAllByRole("checkbox")).toHaveLength(8);
+  expect(screen.getAllByRole("checkbox")[0]).toHaveAccessibleName("Person 109 · People");
+  fireEvent.click(screen.getByRole("button", { name: "Remove Person 100 filter" }));
+  expect(
+    screen.queryByRole("button", { name: "Remove Person 100 filter" }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(search, { target: { value: "No such person" } });
+  expect(screen.getByText("No Entries match this search.")).toBeVisible();
+});
+it("puts a selected symmetric target first without changing the relationship, and uses selection order for ties", async () => {
+  const snapshot = data();
+  snapshot.relationships = [
+    {
+      ...snapshot.relationships[5],
+      source: { id: "a", label: "Pilot", workspaceState: "active" },
+      target: { id: "b", label: "Engineer", workspaceState: "active" },
+    },
+  ];
+  const original = JSON.stringify(snapshot);
+  vi.mocked(readProjectRelationships).mockResolvedValue(snapshot);
+  render(<Harness />);
+  await screen.findByRole("article");
+  fireEvent.change(screen.getByLabelText("Find an Entry"), { target: { value: "Engineer" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Engineer · active" }));
+  const card = screen.getByRole("article", { name: "Engineer allied with Pilot" });
+  expect(within(card).getAllByRole("button")[0]).toHaveAccessibleName("Engineer");
+  fireEvent.change(screen.getByLabelText("Find an Entry"), { target: { value: "Pilot" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Pilot · active" }));
+  expect(card).toHaveAccessibleName("Engineer allied with Pilot");
+  expect(JSON.stringify(snapshot)).toBe(original);
 });

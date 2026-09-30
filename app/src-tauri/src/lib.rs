@@ -59,6 +59,7 @@ pub fn run() {
             tauri_boundary::rename_project,
             tauri_boundary::close_project,
             tauri_boundary::get_project_summary,
+            tauri_boundary::list_open_projects,
             tauri_boundary::create_backup,
             tauri_boundary::restore_backup_as_copy,
             tauri_boundary::list_categories,

@@ -1597,3 +1597,60 @@ dialog::after {
 .relationships-more {
   margin-top: 20px;
 }
+
+/* A relationship is stored once; these groups are only a compact reading view. */
+.relationship-group {
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 0;
+}
+.relationship-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.relationship-group-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.relationship-group-toggle {
+  flex: none;
+  min-height: 32px;
+  padding: 4px 8px;
+}
+.relationship-group-toggle small {
+  color: var(--muted);
+}
+.relationship-group-content {
+  margin: 8px 0 2px 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+.relationship-group-content[hidden] {
+  display: none;
+}
+.relationship-group-content > label {
+  font-size: 12px;
+}
+.relationship-group-content input {
+  margin-top: 4px;
+  padding: 6px 9px;
+}
+.relationship-group-content .relationship-card:last-child {
+  border-bottom: 0;
+}
+.relationship-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.relationship-selected > button {
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  font-size: 12px;
+}
