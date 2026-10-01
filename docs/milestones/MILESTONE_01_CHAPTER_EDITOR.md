@@ -17,8 +17,11 @@ and no world material. No Book, Category, title, or Story Role is required.
   preview Fields, current Relationships, and its separately labelled derived
   Spatial path. Open the full Entry and return using workspace history.
 - Search for an Entry to link it; the picker shows at most ten matching results.
-  Links may have no Roles, or several. Chapter options can create additional
-  Project-local Roles. Role assignments never duplicate the underlying link.
+  Links may have no Roles, or several. The Roles button beside each linked Entry
+  opens its assignments directly. Chapter options lists available Project Roles,
+  their assignments in this Chapter, and Find uses across the Project. Creating
+  a Role makes it available without assigning it. Role assignments never duplicate
+  the underlying link. See [Role discovery](MILESTONE_01_STORY_ROLE_DISCOVERY.md).
 - Entries show **Story usage**, derived from those same Chapter links. Renaming
   an Entry updates the resolved link label without rewriting authored prose.
 - Chapter options offer Archive and Trash. Both retain documents and links;
@@ -122,6 +125,7 @@ Use a disposable Project, or a copy of an existing Project.
 
 Books/Parts/Scenes, timelines and calendars, passage-level links and quick-create
 from selected prose, graph views, multi-pane split editing, publishing/export,
-rich Entry-description Fields, global Story search/FTS, Tags/Statuses, permanent
+rich Entry-description Fields, Tags/Statuses, permanent
 Chapter deletion, and Role rename/retirement management remain separate work.
+Global Story search/FTS was added by the subsequent Search slice.
 This slice makes no claim that all of Milestone 01 is finished.

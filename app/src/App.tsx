@@ -1705,6 +1705,21 @@ function EntryWorkflow({
     setHistory(next);
   }
   function openSearchTarget(target: SearchTarget) {
+    if (target.kind === "story_role") {
+      void requestNavigation({
+        location: {
+          ...initialLocation,
+          page: "search",
+          searchView: {
+            ...initialLocation.searchView,
+            storyRoleId: target.roleId,
+            storyRoleName: target.name,
+            structuredKind: "chapters",
+          },
+        },
+      });
+      return;
+    }
     const next =
       target.kind === "entry"
         ? destination(target.entryId)
@@ -1852,6 +1867,9 @@ function EntryWorkflow({
               onGlobalRevision(next.globalRevision);
               setChapter(next);
             }}
+            onFindRole={(role) =>
+              openSearchTarget({ kind: "story_role", roleId: role.id, name: role.name })
+            }
             onEntry={(id) => void requestNavigation({ location: destination(id) })}
             onBack={navigationProps.onChapters}
           />

@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-const INDEX_VERSION: i64 = 2;
+const INDEX_VERSION: i64 = 3;
 const CREATE_INDEX: &str = "CREATE VIRTUAL TABLE search_index USING fts5(payload UNINDEXED, terms, tokenize='unicode61 remove_diacritics 0')";
 fn invalid(message: impl ToString) -> PersistenceError {
     PersistenceError::Other(message.to_string())
@@ -97,6 +97,7 @@ struct Document {
     text: String,
     preview_text: Option<String>,
     entry_ids: Vec<String>,
+    story_role_ids: Vec<String>,
     structured_kind: Option<StructuredKind>,
     relationship: Option<RelationshipContext>,
 }
@@ -171,6 +172,7 @@ fn doc(
         text,
         preview_text: None,
         entry_ids: vec![],
+        story_role_ids: vec![],
         structured_kind: None,
         relationship: None,
     }
@@ -233,6 +235,36 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
         });
         result.push(d);
     }
+    // Role definitions are findable before their first assignment. Usage remains
+    // derived from canonical Story links, not from prose or matching Role names.
+    for row in conn
+        .prepare("SELECT id,name FROM story_role ORDER BY name,id")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+    {
+        let (id, name) = row?;
+        let mut d = doc(
+            "roles",
+            format!("story-role:{id}"),
+            name.clone(),
+            "Story Role · View Chapter uses".into(),
+            "active".into(),
+            SearchTarget::StoryRole {
+                role_id: id.clone(),
+                name: name.clone(),
+            },
+            name,
+        );
+        d.identity = Some(id);
+        result.push(d);
+    }
+    let mut link_roles: HashMap<String, Vec<String>> = HashMap::new();
+    for row in conn
+        .prepare("SELECT link_id,role_id FROM story_link_role ORDER BY link_id,role_id")?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+    {
+        let (link, role) = row?;
+        link_roles.entry(link).or_default().push(role);
+    }
     let mut chapter_entries: HashMap<String, Vec<String>> = HashMap::new();
     for row in conn.prepare("SELECT l.id,l.story_unit_id,COALESCE(e.authored_name,json_extract(l.unresolved_snapshot,'$.label'),'[Unnamed Entry]'),COALESCE((SELECT group_concat(name,', ') FROM (SELECT r.name FROM story_role r JOIN story_link_role lr ON lr.role_id=r.id WHERE lr.link_id=l.id ORDER BY r.name,r.id)),''),l.entry_id FROM story_link l LEFT JOIN entry e ON e.id=l.entry_id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?)))? {
         let (id,chapter,entry,roles,entry_id)=row?;
@@ -246,6 +278,7 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
             d.text.push_str(&format!(" {}",alias_map.get(&entry_id).cloned().unwrap_or_default().join(" ")));
         }
         d.structured_kind=Some(StructuredKind::Chapters);
+        d.story_role_ids = link_roles.remove(&id).unwrap_or_default();
         result.push(d);
     }
     for row in conn.prepare("SELECT id,owner_id,area,document_schema_version,canonical_json,plain_text FROM rich_document")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?)))? {
@@ -409,18 +442,34 @@ pub(super) fn query(
         }
     }
     let query = normalize_search(request.query.trim());
-    let words = tokens(&query);
-    let (documents, refresh) = if query.is_empty() && scope.is_none() {
-        (vec![], false)
-    } else {
-        match cached(conn, &query) {
-            Ok(d) => (d, false),
-            Err(_) => (sources(conn)?, true),
+    if let Some(id) = &request.story_role_id {
+        if !conn
+            .prepare("SELECT 1 FROM story_role WHERE id=?1")?
+            .exists([id])?
+        {
+            return Err(invalid("Story Role not found in this Project"));
         }
-    };
+    }
+    let words = tokens(&query);
+    let (documents, refresh) =
+        if query.is_empty() && scope.is_none() && request.story_role_id.is_none() {
+            (vec![], false)
+        } else {
+            match cached(conn, &query) {
+                Ok(d) => (d, false),
+                Err(_) => (sources(conn)?, true),
+            }
+        };
     let mut matches = documents
         .into_iter()
         .filter(|d| {
+            if request
+                .story_role_id
+                .as_ref()
+                .is_some_and(|id| !d.story_role_ids.contains(id))
+            {
+                return false;
+            }
             if d.group == "text" && d.text.trim().is_empty() {
                 return false;
             }
@@ -490,7 +539,7 @@ pub(super) fn query(
             .then_with(|| normalize_search(&x.hit.title).cmp(&normalize_search(&y.hit.title)))
             .then_with(|| x.hit.key.cmp(&y.hit.key))
     });
-    let groups = ["entries", "chapters", "structured", "text"]
+    let groups = ["entries", "chapters", "roles", "structured", "text"]
         .into_iter()
         .map(|kind| {
             let matching = matches
