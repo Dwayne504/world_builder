@@ -15,7 +15,7 @@ use rusqlite::{Connection, Transaction};
 use super::error::PersistenceError;
 
 /// The newest schema version this build knows how to read and write.
-pub const CURRENT_SCHEMA_VERSION: i64 = 8;
+pub const CURRENT_SCHEMA_VERSION: i64 = 9;
 
 /// Ordered (version, sql) pairs. Each migration is applied at most once and
 /// migrations must be applied in order starting just above the database's
@@ -68,6 +68,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 8,
         sql: include_str!("migrations/0008_spatial_structure.sql"),
         after_sql: None,
+    },
+    Migration {
+        version: 9,
+        sql: include_str!("migrations/0009_story.sql"),
+        after_sql: Some(add_story_roles),
     },
 ];
 
@@ -176,6 +181,17 @@ pub fn require_current_schema(conn: &Connection) -> Result<(), PersistenceError>
 
 pub fn user_version(conn: &Connection) -> Result<i64, PersistenceError> {
     Ok(conn.pragma_query_value(None, "user_version", |r| r.get(0))?)
+}
+
+fn add_story_roles(tx: &Transaction<'_>) -> Result<(), PersistenceError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    for name in ["POV", "Appears", "Setting", "Primary Setting", "Used"] {
+        tx.execute(
+            "INSERT INTO story_role VALUES(?1,?2,?3,?3,1,NULL)",
+            rusqlite::params![uuid::Uuid::now_v7().to_string(), name, now],
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

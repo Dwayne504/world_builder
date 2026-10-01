@@ -17,6 +17,42 @@ use crate::preferences::{self, PreferencesError, PreferencesStore};
 use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
 #[tauri::command]
+pub fn read_story(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<crate::domain::story::StoryIndex, AppErrorDto> {
+    ProjectService::read_story(&state, parse_project_id(&project_id)?).map_err(Into::into)
+}
+#[tauri::command]
+pub fn read_chapter(
+    state: State<'_, AppState>,
+    project_id: String,
+    chapter_id: crate::domain::structure::ChapterId,
+) -> Result<crate::domain::story::ChapterSnapshot, AppErrorDto> {
+    ProjectService::read_chapter(&state, parse_project_id(&project_id)?, chapter_id)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub fn story_usage(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: EntryId,
+) -> Result<Vec<crate::domain::story::StoryUsage>, AppErrorDto> {
+    ProjectService::story_usage(&state, parse_project_id(&project_id)?, entry_id)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_story(
+    state: State<'_, AppState>,
+    project_id: String,
+    expected: i64,
+    command: crate::domain::story::StoryCommand,
+) -> Result<crate::domain::story::ChapterSnapshot, AppErrorDto> {
+    ProjectService::apply_story(&state, parse_project_id(&project_id)?, expected, command)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn read_spatial(
     state: State<'_, AppState>,
     project_id: String,

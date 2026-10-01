@@ -21,6 +21,36 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn read_story(
+        state: &AppState,
+        project_id: ProjectId,
+    ) -> Result<crate::domain::story::StoryIndex, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.read_story())
+    }
+    pub fn read_chapter(
+        state: &AppState,
+        project_id: ProjectId,
+        chapter_id: crate::domain::structure::ChapterId,
+    ) -> Result<crate::domain::story::ChapterSnapshot, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.read_chapter(chapter_id))
+    }
+    pub fn story_usage(
+        state: &AppState,
+        project_id: ProjectId,
+        entry_id: EntryId,
+    ) -> Result<Vec<crate::domain::story::StoryUsage>, AppError> {
+        Self::with_worker(state, project_id, |worker| worker.story_usage(entry_id))
+    }
+    pub fn apply_story(
+        state: &AppState,
+        project_id: ProjectId,
+        expected: i64,
+        command: crate::domain::story::StoryCommand,
+    ) -> Result<crate::domain::story::ChapterSnapshot, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.apply_story(expected, command)
+        })
+    }
     pub fn read_spatial(
         state: &AppState,
         project_id: ProjectId,
@@ -883,6 +913,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
@@ -986,6 +1017,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
+             DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;

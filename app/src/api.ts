@@ -5,6 +5,24 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { ChapterSnapshot, StoryCommand, StoryIndex, StoryUsage } from "./storyTypes";
+
+export function readStory(projectId: string): Promise<StoryIndex> {
+  return call("read_story", { projectId });
+}
+export function readChapter(projectId: string, chapterId: string): Promise<ChapterSnapshot> {
+  return call("read_chapter", { projectId, chapterId });
+}
+export function storyUsage(projectId: string, entryId: string): Promise<StoryUsage[]> {
+  return call("story_usage", { projectId, entryId });
+}
+export function applyStory(
+  projectId: string,
+  expected: number,
+  command: StoryCommand,
+): Promise<ChapterSnapshot> {
+  return call("apply_story", { projectId, expected, command });
+}
 import type {
   AppErrorDto,
   Category,

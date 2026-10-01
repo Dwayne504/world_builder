@@ -9,6 +9,7 @@ pub mod fields;
 pub mod ids;
 pub mod relationships;
 pub mod spatial;
+pub mod story;
 pub mod structure;
 pub mod working_name;
 

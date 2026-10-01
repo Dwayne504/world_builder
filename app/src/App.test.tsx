@@ -64,6 +64,10 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  storyUsage: vi.fn().mockResolvedValue([]),
+  readStory: vi.fn().mockResolvedValue({ globalRevision: 1, chapters: [] }),
+  readChapter: vi.fn(),
+  applyStory: vi.fn(),
   readSpatial: vi.fn().mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] }),
   applySpatial: vi.fn(),
   listOpenProjects: vi.fn().mockResolvedValue([]),
@@ -117,7 +121,12 @@ vi.mock("./api", () => ({
 }));
 
 import App from "./App";
+import { chapterFixture, textDocument } from "./chapterTestFixtures";
 import {
+  readStory,
+  readChapter,
+  applyStory,
+  storyUsage,
   readSpatial,
   applySpatial,
   AppCommandError,
@@ -269,6 +278,11 @@ describe("Project screen Saved contract", () => {
   });
 
   beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(readStory).mockReset().mockResolvedValue({ globalRevision: 1, chapters: [] });
+    vi.mocked(readChapter).mockReset();
+    vi.mocked(applyStory).mockReset();
+    vi.mocked(storyUsage).mockReset().mockResolvedValue([]);
     vi.mocked(readSpatial)
       .mockReset()
       .mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] });
@@ -321,6 +335,63 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("flushes Chapter manuscript on native close and waits for durable acknowledgement", async () => {
+    enableTauriWindow();
+    const initial = chapterFixture();
+    vi.mocked(readStory).mockResolvedValue({ globalRevision: 3, chapters: [initial.chapter] });
+    vi.mocked(readChapter).mockResolvedValue(initial);
+    const pending = deferred<typeof initial>();
+    vi.mocked(applyStory).mockReturnValue(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Chapters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "The First Step" }));
+    const prose = await screen.findByRole("textbox", { name: "Manuscript" });
+    await act(async () => {
+      prose.querySelector("p")!.textContent = "Writing right before closing.";
+      fireEvent.input(prose, { inputType: "insertText", data: "Writing right before closing." });
+    });
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    await waitFor(() =>
+      expect(applyStory).toHaveBeenCalledWith(
+        project.projectId,
+        3,
+        expect.objectContaining({
+          kind: "save",
+          documents: [
+            {
+              area: "manuscript",
+              schemaVersion: 1,
+              content: textDocument("Writing right before closing."),
+            },
+          ],
+        }),
+      ),
+    );
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ ...initial, globalRevision: 4 }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    expect(nativeWindowCloseMock).toHaveBeenCalled();
+  });
+
+  it("blocks Chapter navigation after a save failure and retains the writing draft", async () => {
+    const initial = chapterFixture();
+    vi.mocked(readStory).mockResolvedValue({ globalRevision: 3, chapters: [initial.chapter] });
+    vi.mocked(readChapter).mockResolvedValue(initial);
+    vi.mocked(applyStory).mockRejectedValue(new Error("Disk full"));
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Chapters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "The First Step" }));
+    fireEvent.change(await screen.findByLabelText("Chapter title"), {
+      target: { value: "Keep this title" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Relationships" }));
+    await screen.findByText(/Changes are not being saved/);
+    expect(screen.getByLabelText("Chapter title")).toHaveValue("Keep this title");
+    expect(screen.getByTestId("save-state")).not.toHaveTextContent(/^Saved$/);
+    expect(closeProjectMock).not.toHaveBeenCalled();
   });
 
   it("keeps projected Fields and full Relationships synchronized after acknowledged edits", async () => {

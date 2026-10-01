@@ -11,6 +11,7 @@ export function WorkspaceFrame({
   onToggle,
   onBrowse,
   onRelationships,
+  onChapters,
   onAddEntry,
   onBack,
   onForward,
@@ -22,12 +23,13 @@ export function WorkspaceFrame({
   children: ReactNode;
   categories: Category[];
   entries: Entry[];
-  page: "entries" | "relationships";
+  page: "entries" | "relationships" | "chapters";
   categoryId: string;
   collapsed: boolean;
   onToggle: () => void;
   onBrowse: (id: string) => void;
   onRelationships: () => void;
+  onChapters: () => void;
   onAddEntry: (categoryId: string) => void;
   onBack: () => void;
   onForward: () => void;
@@ -117,6 +119,14 @@ export function WorkspaceFrame({
               onClick={onRelationships}
             >
               Relationships
+            </button>
+            <button
+              className="sidebar-destination"
+              aria-current={page === "chapters" ? "page" : undefined}
+              disabled={busy || browsingDisabled}
+              onClick={onChapters}
+            >
+              Chapters
             </button>
             <button
               className="sidebar-section-toggle"

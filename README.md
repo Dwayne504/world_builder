@@ -393,13 +393,21 @@ shows derived paths around directly connected Spatial Entries. Category/Type
 Spatial defaults apply only when creating Entries; changing defaults never rewrites
 existing features. See the [Spatial foundation note](docs/milestones/MILESTONE_01_SPATIAL_FOUNDATION.md).
 
+The **Chapters** sidebar destination adds schema 9 and a writing workspace with
+separate rich-text **Manuscript**, **Plan**, and **Notes**, manuscript word count,
+autosave, reading order, and reversible Archive/Trash. Link world Entries in the
+right context panel with zero or multiple Story Roles; Entries show Story Usage
+backlinks. Renames never rewrite prose. Failed saves retain drafts, and recovered
+writing is reviewed before restoration. See the [Chapter editor note](docs/milestones/MILESTONE_01_CHAPTER_EDITOR.md)
+for persistence details, verification limits, and the Windows manual checklist.
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 plain navigational Entry Reference Fields, semantic field-kind conversion,
 advanced field metadata, additional Capabilities and advanced relationship constraints,
-maps, location-specific Explore filters, Chapters/Story Units, TipTap prose
-editing and rich descriptions, search/FTS, Tags/Roles/Statuses, aliases,
-Archive/Trash, shared-definition permanent deletion, final Recent/Pinned navigation, and any
-final visual design system.
+maps, location-specific Explore filters, Books/Scenes, passage links, publishing
+export, rich Entry descriptions, search/FTS, Tags/Statuses, aliases, Entry
+Archive/Trash, shared-definition permanent deletion, final Recent/Pinned navigation,
+and any final visual design system.
 
 ### Manual native-close verification
 
