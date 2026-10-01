@@ -22,10 +22,12 @@ beforeEach(() => {
   localStorage.clear();
   vi.mocked(listEntries).mockResolvedValue([]);
 });
+const findRole = vi.fn();
 function show(initial = chapterFixture()) {
   return render(
     <ChapterEditor
       projectId="project"
+      onFindRole={findRole}
       initial={initial}
       onController={(value) => {
         controller = value;
@@ -234,4 +236,130 @@ it("searches a bounded list and creates a role-free canonical Story link", async
     }),
   );
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it("assigns several Roles directly beside a collapsed Entry and keeps a role-free link", async () => {
+  const initial = chapterFixture();
+  initial.links = [
+    { id: "link", entryId: "person", label: "Traveller", workspaceState: "active", roles: [] },
+  ];
+  let saved = initial;
+  vi.mocked(applyStory).mockImplementation(async (_project, _revision, command) => {
+    if (command.kind === "set_link")
+      saved = {
+        ...saved,
+        globalRevision: saved.globalRevision + 1,
+        links: [
+          { ...saved.links[0], roles: saved.roles.filter((r) => command.roleIds.includes(r.id)) },
+        ],
+      };
+    return saved;
+  });
+  show(initial);
+  fireEvent.click(screen.getByRole("button", { name: "Roles for Traveller" }));
+  const dialog = screen.getByRole("dialog", { name: "Roles for Traveller" });
+  expect(within(dialog).getByText(/Choose none, one, or several/)).toBeVisible();
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "POV" }));
+  await waitFor(() => expect(within(dialog).getByRole("checkbox", { name: "POV" })).toBeChecked());
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "Setting" }));
+  await waitFor(() =>
+    expect(within(dialog).getByRole("checkbox", { name: "Setting" })).toBeChecked(),
+  );
+  expect(applyStory).toHaveBeenLastCalledWith("project", 4, {
+    kind: "set_link",
+    chapterId: "chapter",
+    entryId: "person",
+    roleIds: ["pov", "setting"],
+  });
+  fireEvent.change(within(dialog).getByRole("searchbox"), { target: { value: "pov" } });
+  expect(within(dialog).queryByRole("checkbox", { name: "Setting" })).not.toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "POV" }));
+  await waitFor(() =>
+    expect(within(dialog).getByRole("checkbox", { name: "POV" })).not.toBeChecked(),
+  );
+  fireEvent.change(within(dialog).getByRole("searchbox"), { target: { value: "" } });
+  expect(within(dialog).getByRole("checkbox", { name: "Setting" })).toBeChecked();
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "Setting" }));
+  await waitFor(() =>
+    expect(within(dialog).getByRole("checkbox", { name: "Setting" })).not.toBeChecked(),
+  );
+  expect(applyStory).toHaveBeenLastCalledWith("project", 6, {
+    kind: "set_link",
+    chapterId: "chapter",
+    entryId: "person",
+    roleIds: [],
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close Roles for Traveller" }));
+  expect(screen.getByText("No Roles assigned")).toBeVisible();
+  expect(screen.getByText("Traveller")).toBeVisible();
+});
+it("makes a new Role available without silently assigning it and returns to the Role picker", async () => {
+  const initial = chapterFixture();
+  initial.links = [
+    { id: "link", entryId: "person", label: "Traveller", workspaceState: "active", roles: [] },
+  ];
+  vi.mocked(applyStory).mockResolvedValue({
+    ...initial,
+    globalRevision: 4,
+    roles: [...initial.roles, { id: "intro", name: "Intro" }],
+  });
+  show(initial);
+  fireEvent.click(screen.getByRole("button", { name: "Roles for Traveller" }));
+  fireEvent.click(screen.getByRole("button", { name: "Manage available Roles" }));
+  const options = screen.getByRole("dialog", { name: "Chapter options" });
+  fireEvent.change(within(options).getByLabelText("New Story Role"), {
+    target: { value: "Intro" },
+  });
+  expect(controller.canSubmit).toBe(false);
+  fireEvent.click(within(options).getByRole("button", { name: "Create Role" }));
+  await within(options).findByText(/Intro is available/);
+  expect(controller.canSubmit).toBe(true);
+  expect(applyStory).toHaveBeenCalledTimes(1);
+  expect(applyStory).toHaveBeenCalledWith("project", 3, {
+    kind: "create_role",
+    chapterId: "chapter",
+    name: "Intro",
+  });
+  fireEvent.click(within(options).getByRole("button", { name: "Close Chapter options" }));
+  const picker = screen.getByRole("dialog", { name: "Roles for Traveller" });
+  expect(within(picker).getByRole("checkbox", { name: "Intro" })).not.toBeChecked();
+});
+it("shows assignment errors inside the dialog without displaying an uncommitted Role", async () => {
+  const initial = chapterFixture();
+  initial.links = [
+    { id: "link", entryId: "person", label: "Traveller", workspaceState: "active", roles: [] },
+  ];
+  vi.mocked(applyStory).mockRejectedValue(new Error("Write failed"));
+  show(initial);
+  fireEvent.click(screen.getByRole("button", { name: "Roles for Traveller" }));
+  const dialog = screen.getByRole("dialog", { name: "Roles for Traveller" });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "POV" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "The Role change was not saved",
+  );
+  expect(within(dialog).getByRole("checkbox", { name: "POV" })).not.toBeChecked();
+  expect(within(dialog).getByRole("checkbox", { name: "POV" })).toBeDisabled();
+});
+it("shows current Chapter assignments in the Role catalog and opens exact Project usage", () => {
+  const initial = chapterFixture();
+  initial.links = [
+    {
+      id: "link",
+      entryId: "person",
+      label: "Traveller",
+      workspaceState: "active",
+      roles: [initial.roles[0]],
+    },
+  ];
+  show(initial);
+  fireEvent.click(screen.getByRole("button", { name: "Chapter options" }));
+  const options = screen.getByRole("dialog", { name: "Chapter options" });
+  expect(within(options).getByText("In this Chapter: Traveller")).toBeVisible();
+  fireEvent.change(within(options).getByLabelText("Find an available Role"), {
+    target: { value: "pov" },
+  });
+  expect(within(options).queryByText("Setting")).not.toBeInTheDocument();
+  fireEvent.click(within(options).getByRole("button", { name: "Find Chapters using POV" }));
+  expect(findRole).toHaveBeenCalledWith(initial.roles[0]);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

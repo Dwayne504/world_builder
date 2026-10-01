@@ -410,6 +410,61 @@ describe("Project screen Saved contract", () => {
       "true",
     );
   });
+  it("opens exact Story Role usage from Search and keeps the original query in history", async () => {
+    vi.mocked(searchProject).mockResolvedValue({
+      globalRevision: 3,
+      groups: [
+        {
+          kind: "roles",
+          total: 1,
+          hits: [
+            {
+              key: "role:pov",
+              title: "POV",
+              context: "Story Role",
+              workspaceState: "active",
+              reason: "Exact name",
+              excerpt: "",
+              target: { kind: "story_role", roleId: "pov", name: "POV" },
+            },
+          ],
+        },
+      ],
+    });
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.change(await screen.findByRole("searchbox"), { target: { value: "POV" } });
+    fireEvent.click(await screen.findByRole("button", { name: "POV" }));
+    expect(await screen.findByRole("heading", { name: "Chapters using POV" })).toBeVisible();
+    await waitFor(() =>
+      expect(searchProject).toHaveBeenLastCalledWith(project.projectId, {
+        query: "",
+        includeInactive: false,
+        limitPerGroup: 10,
+        storyRoleId: "pov",
+        structuredKind: "chapters",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "← Back" }));
+    expect(await screen.findByRole("searchbox")).toHaveValue("POV");
+  });
+  it("protects an unapplied Role draft when finding uses from Chapter options", async () => {
+    const initial = chapterFixture();
+    vi.mocked(readStory).mockResolvedValue({ globalRevision: 3, chapters: [initial.chapter] });
+    vi.mocked(readChapter).mockResolvedValue(initial);
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Chapters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "The First Step" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Chapter options" }));
+    fireEvent.change(screen.getByLabelText("New Story Role"), { target: { value: "Unapplied" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find Chapters using POV" }));
+    expect(await screen.findByText(/unsaved changes.*before navigating/)).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Chapters using POV" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chapter options" }));
+    expect(screen.getByLabelText("New Story Role")).toHaveValue("Unapplied");
+  });
   it("searches an Entry's connections and linked Chapters through guarded navigation", async () => {
     const e = mockEditableEntry();
     getEntryMock.mockResolvedValue(e);

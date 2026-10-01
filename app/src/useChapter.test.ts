@@ -24,8 +24,10 @@ it("debounces writing, retains newer typing during an acknowledgement, and drain
   expect(readChapterDraft("project", initial)?.draft.documents.manuscript).toEqual(
     textDocument("First draft"),
   );
-  await waitFor(() => expect(applyStory).toHaveBeenCalledTimes(1));
-  expect(result.current.state).toBe("saving");
+  await waitFor(() => {
+    expect(applyStory).toHaveBeenCalledTimes(1);
+    expect(result.current.state).toBe("saving");
+  });
   act(() => result.current.changeDocument("manuscript", textDocument("First draft, more writing")));
   let flush!: Promise<unknown>;
   act(() => {

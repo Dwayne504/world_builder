@@ -77,6 +77,9 @@
   min-width: 0;
   max-width: 100%;
 }
+.search-controls label[hidden] {
+  display: none;
+}
 .search-controls select,
 .search-controls input {
   margin-top: 0.25rem;
@@ -2078,12 +2081,16 @@ dialog::after {
 }
 .chapter-world-link {
   border-top: 1px solid var(--line);
-  padding: 0.85rem 0;
+  padding: 0.65rem 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: start;
 }
-.chapter-world-link > summary {
+.chapter-world-link > details > summary {
   cursor: pointer;
 }
-.chapter-world-link > summary small {
+.chapter-world-link > details > summary small {
   display: block;
   margin-top: 0.25rem;
   color: var(--muted);
@@ -2116,12 +2123,44 @@ dialog::after {
   gap: 0.5rem;
   align-items: center;
   font-weight: normal;
+  margin: 0;
+  min-height: 2rem;
 }
 .story-role-options input {
   width: auto;
+  margin: 0;
 }
-.story-link-options {
+.chapter-role-button {
+  padding: 0.2rem 0.4rem;
+}
+.chapter-world-link > details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.story-role-catalog {
+  list-style: none;
+  padding: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.story-role-catalog li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.story-role-catalog li > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.story-role-catalog small {
+  display: block;
   font-size: 0.8rem;
+}
+.story-role-catalog button {
+  flex-shrink: 0;
 }
 .story-usage {
   margin-top: 1rem;

@@ -40,6 +40,8 @@ pub struct SearchRequest {
     pub structured_kind: Option<StructuredKind>,
     #[serde(default)]
     pub text_area: Option<DocumentArea>,
+    #[serde(default)]
+    pub story_role_id: Option<String>,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -55,6 +57,10 @@ pub enum StructuredKind {
     rename_all_fields = "camelCase"
 )]
 pub enum SearchTarget {
+    StoryRole {
+        role_id: String,
+        name: String,
+    },
     Entry {
         entry_id: String,
     },

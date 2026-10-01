@@ -342,3 +342,73 @@ it("labels each preview source and changes the text area without filtering out E
     }),
   );
 });
+
+it("finds unused Role definitions and offers exact usage navigation", async () => {
+  vi.mocked(searchProject).mockResolvedValue({
+    globalRevision: 3,
+    groups: [
+      {
+        kind: "roles",
+        total: 1,
+        hits: [
+          {
+            key: "role:intro",
+            title: "Intro",
+            context: "Story Role · View Chapter uses",
+            workspaceState: "active",
+            reason: "Exact name",
+            excerpt: "",
+            target: { kind: "story_role", roleId: "intro", name: "Intro" },
+          },
+        ],
+      },
+    ],
+  });
+  render(<Search initial={{ ...view, query: "Intro" }} />);
+  const role = await screen.findByRole("button", { name: "Intro" });
+  expect(screen.getByRole("region", { name: "Story Roles" })).toHaveTextContent(
+    "Creating a Role makes it available",
+  );
+  fireEvent.click(role);
+  expect(open).toHaveBeenCalledWith({ kind: "story_role", roleId: "intro", name: "Intro" });
+});
+it("loads Role usage without a text query and explains how to assign an unused Role", async () => {
+  vi.mocked(searchProject).mockResolvedValue({ globalRevision: 3, groups: [] });
+  render(
+    <Search
+      initial={{
+        ...view,
+        storyRoleId: "intro",
+        storyRoleName: "Intro",
+        structuredKind: "chapters",
+      }}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Chapters using Intro" })).toBeVisible();
+  expect(await screen.findByText(/No matching Chapter links/)).toHaveTextContent(
+    "choose Roles beside its name",
+  );
+  expect(searchProject).toHaveBeenCalledWith("p", {
+    query: "",
+    includeInactive: false,
+    limitPerGroup: 10,
+    storyRoleId: "intro",
+    structuredKind: "chapters",
+  });
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Traveller" } });
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith(
+      "p",
+      expect.objectContaining({ storyRoleId: "intro", query: "Traveller" }),
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Clear Role filter" }));
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith("p", {
+      query: "Traveller",
+      includeInactive: false,
+      limitPerGroup: 10,
+      structuredKind: "chapters",
+    }),
+  );
+});
