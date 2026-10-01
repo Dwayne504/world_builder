@@ -42,7 +42,7 @@ export function RelationshipsBrowser({
   }, [projectId, attempt]);
 
   function filter(change: Partial<RelationshipView>) {
-    onViewChange({ ...view, ...change, visibleCount: 5 });
+    onViewChange({ ...view, relationshipId: undefined, ...change, visibleCount: 5 });
   }
   function participant(person: RelationshipParticipant, focusKey: string) {
     return person.id && person.workspaceState === "active" ? (
@@ -85,6 +85,7 @@ export function RelationshipsBrowser({
       });
   const matching = (snapshot?.relationships ?? []).filter(
     (relation) =>
+      (!view.relationshipId || relation.id === view.relationshipId) &&
       (!view.definitionId || relation.definitionId === view.definitionId) &&
       (!view.entryIds.length ||
         view.entryIds.some((id) => relation.source.id === id || relation.target.id === id)) &&
@@ -93,7 +94,12 @@ export function RelationshipsBrowser({
           ? relation.ended
           : !relation.ended && relation.workspaceState === "active")),
   );
-  const filtered = !!(view.entryIds.length || view.definitionId || view.state !== "all");
+  const filtered = !!(
+    view.relationshipId ||
+    view.entryIds.length ||
+    view.definitionId ||
+    view.state !== "all"
+  );
 
   return (
     <section className="relationships-browser" aria-labelledby="relationships-title">
@@ -113,6 +119,12 @@ export function RelationshipsBrowser({
         <p role="status">Loading relationships…</p>
       ) : (
         <>
+          {view.relationshipId && (
+            <p className="field-note">
+              Showing the connection you found in Search. Clear filters to explore all
+              relationships.
+            </p>
+          )}
           <div className="relationship-filters">
             <div className="relationship-entry-filter">
               <label>

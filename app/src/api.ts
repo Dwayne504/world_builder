@@ -310,3 +310,24 @@ export function applySpatial(
 ): Promise<import("./types").SpatialSnapshot> {
   return call("apply_spatial", { projectId, expectedRevision, command });
 }
+
+export function searchProject(
+  projectId: string,
+  request: import("./searchTypes").SearchRequest,
+): Promise<import("./searchTypes").SearchResults> {
+  return call("search_project", { projectId, request });
+}
+export function readAliases(
+  projectId: string,
+  entryId: string,
+): Promise<import("./searchTypes").EntryAliases> {
+  return call("read_aliases", { projectId, entryId });
+}
+export function applyAlias(
+  projectId: string,
+  entryId: string,
+  expectedRevision: number,
+  command: import("./searchTypes").AliasCommand,
+): Promise<import("./searchTypes").EntryAliases> {
+  return call("apply_alias", { projectId, entryId, expectedRevision, command });
+}

@@ -11,6 +11,7 @@ pub mod lock;
 pub mod migrations;
 pub mod pragmas;
 mod relationships;
+mod search;
 pub mod snapshot;
 mod spatial;
 mod story;

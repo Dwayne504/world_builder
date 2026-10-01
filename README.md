@@ -401,11 +401,23 @@ backlinks. Renames never rewrite prose. Failed saves retain drafts, and recovere
 writing is reviewed before restoration. See the [Chapter editor note](docs/milestones/MILESTONE_01_CHAPTER_EDITOR.md)
 for persistence details, verification limits, and the Windows manual checklist.
 
+**Search** in the sidebar finds Entries by name, ID, or alias; Chapter titles;
+authored Field values and units; canonical relationship context and notes; Story
+links and Roles; and text in Manuscript, Plan, and Notes. Results keep identity
+matches ahead of prose and open the relevant record. Compact relationship results
+put the searched participant first; Chapter rows collapse around their previews.
+Filter Fields/connections/Chapter links, choose the result count, or use **Search
+this Entry** to search its Fields, connections, and explicitly linked Chapters.
+**Entry settings → Other names** adds/removes explicit aliases without rewriting
+prose. Schema 10 adds authored aliases and a disposable local search index;
+dirty or damaged indexes fall back to saved source data and rebuild safely.
+See the [Search and aliases note](docs/milestones/MILESTONE_01_SEARCH_AND_ALIASES.md).
+
 **Current non-goals** (deliberately out of scope for this slice): Rich Text and
 plain navigational Entry Reference Fields, semantic field-kind conversion,
 advanced field metadata, additional Capabilities and advanced relationship constraints,
 maps, location-specific Explore filters, Books/Scenes, passage links, publishing
-export, rich Entry descriptions, search/FTS, Tags/Statuses, aliases, Entry
+export, rich Entry descriptions, advanced Explore filters, Tags/Statuses, Entry
 Archive/Trash, shared-definition permanent deletion, final Recent/Pinned navigation,
 and any final visual design system.
 

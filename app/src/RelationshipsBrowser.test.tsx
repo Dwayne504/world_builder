@@ -70,6 +70,22 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(readProjectRelationships).mockResolvedValue(data());
 });
+it("opens the exact relationship from Search and lets the reader return to all connections", async () => {
+  const change = vi.fn();
+  render(
+    <RelationshipsBrowser
+      projectId="project"
+      view={{ ...initialRelationshipView, relationshipId: "relation-6" }}
+      onViewChange={change}
+      onNavigate={navigate}
+    />,
+  );
+  await screen.findByText("Showing 1 of 1 matching relationships");
+  expect(screen.getAllByRole("article")).toHaveLength(1);
+  expect(screen.getByRole("article")).toHaveAccessibleName("Captain allied with Captain");
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(change).toHaveBeenCalledWith(initialRelationshipView);
+});
 it("shows five cards initially and reveals the rest without duplicating symmetric or self connections", async () => {
   render(<Harness />);
   await screen.findByText("Showing 5 of 7 relationships");

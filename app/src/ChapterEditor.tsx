@@ -112,6 +112,8 @@ function EntryPreview({
 
 export function ChapterEditor({
   locked = false,
+  initialArea = "manuscript",
+  onAreaChange,
   categories = [],
   projectId,
   initial,
@@ -122,6 +124,8 @@ export function ChapterEditor({
   positions,
 }: {
   locked?: boolean;
+  initialArea?: DocumentArea;
+  onAreaChange?: (area: DocumentArea) => void;
   categories?: Category[];
   projectId: string;
   initial: ChapterSnapshot;
@@ -132,7 +136,7 @@ export function ChapterEditor({
   positions: Record<string, WritingPosition>;
 }) {
   const chapter = useChapter(projectId, initial, onChanged);
-  const [area, setArea] = useState<DocumentArea>("manuscript");
+  const [area, setArea] = useState<DocumentArea>(initialArea);
   const [contextOpen, setContextOpen] = useState(true);
   const [linkOpen, setLinkOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -296,7 +300,10 @@ export function ChapterEditor({
                 id={`tab-${value}`}
                 aria-controls={`writing-${value}`}
                 aria-selected={area === value}
-                onClick={() => setArea(value)}
+                onClick={() => {
+                  setArea(value);
+                  onAreaChange?.(value);
+                }}
               >
                 {value === "manuscript" ? "Manuscript" : value === "plan" ? "Plan" : "Notes"}
               </button>

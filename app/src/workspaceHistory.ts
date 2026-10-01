@@ -1,6 +1,8 @@
 /** Session navigation stores identity and presentation, never copies of authored data. */
 export interface WorkspaceLocation {
-  page: "entries" | "relationships" | "chapters";
+  page: "entries" | "relationships" | "chapters" | "search";
+  searchView: import("./searchTypes").SearchView;
+  chapterArea: import("./storyTypes").DocumentArea;
   chapterId: string | null;
   relationshipView: RelationshipView;
   entryId: string | null;
@@ -11,6 +13,7 @@ export interface WorkspaceLocation {
   focusKey: string | null;
 }
 export interface RelationshipView {
+  relationshipId?: string;
   entryIds: string[];
   definitionId: string;
   state: "all" | "current" | "ended";
@@ -28,6 +31,8 @@ export interface WorkspaceHistory {
 }
 export const initialLocation: WorkspaceLocation = {
   page: "entries",
+  searchView: { query: "", includeInactive: false, limitPerGroup: 10 },
+  chapterArea: "manuscript",
   chapterId: null,
   relationshipView: initialRelationshipView,
   entryId: null,

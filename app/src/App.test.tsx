@@ -97,6 +97,9 @@ vi.mock("./api", () => ({
       this.kind = dto.kind;
     }
   },
+  readAliases: vi.fn().mockResolvedValue({ globalRevision: 0, aliases: [] }),
+  applyAlias: vi.fn(),
+  searchProject: vi.fn(),
   createProject: vi.fn(),
   openProject: (...args: unknown[]) => openProjectMock(...args),
   restoreBackupAsCopy: vi.fn(),
@@ -123,6 +126,9 @@ vi.mock("./api", () => ({
 import App from "./App";
 import { chapterFixture, textDocument } from "./chapterTestFixtures";
 import {
+  searchProject,
+  readAliases,
+  applyAlias,
   readStory,
   readChapter,
   applyStory,
@@ -279,6 +285,9 @@ describe("Project screen Saved contract", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    vi.mocked(readAliases).mockReset().mockResolvedValue({ globalRevision: 1, aliases: [] });
+    vi.mocked(applyAlias).mockReset();
+    vi.mocked(searchProject).mockReset().mockResolvedValue({ globalRevision: 1, groups: [] });
     vi.mocked(readStory).mockReset().mockResolvedValue({ globalRevision: 1, chapters: [] });
     vi.mocked(readChapter).mockReset();
     vi.mocked(applyStory).mockReset();
@@ -337,6 +346,112 @@ describe("Project screen Saved contract", () => {
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
 
+  it("opens Search results by identity and restores query and matching Chapter area with Back", async () => {
+    const e = mockEditableEntry();
+    getEntryMock.mockResolvedValue(e);
+    const c = chapterFixture();
+    vi.mocked(readChapter).mockResolvedValue(c);
+    vi.mocked(searchProject).mockResolvedValue({
+      globalRevision: 1,
+      groups: [
+        {
+          kind: "entries",
+          total: 1,
+          hits: [
+            {
+              key: "entry",
+              title: "Thron",
+              context: "Character",
+              workspaceState: "active",
+              reason: "Exact name",
+              excerpt: "",
+              target: { kind: "entry", entryId: e.id },
+            },
+          ],
+        },
+        {
+          kind: "text",
+          total: 1,
+          hits: [
+            {
+              key: "notes",
+              title: "A Chapter",
+              context: "notes",
+              workspaceState: "active",
+              reason: "Text",
+              excerpt: "Thron",
+              target: { kind: "chapter", chapterId: c.chapter.id, area: "notes" },
+            },
+          ],
+        },
+      ],
+    });
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.change(await screen.findByRole("searchbox"), { target: { value: "Thron" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Text previews" }), {
+      target: { value: "notes" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByLabelText("entry-name");
+    fireEvent.click(screen.getByRole("button", { name: "← Back" }));
+    expect(await screen.findByRole("searchbox")).toHaveValue("Thron");
+    expect(screen.getByRole("combobox", { name: "Text previews" })).toHaveValue("notes");
+    fireEvent.click(await screen.findByRole("button", { name: /^A Chapter/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Chapter · Notes" }));
+    expect(await screen.findByRole("tab", { name: "Notes" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "← Back" }));
+    expect(await screen.findByRole("searchbox")).toHaveValue("Thron");
+    expect(await screen.findByRole("button", { name: /^A Chapter/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+  it("searches an Entry's connections and linked Chapters through guarded navigation", async () => {
+    const e = mockEditableEntry();
+    getEntryMock.mockResolvedValue(e);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Search this Entry" }));
+    expect(await screen.findByRole("heading", { name: "Search within Thron" })).toBeVisible();
+    await waitFor(() =>
+      expect(searchProject).toHaveBeenCalledWith(project.projectId, {
+        query: "",
+        entryId: e.id,
+        includeInactive: false,
+        limitPerGroup: 10,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "← Back" }));
+    await screen.findByLabelText("entry-name");
+    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.change(screen.getByLabelText("New alias"), { target: { value: "Unapplied" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search this Entry" }));
+    expect(await screen.findByText(/unsaved changes.*before navigating/)).toBeVisible();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+  });
+  it("protects an unapplied alias when leaving for Search", async () => {
+    const e = mockEditableEntry();
+    getEntryMock.mockResolvedValue(e);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Entry settings" }));
+    fireEvent.change(screen.getByLabelText("New alias"), { target: { value: "The Captain" } });
+    expect(screen.getByLabelText("entry-category")).toBeDisabled();
+    expect(screen.getByLabelText("entry-type")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByText(/unsaved changes.*before navigating/)).toBeVisible();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    expect(screen.getByLabelText("New alias")).toHaveValue("The Captain");
+    expect(applyAlias).not.toHaveBeenCalled();
+  });
   it("flushes Chapter manuscript on native close and waits for durable acknowledgement", async () => {
     enableTauriWindow();
     const initial = chapterFixture();
