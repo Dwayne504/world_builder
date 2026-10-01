@@ -12,6 +12,7 @@ export function WorkspaceFrame({
   onBrowse,
   onRelationships,
   onChapters,
+  onSearch,
   onAddEntry,
   onBack,
   onForward,
@@ -23,13 +24,14 @@ export function WorkspaceFrame({
   children: ReactNode;
   categories: Category[];
   entries: Entry[];
-  page: "entries" | "relationships" | "chapters";
+  page: "entries" | "relationships" | "chapters" | "search";
   categoryId: string;
   collapsed: boolean;
   onToggle: () => void;
   onBrowse: (id: string) => void;
   onRelationships: () => void;
   onChapters: () => void;
+  onSearch: () => void;
   onAddEntry: (categoryId: string) => void;
   onBack: () => void;
   onForward: () => void;
@@ -98,6 +100,14 @@ export function WorkspaceFrame({
       <div className={`workspace-layout ${collapsed ? "sidebar-collapsed" : ""}`}>
         <aside id="project-navigation" className="project-sidebar" hidden={collapsed}>
           <nav aria-label="Project navigation">
+            <button
+              className="sidebar-destination"
+              aria-current={page === "search" ? "page" : undefined}
+              disabled={busy || browsingDisabled}
+              onClick={onSearch}
+            >
+              Search
+            </button>
             <button
               className="sidebar-destination"
               aria-label="All Entries"

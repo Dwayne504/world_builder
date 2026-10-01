@@ -55,7 +55,22 @@ use crate::domain::fields::{EntryFields, FieldCatalog, FieldCommand, FieldMergeP
 use crate::domain::relationships::{EntryRelationships, RelationshipCommand, RelationshipSnapshot};
 use crate::domain::structure::FieldId;
 
+use crate::domain::search::{AliasCommand, EntryAliases, SearchRequest, SearchResults};
 enum Job {
+    Search {
+        request: SearchRequest,
+        reply: Reply<SearchResults>,
+    },
+    ReadAliases {
+        entry_id: EntryId,
+        reply: Reply<EntryAliases>,
+    },
+    ApplyAlias {
+        entry_id: EntryId,
+        expected: i64,
+        command: AliasCommand,
+        reply: Reply<EntryAliases>,
+    },
     ReadStory {
         reply: Reply<crate::domain::story::StoryIndex>,
     },
@@ -337,8 +352,27 @@ impl ProjectDbWorker {
 
     fn run(conn: Connection, jobs: Receiver<Job>) {
         let mut conn = conn;
+        // A reopened or restored package revalidates Search from source on first use.
+        // A damaged derived cache must not prevent authoring from opening.
+        let _ = conn.execute("UPDATE derived_index_state SET dirty=1 WHERE id=1", []);
         for job in jobs {
             match job {
+                Job::Search { request, reply } => {
+                    let _ = reply.send(super::search::query(&conn, request));
+                }
+                Job::ReadAliases { entry_id, reply } => {
+                    let _ = reply.send(super::search::aliases(&conn, entry_id));
+                }
+                Job::ApplyAlias {
+                    entry_id,
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::search::apply_alias(
+                        &mut conn, entry_id, expected, command,
+                    ));
+                }
                 Job::ReadStory { reply } => {
                     let _ = reply.send(super::story::index(&conn));
                 }
@@ -537,6 +571,28 @@ impl ProjectDbWorker {
             .map_err(|_| PersistenceError::WorkerShutDown)?
     }
 
+    pub fn search_project(
+        &self,
+        request: SearchRequest,
+    ) -> Result<SearchResults, PersistenceError> {
+        self.call(|reply| Job::Search { request, reply })
+    }
+    pub fn read_aliases(&self, entry_id: EntryId) -> Result<EntryAliases, PersistenceError> {
+        self.call(|reply| Job::ReadAliases { entry_id, reply })
+    }
+    pub fn apply_alias(
+        &self,
+        entry_id: EntryId,
+        expected: i64,
+        command: AliasCommand,
+    ) -> Result<EntryAliases, PersistenceError> {
+        self.call(|reply| Job::ApplyAlias {
+            entry_id,
+            expected,
+            command,
+            reply,
+        })
+    }
     pub fn read_story(&self) -> Result<crate::domain::story::StoryIndex, PersistenceError> {
         self.call(|reply| Job::ReadStory { reply })
     }
@@ -1446,7 +1502,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
+             DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;

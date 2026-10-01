@@ -1,5 +1,8 @@
 import { RecentProjects } from "./RecentProjects";
 import { ChapterLibrary } from "./ChapterLibrary";
+import { ProjectSearch } from "./ProjectSearch";
+import { EntryAliasesEditor } from "./EntryAliasesEditor";
+import type { SearchTarget, SearchView } from "./searchTypes";
 import { ChapterEditor } from "./ChapterEditor";
 import { StoryUsage } from "./StoryUsage";
 import { readChapter } from "./api";
@@ -793,6 +796,7 @@ function EntryEditor({
 }) {
   const editor = useEntryName(projectId, initialEntry);
   const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
+  const [aliasDirty, setAliasDirty] = useState(false);
   const { submit: submitName, currentEntry, waitForPending: waitForName } = editor;
   const { isPending: isStructurePending, waitForPending: waitForStructure } = mutations;
   const committedRevision = useRef(initialEntry.globalRevision);
@@ -909,10 +913,11 @@ function EntryEditor({
     },
     [currentEntry],
   );
-  const structureDirty =
+  const categoryTypeDirty =
     categoryId !== editor.entry.categoryId ||
     typeId !== (editor.entry.typeId ?? "") ||
     !!newTypeName;
+  const structureDirty = categoryTypeDirty || aliasDirty;
   structureDirtyRef.current = structureDirty;
   const combinedEntryState: SaveState =
     editor.saveState === "saving" ||
@@ -1054,7 +1059,7 @@ function EntryEditor({
       {editor.errorMessage && <p role="alert">{editor.errorMessage}</p>}
       {structureDirty && !entrySettingsOpen && (
         <p className="field-note">
-          Category / Type changes are not applied.{" "}
+          Entry settings have unapplied changes.{" "}
           <button className="quiet-button" onClick={() => setEntrySettingsOpen(true)}>
             Review Entry settings
           </button>
@@ -1079,6 +1084,7 @@ function EntryEditor({
           <select
             aria-label="entry-category"
             disabled={
+              aliasDirty ||
               mutations.state === "saving" ||
               relationshipsState === "saving" ||
               spatialState !== "saved"
@@ -1104,6 +1110,7 @@ function EntryEditor({
           <select
             aria-label="entry-type"
             disabled={
+              aliasDirty ||
               mutations.state === "saving" ||
               relationshipsState === "saving" ||
               spatialState !== "saved"
@@ -1129,6 +1136,7 @@ function EntryEditor({
         </label>
         <button
           disabled={
+            aliasDirty ||
             mutations.state === "saving" ||
             relationshipsState === "saving" ||
             fieldsState !== "saved"
@@ -1141,6 +1149,7 @@ function EntryEditor({
           <fieldset
             className="inline-creator"
             disabled={
+              aliasDirty ||
               mutations.state === "saving" ||
               relationshipsState === "saving" ||
               spatialState !== "saved"
@@ -1192,10 +1201,11 @@ function EntryEditor({
         <div className="row">
           <button
             disabled={
+              aliasDirty ||
               mutations.state === "saving" ||
               relationshipsState === "saving" ||
               spatialState !== "saved" ||
-              !structureDirty ||
+              !categoryTypeDirty ||
               !!newTypeName ||
               (categoryId !== editor.entry.categoryId && !structureTypeChosen)
             }
@@ -1204,6 +1214,22 @@ function EntryEditor({
             Apply Category / Type
           </button>
         </div>
+        <EntryAliasesEditor
+          projectId={projectId}
+          entryId={editor.entry.id}
+          disabled={
+            categoryTypeDirty ||
+            mutations.state === "saving" ||
+            editor.saveState !== "saved" ||
+            fieldsState !== "saved" ||
+            relationshipsState !== "saved" ||
+            spatialState !== "saved"
+          }
+          mutations={mutations}
+          getRevision={getRevision}
+          onRevision={receiveRevision}
+          onDraftChange={setAliasDirty}
+        />
         {entrySettingsOpen && structureError && <p role="alert">{structureError}</p>}
         <details className="technical-details">
           <summary>Entry information</summary>
@@ -1631,6 +1657,10 @@ function EntryWorkflow({
       if (!selected && location.page === "relationships") return;
       void requestNavigation({ location: { ...initialLocation, page: "relationships" } });
     },
+    onSearch: () => {
+      if (location.page !== "search")
+        void requestNavigation({ location: { ...initialLocation, page: "search" } });
+    },
     onChapters: () => {
       if (!chapter && location.page === "chapters") return;
       void requestNavigation({ location: { ...initialLocation, page: "chapters" } });
@@ -1658,6 +1688,38 @@ function EntryWorkflow({
     setHistory(next);
   }
 
+  function updateSearchView(searchView: SearchView) {
+    const current = historyRef.current;
+    const next = {
+      ...current,
+      locations: current.locations.map((item, index) =>
+        index === current.index ? { ...item, searchView } : item,
+      ),
+    };
+    historyRef.current = next;
+    setHistory(next);
+  }
+  function openSearchTarget(target: SearchTarget) {
+    const next =
+      target.kind === "entry"
+        ? destination(target.entryId)
+        : target.kind === "chapter"
+          ? {
+              ...initialLocation,
+              page: "chapters" as const,
+              chapterId: target.chapterId,
+              chapterArea: target.area,
+            }
+          : {
+              ...initialLocation,
+              page: "relationships" as const,
+              relationshipView: {
+                ...initialLocation.relationshipView,
+                relationshipId: target.relationshipId,
+              },
+            };
+    void requestNavigation({ location: next });
+  }
   async function addCategory() {
     const outcome = await mutations.run(
       () => createCategory(projectId, newCategoryName),
@@ -1717,6 +1779,19 @@ function EntryWorkflow({
     }
   }
 
+  if (location.page === "search") {
+    return (
+      <WorkspaceFrame {...navigationProps}>
+        {error && <p role="alert">{error}</p>}
+        <ProjectSearch
+          projectId={projectId}
+          view={location.searchView}
+          onViewChange={updateSearchView}
+          onOpen={openSearchTarget}
+        />
+      </WorkspaceFrame>
+    );
+  }
   if (location.page === "chapters") {
     return (
       <WorkspaceFrame {...navigationProps}>
@@ -1753,6 +1828,18 @@ function EntryWorkflow({
             key={chapter.chapter.id}
             projectId={projectId}
             initial={chapter}
+            initialArea={location.chapterArea}
+            onAreaChange={(chapterArea) => {
+              const current = historyRef.current;
+              const next = {
+                ...current,
+                locations: current.locations.map((item, index) =>
+                  index === current.index ? { ...item, chapterArea } : item,
+                ),
+              };
+              historyRef.current = next;
+              setHistory(next);
+            }}
             positions={writingPositions.current}
             onController={receiveController}
             onChanged={(next) => {

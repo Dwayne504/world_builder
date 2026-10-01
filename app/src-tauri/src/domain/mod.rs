@@ -8,6 +8,7 @@ pub mod error;
 pub mod fields;
 pub mod ids;
 pub mod relationships;
+pub mod search;
 pub mod spatial;
 pub mod story;
 pub mod structure;

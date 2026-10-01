@@ -626,7 +626,7 @@ fn schema_seven_migration_is_atomic_backed_up_and_preserves_existing_entries() {
     ProjectService::close_project(&state, project.project_id).unwrap();
     let root = std::path::Path::new(&project.package_path);
     let db = Connection::open(root.join("data").join("project.sqlite")).unwrap();
-    db.execute_batch("DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit; DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; PRAGMA user_version=7; UPDATE project_meta SET schema_version=7; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
+    db.execute_batch("DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit; DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; PRAGMA user_version=7; UPDATE project_meta SET schema_version=7; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
     let mut manifest = Manifest::read(&root.join("manifest.json")).unwrap();
     manifest.schema_version = 7;
     manifest.write(&root.join("manifest.json")).unwrap();

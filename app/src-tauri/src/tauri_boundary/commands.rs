@@ -17,6 +17,41 @@ use crate::preferences::{self, PreferencesError, PreferencesStore};
 use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
 #[tauri::command]
+pub fn search_project(
+    state: State<'_, AppState>,
+    project_id: String,
+    request: crate::domain::search::SearchRequest,
+) -> Result<crate::domain::search::SearchResults, AppErrorDto> {
+    ProjectService::search_project(&state, parse_project_id(&project_id)?, request)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub fn read_aliases(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: EntryId,
+) -> Result<crate::domain::search::EntryAliases, AppErrorDto> {
+    ProjectService::read_aliases(&state, parse_project_id(&project_id)?, entry_id)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_alias(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: EntryId,
+    expected_revision: i64,
+    command: crate::domain::search::AliasCommand,
+) -> Result<crate::domain::search::EntryAliases, AppErrorDto> {
+    ProjectService::apply_alias(
+        &state,
+        parse_project_id(&project_id)?,
+        entry_id,
+        expected_revision,
+        command,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
 pub fn read_story(
     state: State<'_, AppState>,
     project_id: String,

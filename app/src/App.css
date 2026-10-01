@@ -1,3 +1,84 @@
+/* Project search shares the existing desktop palettes. */
+.project-search {
+  padding: clamp(1rem, 2.5vw, 2.5rem);
+}
+.search-query {
+  max-width: 65rem;
+}
+.search-query input {
+  margin-top: 0.5rem;
+}
+.search-inactive {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  font-weight: normal;
+}
+.search-inactive input {
+  width: auto;
+}
+.search-group {
+  margin-top: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.search-group h3 small {
+  font:
+    0.85rem system-ui,
+    sans-serif;
+  margin-left: 0.5rem;
+}
+.search-results,
+.alias-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.search-results li {
+  border-bottom: 1px solid var(--line);
+  padding: 0.8rem 0;
+  overflow-wrap: anywhere;
+}
+.search-result-title {
+  text-align: left;
+  font-size: 1.05rem;
+  padding-left: 0;
+  margin-right: 0.8rem;
+}
+.search-results p {
+  margin: 0.3rem 0;
+}
+.search-excerpt {
+  max-width: 85ch;
+}
+.entry-aliases {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin-top: 1.5rem;
+  padding: 1rem 0 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.dialog-body .entry-aliases fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.alias-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 /* Two deliberate palettes, selected in application preferences. */
 :root {
   font-family: "Segoe UI", system-ui, sans-serif;

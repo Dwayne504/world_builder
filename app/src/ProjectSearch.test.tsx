@@ -1,0 +1,169 @@
+import { useState } from "react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+import { ProjectSearch } from "./ProjectSearch";
+import { EntryAliasesEditor } from "./EntryAliasesEditor";
+import { useMutationCoordinator } from "./useMutationCoordinator";
+import { searchProject, readAliases, applyAlias } from "./api";
+import type { SearchResults, SearchView } from "./searchTypes";
+vi.mock("./api", () => ({ searchProject: vi.fn(), readAliases: vi.fn(), applyAlias: vi.fn() }));
+beforeEach(() => {
+  vi.resetAllMocks();
+});
+const view: SearchView = { query: "", includeInactive: false, limitPerGroup: 10 };
+const result: SearchResults = {
+  globalRevision: 3,
+  groups: [
+    {
+      kind: "entries",
+      total: 1,
+      hits: [
+        {
+          key: "e",
+          title: "Wanderer",
+          context: "Character · Human",
+          workspaceState: "active",
+          reason: "Alias: Captain",
+          excerpt: "",
+          target: { kind: "entry", entryId: "e" },
+        },
+      ],
+    },
+    {
+      kind: "text",
+      total: 1,
+      hits: [
+        {
+          key: "d",
+          title: "Journey",
+          context: "notes · Text match",
+          workspaceState: "active",
+          reason: "Plain text · not a structural link",
+          excerpt: '<img src="x" onerror="alert(1)"> Captain in prose',
+          target: { kind: "chapter", chapterId: "c", area: "notes" },
+        },
+      ],
+    },
+  ],
+};
+const open = vi.fn();
+function Search({ initial = view }: { initial?: SearchView }) {
+  const [current, setCurrent] = useState(initial);
+  return <ProjectSearch projectId="p" view={current} onViewChange={setCurrent} onOpen={open} />;
+}
+it("groups identities ahead of prose and opens the actual matching document area", async () => {
+  vi.mocked(searchProject).mockResolvedValue(result);
+  render(<Search />);
+  expect(searchProject).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Captain" } });
+  expect(await screen.findByText("2 matching results")).toBeVisible();
+  expect(screen.getByRole("region", { name: "Entries" })).toHaveTextContent("Alias: Captain");
+  expect(document.querySelector("img")).toBeNull();
+  expect(screen.getByText(result.groups[1].hits[0].excerpt)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Journey" }));
+  expect(open).toHaveBeenCalledWith({ kind: "chapter", chapterId: "c", area: "notes" });
+  expect(searchProject).toHaveBeenCalledWith("p", {
+    query: "Captain",
+    includeInactive: false,
+    limitPerGroup: 10,
+  });
+});
+it("ignores a late response to an earlier query", async () => {
+  let resolve!: (value: SearchResults) => void;
+  vi.mocked(searchProject)
+    .mockReturnValueOnce(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    )
+    .mockResolvedValueOnce({ globalRevision: 3, groups: [] });
+  render(<Search initial={{ ...view, query: "Captain" }} />);
+  await waitFor(() => expect(searchProject).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Nobody" } });
+  await screen.findByText(/No matches/);
+  await act(async () => resolve(result));
+  expect(screen.queryByRole("button", { name: "Wanderer" })).not.toBeInTheDocument();
+  expect(screen.getByText(/No matches/)).toBeVisible();
+});
+it("retries visible errors, includes inactive records only explicitly, and bounds more results", async () => {
+  vi.mocked(searchProject)
+    .mockRejectedValueOnce(new Error("Read failed"))
+    .mockResolvedValue({ ...result, groups: [{ ...result.groups[0], total: 50 }] });
+  render(<Search initial={{ ...view, query: "Captain" }} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Read failed");
+  fireEvent.click(screen.getByRole("button", { name: "Retry search" }));
+  await screen.findByText("50 matching results");
+  fireEvent.click(screen.getByRole("checkbox"));
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith("p", {
+      query: "Captain",
+      includeInactive: true,
+      limitPerGroup: 10,
+    }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Show more results" }));
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith("p", {
+      query: "Captain",
+      includeInactive: true,
+      limitPerGroup: 30,
+    }),
+  );
+});
+const onRevision = vi.fn();
+const onDraft = vi.fn();
+const getRevision = () => 7;
+function Aliases() {
+  const mutations = useMutationCoordinator();
+  return (
+    <EntryAliasesEditor
+      projectId="p"
+      entryId="e"
+      disabled={mutations.state === "saving"}
+      mutations={mutations}
+      getRevision={getRevision}
+      onRevision={onRevision}
+      onDraftChange={onDraft}
+    />
+  );
+}
+it("keeps failed alias drafts, retries explicitly, and removes only the selected alias", async () => {
+  vi.mocked(readAliases).mockResolvedValue({ globalRevision: 7, aliases: [] });
+  vi.mocked(applyAlias)
+    .mockRejectedValueOnce(new Error("Disk full"))
+    .mockResolvedValueOnce({ globalRevision: 8, aliases: [{ id: "alias-id", text: "Captain" }] })
+    .mockResolvedValueOnce({ globalRevision: 9, aliases: [] });
+  render(<Aliases />);
+  await waitFor(() => expect(screen.getByLabelText("New alias")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("New alias"), { target: { value: "Captain" } });
+  expect(onDraft).toHaveBeenLastCalledWith(true);
+  fireEvent.click(screen.getByRole("button", { name: "Add alias" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Disk full");
+  expect(screen.getByLabelText("New alias")).toHaveValue("Captain");
+  fireEvent.click(screen.getByRole("button", { name: "Add alias" }));
+  await screen.findByText("Captain");
+  expect(screen.getByLabelText("New alias")).toHaveValue("");
+  fireEvent.click(screen.getByRole("button", { name: "Remove alias Captain" }));
+  expect(applyAlias).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "Keep alias" }));
+  expect(applyAlias).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "Remove alias Captain" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove alias" }));
+  await waitFor(() => expect(screen.queryByText("Captain")).not.toBeInTheDocument());
+  expect(applyAlias).toHaveBeenLastCalledWith("p", "e", 7, { kind: "delete", aliasId: "alias-id" });
+  expect(onRevision).toHaveBeenLastCalledWith(9);
+  expect(onDraft).toHaveBeenLastCalledWith(false);
+});
+it("keeps alias load errors visible and enables editing after reload", async () => {
+  vi.mocked(readAliases)
+    .mockRejectedValueOnce(new Error("Unavailable"))
+    .mockResolvedValueOnce({ globalRevision: 7, aliases: [] });
+  render(<Aliases />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Unavailable");
+  expect(screen.getByLabelText("New alias")).toBeDisabled();
+  fireEvent.click(
+    within(screen.getByRole("alert")).getByRole("button", { name: "Reload aliases" }),
+  );
+  await waitFor(() => expect(screen.getByLabelText("New alias")).toBeEnabled());
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
