@@ -63,7 +63,7 @@ it("groups identities ahead of prose and opens the actual matching document area
   fireEvent.click(screen.getByRole("button", { name: /^Journey/ }));
   expect(screen.getByText(result.groups[1].hits[0].excerpt)).toBeVisible();
   expect(document.querySelector("img")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Open Chapter · notes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open Chapter · Notes" }));
   expect(open).toHaveBeenCalledWith({ kind: "chapter", chapterId: "c", area: "notes" });
   expect(searchProject).toHaveBeenCalledWith("p", {
     query: "Captain",
@@ -287,6 +287,53 @@ it("loads an Entry scope without a query and can return to the whole Project", a
   await screen.findByText("2 matching results");
   fireEvent.click(screen.getByRole("button", { name: "Search whole Project" }));
   expect(screen.getByRole("heading", { name: "Search your Project" })).toBeVisible();
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith("p", {
+      query: "Captain",
+      includeInactive: false,
+      limitPerGroup: 10,
+    }),
+  );
+});
+
+it("labels each preview source and changes the text area without filtering out Entries", async () => {
+  vi.mocked(searchProject).mockImplementation(async (_project, request) => ({
+    ...result,
+    groups: [
+      result.groups[0],
+      {
+        ...result.groups[1],
+        total: request.textArea === "plan" ? 0 : 1,
+        hits: request.textArea === "plan" ? [] : result.groups[1].hits,
+      },
+    ],
+  }));
+  render(<Search initial={{ ...view, query: "Captain" }} />);
+  expect(await screen.findByRole("button", { name: "Journey Preview from Notes" })).toBeVisible();
+  expect(
+    screen.getByText(/Previews come from the writing area matching your search/),
+  ).toBeVisible();
+  const source = screen.getByRole("combobox", { name: "Text previews" });
+  expect(source).toHaveValue("all");
+  fireEvent.change(source, { target: { value: "plan" } });
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith("p", {
+      query: "Captain",
+      includeInactive: false,
+      limitPerGroup: 10,
+      textArea: "plan",
+    }),
+  );
+  await screen.findByText("1 matching result");
+  expect(screen.getByRole("button", { name: "Wanderer" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /Journey/ })).not.toBeInTheDocument();
+  expect(source).toBeVisible(); // Still reachable when the chosen area has no matches.
+  fireEvent.change(source, { target: { value: "notes" } });
+  const row = await screen.findByRole("button", { name: "Journey Preview from Notes" });
+  fireEvent.click(row);
+  fireEvent.click(screen.getByRole("button", { name: "Open Chapter · Notes" }));
+  expect(open).toHaveBeenCalledWith({ kind: "chapter", chapterId: "c", area: "notes" });
+  fireEvent.change(source, { target: { value: "all" } });
   await waitFor(() =>
     expect(searchProject).toHaveBeenLastCalledWith("p", {
       query: "Captain",

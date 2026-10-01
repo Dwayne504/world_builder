@@ -36,8 +36,14 @@ are displayed separately, behind a disclosure, rather than displaying concatenat
 index terms as prose. Opening the result retains that participant perspective.
 
 Chapter rows start collapsed, with Roles or the matching writing area beneath
-the title. Opening a row reveals a short excerpt and a link to the exact writing
-area. Longer preview expands surrounding context up to 1,200 characters in a
+the title. Disclosure arrows align with the title, rather than between the title
+and metadata. Opening a row reveals a short excerpt and a link to the exact
+writing area. Text results say **Preview from Manuscript**, **Preview from Plan**,
+or **Preview from Notes**. **Text previews** defaults to all matching writing
+areas; selecting one area filters text results before totals and limits. Other
+result groups are unaffected. A preview comes from text matching the query in
+that area, not from a generated or separately authored Summary. The selector
+remains available even if the chosen area has no matches. Longer preview expands surrounding context up to 1,200 characters in a
 resizable pane; it does not load the entire manuscript into the result. Titles
 truncate visually with their full text available on hover and to assistive tools.
 
@@ -50,7 +56,7 @@ scope. Empty writing areas are omitted.
 
 Results open an Entry, the exact canonical relationship in the relationship
 browser, or the matching Chapter writing area. Back/Forward retains query,
-inclusion setting, section filter, result limit, Entry scope, expanded rows and
+inclusion setting, section and text-area filters, result limit, Entry scope, expanded rows and
 previews, scroll/focus context, and Chapter area. Leaving
 an editor uses the existing pending-save and unsaved-draft guards.
 
@@ -108,7 +114,8 @@ failed rebuilds, reopening, Restore as Copy, schema-9 upgrade rollback and its
 external recovery snapshot, and bounded results with 1,001 Entries. Feedback regressions cover forward,
 inverse, symmetric and alias-based relationship wording; unchanged canonical
 participants; notes separated from indexed terms; Entry scoping; pre-limit
-filters; invalid scope IDs; and bounded short/long previews.
+filters; invalid scope IDs; bounded short/long previews; and text-area filtering
+with unchanged chapter documents and other result groups.
 
 Frontend coverage includes query races, result grouping, escaped text, retry,
 inactive inclusion, result limits, alias write failures/removal confirmation,
@@ -123,14 +130,17 @@ desktop and narrow widths (1536, 1366, 1000, 600), alias addition, Entry round-t
 Back restoring query, Chapter Notes selection, and flush before Search navigation.
 Feedback checks additionally use 50 synthetic Chapters, section filtering,
 compact relationship notes, short/long previews, chosen result counts, and Entry
-search. Screenshots are inspected for readability and overflow. This does not replace a
+search. Preview-source checks also verify arrow/title alignment in both palettes
+at four widths, explicit source labels, source switching, correct writing-area
+navigation, and Back retaining the selected source. Screenshots are inspected for
+readability and overflow. This does not replace a
 manual packaged Windows/WebView2 test; no native OS-close run is claimed here.
 
 Required gates: frontend typecheck/tests/lint/format/build; Rust format/tests/
 Clippy with warnings denied/check; Git whitespace and forbidden-artifact review.
 The existing rich-text JavaScript chunk warning remains non-blocking.
 
-Local checks on 2026-10-01 pass: 227 frontend tests, 208 Rust tests, all required
+Local checks on 2026-10-01 pass: 228 frontend tests, 209 Rust tests, all required
 formatting/lint/compiler/build checks, and Git whitespace checks. Two Rust
 subprocess helpers are ignored by discovery and exercised by their parent crash
 tests.
@@ -160,7 +170,9 @@ Use a new disposable Project or a copy, never an original author Project.
    preserves that perspective.
 7. Search across many Chapters. Expand a row and its preview, filter to only
    Relationships or linked Chapters, and choose a result count above ten. Open a
-   result and go Back; the filters and open rows should remain.
+   result and go Back; the filters and open rows should remain. Change Text previews
+   to Plan, Manuscript, and Notes; only matching text from that area should appear,
+   and Open Chapter must open that same writing area.
 8. Use Search this Entry. Search another participant and words from a linked
    Chapter, then clear the query to browse that Entry's scope. Confirm unlinked
    prose mentions appear only in whole-Project search.

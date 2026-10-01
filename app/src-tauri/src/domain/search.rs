@@ -1,5 +1,5 @@
 //! Search is navigation over saved sources, never a source of world facts.
-use super::EntryId;
+use super::{story::DocumentArea, EntryId};
 use serde::{Deserialize, Serialize};
 use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
@@ -38,6 +38,8 @@ pub struct SearchRequest {
     pub entry_id: Option<EntryId>,
     #[serde(default)]
     pub structured_kind: Option<StructuredKind>,
+    #[serde(default)]
+    pub text_area: Option<DocumentArea>,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

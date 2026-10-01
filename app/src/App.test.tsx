@@ -389,12 +389,16 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     fireEvent.change(await screen.findByRole("searchbox"), { target: { value: "Thron" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Text previews" }), {
+      target: { value: "notes" },
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     await screen.findByLabelText("entry-name");
     fireEvent.click(screen.getByRole("button", { name: "← Back" }));
     expect(await screen.findByRole("searchbox")).toHaveValue("Thron");
+    expect(screen.getByRole("combobox", { name: "Text previews" })).toHaveValue("notes");
     fireEvent.click(await screen.findByRole("button", { name: /^A Chapter/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Chapter · notes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Chapter · Notes" }));
     expect(await screen.findByRole("tab", { name: "Notes" })).toHaveAttribute(
       "aria-selected",
       "true",

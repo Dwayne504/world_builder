@@ -2,6 +2,8 @@ import { useEffect, useId, useState } from "react";
 import { searchProject } from "./api";
 import type { SearchHit, SearchResults, SearchTarget, SearchView } from "./searchTypes";
 
+const areaNames = { manuscript: "Manuscript", plan: "Plan", notes: "Notes" };
+
 const titles = {
   entries: "Entries",
   chapters: "Chapters",
@@ -14,11 +16,13 @@ function ResultRow({
   view,
   onViewChange,
   onOpen,
+  textMatch,
 }: {
   hit: SearchHit;
   view: SearchView;
   onViewChange: (view: SearchView) => void;
   onOpen: (target: SearchTarget) => void;
+  textMatch: boolean;
 }) {
   const bodyId = useId();
   const isChapter = hit.target.kind === "chapter";
@@ -33,7 +37,11 @@ function ResultRow({
         : [...keys, hit.key],
     });
   };
-  const context = [hit.context, hit.workspaceState === "active" ? "" : hit.workspaceState]
+  const resultContext =
+    textMatch && hit.target.kind === "chapter"
+      ? `Preview from ${areaNames[hit.target.area]}`
+      : hit.context;
+  const context = [resultContext, hit.workspaceState === "active" ? "" : hit.workspaceState]
     .filter(Boolean)
     .join(" · ");
   const preview = (
@@ -65,7 +73,9 @@ function ResultRow({
             data-navigation-focus={`search-${hit.key}`}
             onClick={() => toggle("expandedHits")}
           >
-            <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+            <span className="search-disclosure-icon" aria-hidden="true">
+              {expanded ? "▾" : "▸"}
+            </span>
             <span className="search-result-label">
               <span className="search-result-name" title={hit.title}>
                 {hit.title}
@@ -77,7 +87,8 @@ function ResultRow({
             <div className="search-result-body" id={bodyId}>
               {preview}
               <button className="quiet-button" onClick={() => onOpen(hit.target)}>
-                Open Chapter{hit.target.kind === "chapter" ? ` · ${hit.target.area}` : ""}
+                Open Chapter
+                {hit.target.kind === "chapter" ? ` · ${areaNames[hit.target.area]}` : ""}
               </button>
             </div>
           )}
@@ -135,7 +146,7 @@ export function ProjectSearch({
   const [result, setResult] = useState<SearchResults | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const { query, includeInactive, limitPerGroup, entryId, structuredKind } = view;
+  const { query, includeInactive, limitPerGroup, entryId, structuredKind, textArea } = view;
   const [count, setCount] = useState(String(limitPerGroup));
   const [countError, setCountError] = useState(false);
   useEffect(() => {
@@ -159,6 +170,7 @@ export function ProjectSearch({
         limitPerGroup,
         ...(entryId ? { entryId } : {}),
         ...(structuredKind ? { structuredKind } : {}),
+        ...(textArea ? { textArea } : {}),
       })
         .then((next) => {
           if (current) setResult(next);
@@ -172,7 +184,16 @@ export function ProjectSearch({
       current = false;
       window.clearTimeout(timer);
     };
-  }, [projectId, query, includeInactive, limitPerGroup, entryId, structuredKind, attempt]);
+  }, [
+    projectId,
+    query,
+    includeInactive,
+    limitPerGroup,
+    entryId,
+    structuredKind,
+    textArea,
+    attempt,
+  ]);
   const total = result?.groups.reduce((sum, group) => sum + group.total, 0) ?? 0;
   return (
     <section className="project-search" aria-labelledby="search-heading">
@@ -238,6 +259,27 @@ export function ProjectSearch({
             <option value="chapters">Linked Chapters</option>
           </select>
         </label>
+        <label>
+          Text previews
+          <select
+            aria-label="Text previews"
+            value={textArea ?? "all"}
+            onChange={(event) =>
+              onViewChange({
+                ...view,
+                textArea:
+                  event.currentTarget.value === "all"
+                    ? undefined
+                    : (event.currentTarget.value as SearchView["textArea"]),
+              })
+            }
+          >
+            <option value="all">All matching writing areas</option>
+            <option value="manuscript">Manuscript</option>
+            <option value="plan">Plan</option>
+            <option value="notes">Notes</option>
+          </select>
+        </label>
         <label className="search-count">
           Results per section
           <input
@@ -297,7 +339,10 @@ export function ProjectSearch({
                   {titles[group.kind]} <small className="muted">{group.total}</small>
                 </h3>
                 {group.kind === "text" && (
-                  <p className="field-note">Text matches are separate from Chapter links.</p>
+                  <p className="field-note">
+                    Previews come from the writing area matching your search. Change it with Text
+                    previews above. Text matches are separate from Chapter links.
+                  </p>
                 )}
                 <ul className="search-results">
                   {group.hits.map((hit) => (
@@ -307,6 +352,7 @@ export function ProjectSearch({
                       view={view}
                       onViewChange={onViewChange}
                       onOpen={onOpen}
+                      textMatch={group.kind === "text"}
                     />
                   ))}
                 </ul>

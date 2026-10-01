@@ -80,6 +80,7 @@ fn request(query: &str) -> SearchRequest {
         limit_per_group: 10,
         entry_id: None,
         structured_kind: None,
+        text_area: None,
     }
 }
 fn hits(result: &SearchResults, group: &str) -> Vec<SearchHit> {
@@ -854,4 +855,63 @@ fn chapter_excerpts_are_bounded_and_requested_counts_can_exceed_one_hundred() {
     assert!(ProjectService::search_project(&f.state, f.project, q.clone()).is_ok());
     q.limit_per_group = 0;
     assert!(ProjectService::search_project(&f.state, f.project, q).is_err());
+}
+
+#[test]
+fn preview_area_filters_before_limits_without_changing_other_groups_or_chapter_text() {
+    let f = Fixture::new();
+    let e = f.entry("Voyage");
+    let c = f.chapter("Voyage", "Voyage manuscript");
+    f.story(StoryCommand::SetLink {
+        chapter_id: c.chapter.id,
+        entry_id: e.id,
+        role_ids: vec![],
+    });
+    f.story(StoryCommand::Save { chapter_id:c.chapter.id, title:None, documents: [DocumentArea::Plan,DocumentArea::Notes].into_iter().map(|area| DocumentEdit {
+        area, schema_version:1, content:json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":format!("Voyage {}",area.as_str())}]}]})
+    }).collect() });
+    let before = f.revision();
+    let mut q = request("Voyage");
+    q.limit_per_group = 1;
+    let all = ProjectService::search_project(&f.state, f.project, q.clone()).unwrap();
+    assert_eq!(
+        all.groups.iter().find(|g| g.kind == "text").unwrap().total,
+        3
+    );
+    for area in [
+        DocumentArea::Manuscript,
+        DocumentArea::Plan,
+        DocumentArea::Notes,
+    ] {
+        q.text_area = Some(area);
+        f.db()
+            .execute("UPDATE derived_index_state SET dirty=1", [])
+            .unwrap();
+        for _ in 0..2 {
+            let r = ProjectService::search_project(&f.state, f.project, q.clone()).unwrap();
+            let group = r.groups.iter().find(|g| g.kind == "text").unwrap();
+            assert_eq!(group.total, 1);
+            assert_eq!(group.hits.len(), 1);
+            assert_eq!(group.hits[0].excerpt, format!("Voyage {}", area.as_str()));
+            assert_eq!(
+                group.hits[0].target,
+                SearchTarget::Chapter {
+                    chapter_id: c.chapter.id.to_string(),
+                    area: area.as_str().into()
+                }
+            );
+            for kind in ["entries", "chapters", "structured"] {
+                assert_eq!(hits(&r, kind), hits(&all, kind));
+            }
+        }
+    }
+    let saved = ProjectService::read_chapter(&f.state, f.project, c.chapter.id).unwrap();
+    for d in saved.documents {
+        assert_eq!(d.plain_text, format!("Voyage {}\n", d.area.as_str()));
+    }
+    assert_eq!(f.revision(), before);
+    assert!(serde_json::from_value::<SearchRequest>(
+        json!({"query":"Voyage","limitPerGroup":10,"includeInactive":false,"textArea":"unknown"})
+    )
+    .is_err());
 }

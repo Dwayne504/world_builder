@@ -6,6 +6,7 @@ export interface SearchRequest {
   limitPerGroup: number;
   entryId?: string;
   structuredKind?: "fields" | "relationships" | "chapters";
+  textArea?: DocumentArea;
 }
 export interface SearchView extends SearchRequest {
   entryName?: string;

@@ -424,6 +424,15 @@ pub(super) fn query(
             if d.group == "text" && d.text.trim().is_empty() {
                 return false;
             }
+            if d.group == "text" {
+                if let (Some(wanted), SearchTarget::Chapter { area, .. }) =
+                    (request.text_area, &d.hit.target)
+                {
+                    if area != wanted.as_str() {
+                        return false;
+                    }
+                }
+            }
             if !request.include_inactive && d.hit.workspace_state != "active" {
                 return false;
             }
