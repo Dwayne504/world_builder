@@ -404,7 +404,10 @@ for persistence details, verification limits, and the Windows manual checklist.
 **Search** in the sidebar finds Entries by name, ID, or alias; Chapter titles;
 authored Field values and units; canonical relationship context and notes; Story
 links and Roles; and text in Manuscript, Plan, and Notes. Results keep identity
-matches ahead of prose, show why they matched, and open the relevant record.
+matches ahead of prose and open the relevant record. Compact relationship results
+put the searched participant first; Chapter rows collapse around their previews.
+Filter Fields/connections/Chapter links, choose the result count, or use **Search
+this Entry** to search its Fields, connections, and explicitly linked Chapters.
 **Entry settings → Other names** adds/removes explicit aliases without rewriting
 prose. Schema 10 adds authored aliases and a disposable local search index;
 dirty or damaged indexes fall back to saved source data and rebuild safely.

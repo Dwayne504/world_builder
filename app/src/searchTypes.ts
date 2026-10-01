@@ -1,14 +1,21 @@
 import type { DocumentArea } from "./storyTypes";
 
-export interface SearchView {
+export interface SearchRequest {
   query: string;
   includeInactive: boolean;
   limitPerGroup: number;
+  entryId?: string;
+  structuredKind?: "fields" | "relationships" | "chapters";
+}
+export interface SearchView extends SearchRequest {
+  entryName?: string;
+  expandedHits?: string[];
+  extendedHits?: string[];
 }
 export type SearchTarget =
   | { kind: "entry"; entryId: string }
   | { kind: "chapter"; chapterId: string; area: DocumentArea }
-  | { kind: "relationship"; relationshipId: string };
+  | { kind: "relationship"; relationshipId: string; perspectiveEntryId?: string };
 export interface SearchHit {
   key: string;
   title: string;
@@ -16,6 +23,7 @@ export interface SearchHit {
   workspaceState: string;
   reason: string;
   excerpt: string;
+  preview?: string;
   target: SearchTarget;
 }
 export interface SearchResults {

@@ -393,13 +393,42 @@ describe("Project screen Saved contract", () => {
     await screen.findByLabelText("entry-name");
     fireEvent.click(screen.getByRole("button", { name: "← Back" }));
     expect(await screen.findByRole("searchbox")).toHaveValue("Thron");
-    fireEvent.click(await screen.findByRole("button", { name: "A Chapter" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^A Chapter/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Chapter · notes" }));
     expect(await screen.findByRole("tab", { name: "Notes" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     fireEvent.click(screen.getByRole("button", { name: "← Back" }));
     expect(await screen.findByRole("searchbox")).toHaveValue("Thron");
+    expect(await screen.findByRole("button", { name: /^A Chapter/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+  it("searches an Entry's connections and linked Chapters through guarded navigation", async () => {
+    const e = mockEditableEntry();
+    getEntryMock.mockResolvedValue(e);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Search this Entry" }));
+    expect(await screen.findByRole("heading", { name: "Search within Thron" })).toBeVisible();
+    await waitFor(() =>
+      expect(searchProject).toHaveBeenCalledWith(project.projectId, {
+        query: "",
+        entryId: e.id,
+        includeInactive: false,
+        limitPerGroup: 10,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "← Back" }));
+    await screen.findByLabelText("entry-name");
+    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.change(screen.getByLabelText("New alias"), { target: { value: "Unapplied" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search this Entry" }));
+    expect(await screen.findByText(/unsaved changes.*before navigating/)).toBeVisible();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
   it("protects an unapplied alias when leaving for Search", async () => {
     const e = mockEditableEntry();

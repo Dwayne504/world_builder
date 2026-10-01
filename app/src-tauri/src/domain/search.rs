@@ -1,4 +1,5 @@
 //! Search is navigation over saved sources, never a source of world facts.
+use super::EntryId;
 use serde::{Deserialize, Serialize};
 use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
@@ -33,6 +34,17 @@ pub struct SearchRequest {
     pub query: String,
     pub include_inactive: bool,
     pub limit_per_group: usize,
+    #[serde(default)]
+    pub entry_id: Option<EntryId>,
+    #[serde(default)]
+    pub structured_kind: Option<StructuredKind>,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuredKind {
+    Fields,
+    Relationships,
+    Chapters,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
@@ -41,9 +53,18 @@ pub struct SearchRequest {
     rename_all_fields = "camelCase"
 )]
 pub enum SearchTarget {
-    Entry { entry_id: String },
-    Chapter { chapter_id: String, area: String },
-    Relationship { relationship_id: String },
+    Entry {
+        entry_id: String,
+    },
+    Chapter {
+        chapter_id: String,
+        area: String,
+    },
+    Relationship {
+        relationship_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        perspective_entry_id: Option<String>,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +75,7 @@ pub struct SearchHit {
     pub workspace_state: String,
     pub reason: String,
     pub excerpt: String,
+    pub preview: String,
     pub target: SearchTarget,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

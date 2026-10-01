@@ -78,6 +78,8 @@ fn request(query: &str) -> SearchRequest {
         query: query.into(),
         include_inactive: false,
         limit_per_group: 10,
+        entry_id: None,
+        structured_kind: None,
     }
 }
 fn hits(result: &SearchResults, group: &str) -> Vec<SearchHit> {
@@ -351,7 +353,8 @@ fn fields_units_choices_and_canonical_relationship_context_are_searchable() {
     assert_eq!(
         hits(&f.search("ancient"), "structured")[0].target,
         SearchTarget::Relationship {
-            relationship_id: r.to_string()
+            relationship_id: r.to_string(),
+            perspective_entry_id: Some(a.id.to_string())
         }
     );
     ProjectService::update_entry_name(
@@ -414,6 +417,7 @@ fn missing_newer_and_damaged_caches_rebuild_without_changing_authored_revision()
         "DROP TABLE search_index",
         "UPDATE search_index_data SET block=X'00' WHERE id>2",
         "UPDATE derived_index_state SET schema_version=999",
+        "UPDATE derived_index_state SET schema_version=1",
         "UPDATE search_index SET payload='broken'",
         "DELETE FROM search_index",
         "UPDATE derived_index_state SET indexed_revision=-1",
@@ -661,4 +665,193 @@ fn a_thousand_entries_keep_results_bounded_and_exact_names_first() {
             }
         );
     }
+    let mut q = request("Station");
+    q.limit_per_group = 150;
+    let expanded = ProjectService::search_project(&f.state, f.project, q).unwrap();
+    assert_eq!(expanded.groups[0].total, 1001);
+    assert_eq!(expanded.groups[0].hits.len(), 150);
+}
+
+fn connect(f: &Fixture, a: EntryId, b: EntryId, directed: bool, note: &str) -> String {
+    let snapshot = ProjectService::apply_relationships(
+        &f.state,
+        f.project,
+        a,
+        f.revision(),
+        RelationshipCommand::CreateDefinition {
+            draft: DefinitionDraft {
+                name: if directed { "Protection" } else { "Adversary" }.into(),
+                forward_label: if directed { "protects" } else { "opposes" }.into(),
+                inverse_label: if directed { "protected by" } else { "opposes" }.into(),
+                directed,
+                expected_targets_per_source: None,
+                expected_sources_per_target: None,
+            },
+        },
+    )
+    .unwrap();
+    ProjectService::apply_relationships(
+        &f.state,
+        f.project,
+        a,
+        f.revision(),
+        RelationshipCommand::Connect {
+            definition_id: snapshot.definitions.last().unwrap().id,
+            perspective: Perspective::Source,
+            other: OtherEntry::Existing { id: b },
+            note: note.into(),
+            replace: vec![],
+        },
+    )
+    .unwrap()
+    .relationships
+    .last()
+    .unwrap()
+    .id
+    .to_string()
+}
+
+#[test]
+fn search_relationship_perspective_preserves_semantics_and_separates_authored_notes() {
+    for directed in [true, false] {
+        let f = Fixture::new();
+        let a = f.entry("Aster");
+        let b = f.entry("Dawn");
+        f.alias(b.id, "Morning Star");
+        let id = connect(&f, a.id, b.id, directed, "An old promise.");
+        let expected = if directed {
+            "Dawn protected by Aster"
+        } else {
+            "Dawn opposes Aster"
+        };
+        let before = f.revision();
+        for query in ["Dawn", "daw", "Morning Star", "dawn promise"] {
+            f.db()
+                .execute("UPDATE derived_index_state SET dirty=1", [])
+                .unwrap();
+            for _ in 0..2 {
+                let hit = hits(&f.search(query), "structured").remove(0);
+                assert_eq!(hit.title, expected);
+                assert_eq!(hit.excerpt, "An old promise.");
+                assert_eq!(hit.preview, "An old promise.");
+                assert_eq!(
+                    hit.target,
+                    SearchTarget::Relationship {
+                        relationship_id: id.clone(),
+                        perspective_entry_id: Some(b.id.to_string())
+                    }
+                );
+            }
+        }
+        let hit = hits(&f.search("Aster"), "structured").remove(0);
+        assert_eq!(
+            hit.title,
+            if directed {
+                "Aster protects Dawn"
+            } else {
+                "Aster opposes Dawn"
+            }
+        );
+        assert_eq!(f.revision(), before);
+        let source: String = f.db().query_row("SELECT record_id FROM relationship_participant WHERE instance_id=?1 AND slot='source'", [&id], |r|r.get(0)).unwrap();
+        assert_eq!(source, a.id.to_string());
+    }
+}
+
+#[test]
+fn entry_scope_uses_explicit_links_filters_before_limits_and_rejects_foreign_ids() {
+    let f = Fixture::new();
+    let a = f.entry("Aster");
+    let b = f.entry("Dawn");
+    connect(&f, a.id, b.id, true, "A promise.");
+    let linked = f.chapter("A linked Chapter", "Aster walks through the forest.");
+    let mention = f.chapter(
+        "A prose mention",
+        "Dawn and Aster are words here, not links.",
+    );
+    f.story(StoryCommand::SetLink {
+        chapter_id: linked.chapter.id,
+        entry_id: b.id,
+        role_ids: vec![],
+    });
+    ProjectService::apply_fields(
+        &f.state,
+        f.project,
+        b.id,
+        f.revision(),
+        FieldCommand::Create {
+            name: "Age".into(),
+            field_kind: FieldKind::Number,
+            unit: Some("years".into()),
+            provider: FieldProvider {
+                kind: ProviderKind::Entry,
+                id: b.id.to_string(),
+            },
+            options: vec![],
+            value: Some(FieldValue::Number(48.0)),
+        },
+    )
+    .unwrap();
+    let mut q = request("");
+    q.entry_id = Some(b.id);
+    q.limit_per_group = 1;
+    let all = ProjectService::search_project(&f.state, f.project, q.clone()).unwrap();
+    let structured = all.groups.iter().find(|g| g.kind == "structured").unwrap();
+    assert_eq!(structured.total, 3);
+    assert_eq!(structured.hits.len(), 1);
+    assert!(
+        matches!(&structured.hits[0].target, SearchTarget::Chapter { chapter_id, .. } if chapter_id == &linked.chapter.id.to_string())
+    );
+    for (kind, key) in [
+        (StructuredKind::Fields, "field:"),
+        (StructuredKind::Relationships, "relationship:"),
+        (StructuredKind::Chapters, "story-link:"),
+    ] {
+        q.structured_kind = Some(kind);
+        for _ in 0..2 {
+            let r = ProjectService::search_project(&f.state, f.project, q.clone()).unwrap();
+            let group = r.groups.iter().find(|g| g.kind == "structured").unwrap();
+            assert_eq!(group.total, 1);
+            assert!(group.hits[0].key.starts_with(key));
+            assert_eq!(hits(&r, "text").len(), 1); // Empty Plan/Notes are not results.
+            assert!(!r.groups.iter().flat_map(|g|&g.hits).any(|h|matches!(&h.target,SearchTarget::Chapter { chapter_id, .. } if chapter_id==&mention.chapter.id.to_string())));
+        }
+    }
+    q.structured_kind = Some(StructuredKind::Relationships);
+    q.query = "Aster".into();
+    let scoped = ProjectService::search_project(&f.state, f.project, q.clone()).unwrap();
+    assert_eq!(
+        hits(&scoped, "structured")[0].title,
+        "Dawn protected by Aster"
+    );
+    assert_eq!(hits(&scoped, "text")[0].title, "A linked Chapter");
+    q.entry_id = Some(EntryId::new());
+    assert!(ProjectService::search_project(&f.state, f.project, q).is_err());
+}
+
+#[test]
+fn chapter_excerpts_are_bounded_and_requested_counts_can_exceed_one_hundred() {
+    let f = Fixture::new();
+    let text = format!("Dawn {}", "walks among the ancient trees. ".repeat(100));
+    let c = f.chapter("Dawn crossing", &text);
+    let hit = hits(&f.search("Dawn"), "text").remove(0);
+    assert!(hit.preview.len() > hit.excerpt.len());
+    assert!(hit.excerpt.chars().count() <= 223);
+    assert!(hit.preview.chars().count() <= 1203);
+    assert!(hit.preview.ends_with('…'));
+    assert_eq!(
+        ProjectService::read_chapter(&f.state, f.project, c.chapter.id)
+            .unwrap()
+            .documents
+            .iter()
+            .find(|d| d.area == DocumentArea::Manuscript)
+            .unwrap()
+            .plain_text,
+        format!("{text}\n")
+    );
+    let mut q = request("Dawn");
+    q.limit_per_group = 150;
+    assert!(ProjectService::search_project(&f.state, f.project, q.clone()).is_ok());
+    q.limit_per_group = 0;
+    assert!(ProjectService::search_project(&f.state, f.project, q).is_err());
 }

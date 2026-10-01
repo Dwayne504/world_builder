@@ -313,7 +313,7 @@ export function applySpatial(
 
 export function searchProject(
   projectId: string,
-  request: import("./searchTypes").SearchView,
+  request: import("./searchTypes").SearchRequest,
 ): Promise<import("./searchTypes").SearchResults> {
   return call("search_project", { projectId, request });
 }

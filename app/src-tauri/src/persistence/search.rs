@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-const INDEX_VERSION: i64 = 1;
+const INDEX_VERSION: i64 = 2;
 const CREATE_INDEX: &str = "CREATE VIRTUAL TABLE search_index USING fts5(payload UNINDEXED, terms, tokenize='unicode61 remove_diacritics 0')";
 fn invalid(message: impl ToString) -> PersistenceError {
     PersistenceError::Other(message.to_string())
@@ -95,6 +95,44 @@ struct Document {
     identity: Option<String>,
     aliases: Vec<String>,
     text: String,
+    preview_text: Option<String>,
+    entry_ids: Vec<String>,
+    structured_kind: Option<StructuredKind>,
+    relationship: Option<RelationshipContext>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SearchParticipant {
+    id: Option<String>,
+    name: String,
+    aliases: Vec<String>,
+}
+impl SearchParticipant {
+    fn relevance(&self, query: &str) -> usize {
+        if self.id.as_deref() == Some(query) {
+            return usize::MAX;
+        }
+        std::iter::once(&self.name)
+            .chain(&self.aliases)
+            .map(|name| {
+                if normalize_search(name) == query {
+                    return 1000;
+                }
+                let name_words = tokens(name);
+                tokens(query)
+                    .iter()
+                    .filter(|q| name_words.iter().any(|w| w.starts_with(*q)))
+                    .count()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RelationshipContext {
+    source: SearchParticipant,
+    target: SearchParticipant,
+    forward: String,
+    inverse: String,
 }
 impl Document {
     fn terms(&self) -> String {
@@ -125,11 +163,16 @@ fn doc(
             workspace_state: state,
             reason: String::new(),
             excerpt: String::new(),
+            preview: String::new(),
             target,
         },
         identity: None,
         aliases: vec![],
         text,
+        preview_text: None,
+        entry_ids: vec![],
+        structured_kind: None,
+        relationship: None,
     }
 }
 
@@ -151,7 +194,8 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
         entry_context.insert(id.clone(),(name.clone(),context.clone(),state.clone()));
         let mut d=doc("entries",format!("entry:{id}"),name.clone(),context,state,SearchTarget::Entry{entry_id:id.clone()},name.clone());
         d.identity=Some(id.clone());
-        d.aliases=alias_map.remove(&id).unwrap_or_default();
+        d.aliases=alias_map.get(&id).cloned().unwrap_or_default();
+        d.entry_ids.push(id);
         result.push(d);
     }
     let mut chapter_context = HashMap::new();
@@ -166,23 +210,57 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
     for row in conn.prepare("SELECT v.id,v.entry_id,f.name,COALESCE(v.text_value,CAST(v.number_value AS TEXT),CASE v.bool_value WHEN 1 THEN 'Yes true' WHEN 0 THEN 'No false' END,(SELECT group_concat(label,', ') FROM (SELECT o.label FROM field_choice_value x JOIN choice_option o ON o.id=x.option_id WHERE x.value_id=v.id ORDER BY o.label,o.id)),''),COALESCE(f.unit,'') FROM field_value v JOIN field_definition f ON f.id=v.field_id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
         let (id,entry,field,value,unit)=row?;
         let (title,context,state)=entry_context.get(&entry).ok_or_else(||invalid("Field owner is missing"))?;
-        result.push(doc("structured",format!("field:{id}"),title.clone(),format!("{context} · Field: {field}"),state.clone(),SearchTarget::Entry{entry_id:entry},format!("{field}: {value} {unit}").trim().into()));
+        let mut d = doc("structured",format!("field:{id}"),title.clone(),format!("{context} · {field}"),state.clone(),SearchTarget::Entry{entry_id:entry.clone()},format!("{field}: {value} {unit}").trim().into());
+        d.entry_ids.push(entry);
+        d.structured_kind = Some(StructuredKind::Fields);
+        result.push(d);
     }
-    // Canonical participants supply names; never index a second semantic projection.
-    for row in conn.prepare("SELECT r.id,d.name,d.forward_label,d.inverse_label,r.note,i.workspace_state,r.semantic_state,COALESCE(a.authored_name,json_extract(p.unresolved_snapshot,'$.label'),'[Unnamed Entry]'),COALESCE(b.authored_name,json_extract(q.unresolved_snapshot,'$.label'),'[Unnamed Entry]') FROM relationship_instance r JOIN relationship_definition d ON d.id=r.definition_id JOIN record_identity i ON i.record_id=r.id JOIN relationship_participant p ON p.instance_id=r.id AND p.slot='source' JOIN relationship_participant q ON q.instance_id=r.id AND q.slot='target' LEFT JOIN entry a ON a.id=p.record_id LEFT JOIN entry b ON b.id=q.record_id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?,r.get::<_,String>(7)?,r.get::<_,String>(8)?)))? {
-        let (id,name,forward,inverse,note,state,semantic,source,target)=row?;
-        result.push(doc("structured",format!("relationship:{id}"),format!("{source} · {forward} · {target}"),format!("Relationship: {name} · {}",if semantic=="ended" {"Past"} else {"Current"}),state,SearchTarget::Relationship{relationship_id:id},format!("{name} {source} {forward} {target} {inverse}\n{note}")));
+    // Search terms include both labels. Display wording uses one perspective;
+    // the authored note is kept separate from those terms.
+    for row in conn.prepare("SELECT r.id,d.name,d.forward_label,d.inverse_label,r.note,i.workspace_state,r.semantic_state,COALESCE(a.authored_name,json_extract(p.unresolved_snapshot,'$.label'),'[Unnamed Entry]'),COALESCE(b.authored_name,json_extract(q.unresolved_snapshot,'$.label'),'[Unnamed Entry]'),p.record_id,q.record_id FROM relationship_instance r JOIN relationship_definition d ON d.id=r.definition_id JOIN record_identity i ON i.record_id=r.id JOIN relationship_participant p ON p.instance_id=r.id AND p.slot='source' JOIN relationship_participant q ON q.instance_id=r.id AND q.slot='target' LEFT JOIN entry a ON a.id=p.record_id LEFT JOIN entry b ON b.id=q.record_id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?,r.get::<_,String>(7)?,r.get::<_,String>(8)?,r.get::<_,Option<String>>(9)?,r.get::<_,Option<String>>(10)?)))? {
+        let (id,name,forward,inverse,note,state,semantic,source,target,source_id,target_id)=row?;
+        let source_aliases=source_id.as_ref().and_then(|id|alias_map.get(id)).cloned().unwrap_or_default();
+        let target_aliases=target_id.as_ref().and_then(|id|alias_map.get(id)).cloned().unwrap_or_default();
+        let terms=format!("{name} {source} {forward} {target} {inverse} {} {}\n{note}",source_aliases.join(" "),target_aliases.join(" "));
+        let mut d=doc("structured",format!("relationship:{id}"),format!("{source} {forward} {target}"),format!("{name} · {}",if semantic=="ended" {"Past"} else {"Current"}),state,SearchTarget::Relationship{relationship_id:id,perspective_entry_id:None},terms);
+        d.preview_text=Some(note);
+        d.entry_ids=source_id.iter().chain(target_id.iter()).cloned().collect();
+        d.structured_kind=Some(StructuredKind::Relationships);
+        d.relationship=Some(RelationshipContext {
+            source:SearchParticipant{id:source_id,name:source,aliases:source_aliases},
+            target:SearchParticipant{id:target_id,name:target,aliases:target_aliases},
+            forward,inverse,
+        });
+        result.push(d);
     }
-    for row in conn.prepare("SELECT l.id,l.story_unit_id,COALESCE(e.authored_name,json_extract(l.unresolved_snapshot,'$.label'),'[Unnamed Entry]'),COALESCE((SELECT group_concat(name,', ') FROM (SELECT r.name FROM story_role r JOIN story_link_role lr ON lr.role_id=r.id WHERE lr.link_id=l.id ORDER BY r.name,r.id)),'') FROM story_link l LEFT JOIN entry e ON e.id=l.entry_id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))? {
-        let (id,chapter,entry,roles)=row?;
+    let mut chapter_entries: HashMap<String, Vec<String>> = HashMap::new();
+    for row in conn.prepare("SELECT l.id,l.story_unit_id,COALESCE(e.authored_name,json_extract(l.unresolved_snapshot,'$.label'),'[Unnamed Entry]'),COALESCE((SELECT group_concat(name,', ') FROM (SELECT r.name FROM story_role r JOIN story_link_role lr ON lr.role_id=r.id WHERE lr.link_id=l.id ORDER BY r.name,r.id)),''),l.entry_id FROM story_link l LEFT JOIN entry e ON e.id=l.entry_id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?)))? {
+        let (id,chapter,entry,roles,entry_id)=row?;
         let (title,state)=chapter_context.get(&chapter).ok_or_else(||invalid("Story link owner is missing"))?;
-        result.push(doc("structured",format!("story-link:{id}"),title.clone(),"Linked Entry and Roles".into(),state.clone(),SearchTarget::Chapter{chapter_id:chapter,area:"manuscript".into()},format!("{entry} {roles}").trim().into()));
+        let context=if roles.is_empty(){format!("{entry} · Linked Chapter")}else{format!("{entry} · {roles}")};
+        let mut d=doc("structured",format!("story-link:{id}"),title.clone(),context,state.clone(),SearchTarget::Chapter{chapter_id:chapter.clone(),area:"manuscript".into()},format!("{entry} {roles} {title}"));
+        d.preview_text=Some(String::new());
+        if let Some(entry_id)=entry_id {
+            chapter_entries.entry(chapter).or_default().push(entry_id.clone());
+            d.entry_ids.push(entry_id.clone());
+            d.text.push_str(&format!(" {}",alias_map.get(&entry_id).cloned().unwrap_or_default().join(" ")));
+        }
+        d.structured_kind=Some(StructuredKind::Chapters);
+        result.push(d);
     }
     for row in conn.prepare("SELECT id,owner_id,area,document_schema_version,canonical_json,plain_text FROM rich_document")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?)))? {
         let (id,chapter,area,version,json,preserved)=row?;
         let (title,state)=chapter_context.get(&chapter).ok_or_else(||invalid("Document owner is missing"))?;
         let text=serde_json::from_str(&json).map_err(|e|e.to_string()).and_then(|v|crate::domain::story::document_text(version,&v)).map(|(text,_)|text).unwrap_or(preserved);
         result.push(doc("text",format!("document:{id}"),title.clone(),format!("{area} · Text match"),state.clone(),SearchTarget::Chapter{chapter_id:chapter,area},text));
+    }
+    // Scope writing only through explicit Story links, never through prose mentions.
+    for d in &mut result {
+        if d.structured_kind.is_none() {
+            if let SearchTarget::Chapter { chapter_id, .. } = &d.hit.target {
+                d.entry_ids = chapter_entries.get(chapter_id).cloned().unwrap_or_default();
+            }
+        }
     }
     Ok(result)
 }
@@ -241,7 +319,7 @@ pub(super) fn rebuild(conn: &Connection) -> Result<(), PersistenceError> {
     Ok(())
 }
 
-fn excerpt(text: &str, query: &str) -> String {
+fn excerpt(text: &str, query: &str, limit: usize) -> String {
     let words = text.split_whitespace().collect::<Vec<_>>();
     let first = tokens(query).into_iter().next().unwrap_or_default();
     let at = words
@@ -250,12 +328,12 @@ fn excerpt(text: &str, query: &str) -> String {
         .unwrap_or(0);
     let start = at.saturating_sub(6);
     let joined = words[start..].join(" ");
-    let preview = joined.chars().take(220).collect::<String>();
+    let preview = joined.chars().take(limit).collect::<String>();
     format!(
         "{}{}{}",
         if start > 0 { "… " } else { "" },
         preview,
-        if joined.chars().count() > 220 {
+        if joined.chars().count() > limit {
             "…"
         } else {
             ""
@@ -315,15 +393,24 @@ pub(super) fn query(
 ) -> Result<SearchResults, PersistenceError> {
     if request.query.chars().count() > 256
         || tokens(&request.query).len() > 32
-        || !(1..=100).contains(&request.limit_per_group)
+        || request.limit_per_group == 0
     {
         return Err(invalid(
-            "Use up to 256 characters and 32 search words; request 1–100 results per group",
+            "Use up to 256 characters and 32 search words; request at least one result per group",
         ));
+    }
+    let scope = request.entry_id.map(|id| id.to_string());
+    if let Some(id) = &scope {
+        if !conn
+            .prepare("SELECT 1 FROM entry WHERE id=?1")?
+            .exists([id])?
+        {
+            return Err(invalid("Entry not found in this Project"));
+        }
     }
     let query = normalize_search(request.query.trim());
     let words = tokens(&query);
-    let (documents, refresh) = if query.is_empty() {
+    let (documents, refresh) = if query.is_empty() && scope.is_none() {
         (vec![], false)
     } else {
         match cached(conn, &query) {
@@ -334,7 +421,19 @@ pub(super) fn query(
     let mut matches = documents
         .into_iter()
         .filter(|d| {
+            if d.group == "text" && d.text.trim().is_empty() {
+                return false;
+            }
             if !request.include_inactive && d.hit.workspace_state != "active" {
+                return false;
+            }
+            if scope.as_ref().is_some_and(|id| !d.entry_ids.contains(id)) {
+                return false;
+            }
+            if d.group == "structured"
+                && request.structured_kind.is_some()
+                && d.structured_kind != request.structured_kind
+            {
                 return false;
             }
             if words.is_empty() {
@@ -350,7 +449,29 @@ pub(super) fn query(
             let (rank, reason) = rank(&d, &query);
             d.hit.reason = reason;
             if d.identity.is_none() {
-                d.hit.excerpt = excerpt(&d.text, &query);
+                let text = d.preview_text.as_deref().unwrap_or(&d.text);
+                d.hit.excerpt = excerpt(text, &query, 220);
+                d.hit.preview = excerpt(text, &query, 1200);
+            }
+            if let Some(r) = &d.relationship {
+                let reverse = if let Some(id) = &scope {
+                    r.target.id.as_ref() == Some(id) && r.source.id.as_ref() != Some(id)
+                } else {
+                    r.target.relevance(&query) > r.source.relevance(&query)
+                };
+                let (first, label, other) = if reverse {
+                    (&r.target, &r.inverse, &r.source)
+                } else {
+                    (&r.source, &r.forward, &r.target)
+                };
+                d.hit.title = format!("{} {label} {}", first.name, other.name);
+                if let SearchTarget::Relationship {
+                    perspective_entry_id,
+                    ..
+                } = &mut d.hit.target
+                {
+                    *perspective_entry_id = first.id.clone();
+                }
             }
             (rank, d)
         })

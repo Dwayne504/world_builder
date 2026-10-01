@@ -59,8 +59,11 @@ it("groups identities ahead of prose and opens the actual matching document area
   expect(await screen.findByText("2 matching results")).toBeVisible();
   expect(screen.getByRole("region", { name: "Entries" })).toHaveTextContent("Alias: Captain");
   expect(document.querySelector("img")).toBeNull();
+  expect(screen.queryByText(result.groups[1].hits[0].excerpt)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /^Journey/ }));
   expect(screen.getByText(result.groups[1].hits[0].excerpt)).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Journey" }));
+  expect(document.querySelector("img")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open Chapter · notes" }));
   expect(open).toHaveBeenCalledWith({ kind: "chapter", chapterId: "c", area: "notes" });
   expect(searchProject).toHaveBeenCalledWith("p", {
     query: "Captain",
@@ -166,4 +169,129 @@ it("keeps alias load errors visible and enables editing after reload", async () 
   );
   await waitFor(() => expect(screen.getByLabelText("New alias")).toBeEnabled());
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("keeps relationship wording compact and opens the chosen perspective with a separate note", async () => {
+  const target = {
+    kind: "relationship" as const,
+    relationshipId: "r",
+    perspectiveEntryId: "leopold",
+  };
+  vi.mocked(searchProject).mockResolvedValue({
+    globalRevision: 3,
+    groups: [
+      {
+        kind: "structured",
+        total: 1,
+        hits: [
+          {
+            key: "r",
+            title: "Leopold opposes Thron",
+            context: "Adversary · Current",
+            workspaceState: "active",
+            reason: "Structured context",
+            excerpt: "Their authored note.",
+            preview: "Their authored note.",
+            target,
+          },
+        ],
+      },
+    ],
+  });
+  render(<Search initial={{ ...view, query: "Leopold" }} />);
+  const title = await screen.findByRole("button", { name: "Leopold opposes Thron" });
+  expect(screen.queryByText("Structured context")).not.toBeInTheDocument();
+  expect(screen.queryByText("Their authored note.")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Note/ }));
+  expect(screen.getByText("Their authored note.")).toBeVisible();
+  fireEvent.click(title);
+  expect(open).toHaveBeenCalledWith(target);
+});
+it("collapses Chapter excerpts, expands bounded context, and remembers open rows", async () => {
+  const hit = {
+    ...result.groups[1].hits[0],
+    preview: "A longer excerpt with surrounding context.",
+  };
+  vi.mocked(searchProject).mockResolvedValue({
+    ...result,
+    groups: [{ kind: "text", total: 1, hits: [hit] }],
+  });
+  render(<Search initial={{ ...view, query: "Captain" }} />);
+  const row = await screen.findByRole("button", { name: /^Journey/ });
+  expect(row).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(row);
+  expect(screen.getByText(hit.excerpt)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Longer preview" }));
+  expect(screen.getByText(hit.preview)).toBeVisible();
+  expect(screen.queryByText(hit.excerpt)).not.toBeInTheDocument();
+  fireEvent.click(row);
+  expect(screen.queryByText(hit.preview)).not.toBeInTheDocument();
+  fireEvent.click(row);
+  expect(screen.getByText(hit.preview)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Shorter preview" }));
+  expect(screen.getByText(hit.excerpt)).toBeVisible();
+  expect(searchProject).toHaveBeenCalledTimes(1);
+});
+it("filters before fetching and accepts a chosen count without resetting it on a new query", async () => {
+  vi.mocked(searchProject).mockResolvedValue(result);
+  render(<Search initial={{ ...view, query: "Captain" }} />);
+  await screen.findByText("2 matching results");
+  fireEvent.change(screen.getByLabelText("Fields & connections filter"), {
+    target: { value: "relationships" },
+  });
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith(
+      "p",
+      expect.objectContaining({ structuredKind: "relationships" }),
+    ),
+  );
+  const count = screen.getByRole("spinbutton", { name: "Results per section" });
+  fireEvent.change(count, { target: { value: "150" } });
+  fireEvent.keyDown(count, { key: "Enter" });
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith(
+      "p",
+      expect.objectContaining({ limitPerGroup: 150 }),
+    ),
+  );
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Journey" } });
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith(
+      "p",
+      expect.objectContaining({
+        query: "Journey",
+        limitPerGroup: 150,
+        structuredKind: "relationships",
+      }),
+    ),
+  );
+  const calls = vi.mocked(searchProject).mock.calls.length;
+  fireEvent.change(count, { target: { value: "0" } });
+  fireEvent.blur(count);
+  expect(screen.getByRole("alert")).toHaveTextContent("Choose a whole number");
+  expect(searchProject).toHaveBeenCalledTimes(calls);
+});
+it("loads an Entry scope without a query and can return to the whole Project", async () => {
+  vi.mocked(searchProject).mockResolvedValue(result);
+  render(<Search initial={{ ...view, entryId: "e", entryName: "Wanderer" }} />);
+  expect(screen.getByRole("heading", { name: "Search within Wanderer" })).toBeVisible();
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenCalledWith("p", {
+      query: "",
+      includeInactive: false,
+      limitPerGroup: 10,
+      entryId: "e",
+    }),
+  );
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Captain" } });
+  await screen.findByText("2 matching results");
+  fireEvent.click(screen.getByRole("button", { name: "Search whole Project" }));
+  expect(screen.getByRole("heading", { name: "Search your Project" })).toBeVisible();
+  await waitFor(() =>
+    expect(searchProject).toHaveBeenLastCalledWith("p", {
+      query: "Captain",
+      includeInactive: false,
+      limitPerGroup: 10,
+    }),
+  );
 });

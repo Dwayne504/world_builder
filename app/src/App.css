@@ -19,7 +19,7 @@
   width: auto;
 }
 .search-group {
-  margin-top: 2rem;
+  margin-top: 1.5rem;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -40,20 +40,109 @@
 }
 .search-results li {
   border-bottom: 1px solid var(--line);
-  padding: 0.8rem 0;
+  padding: 0.45rem 0;
   overflow-wrap: anywhere;
 }
-.search-result-title {
+.search-results .search-result-title {
   text-align: left;
-  font-size: 1.05rem;
-  padding-left: 0;
-  margin-right: 0.8rem;
+  font-size: 1rem;
+  padding: 0.2rem 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .search-results p {
-  margin: 0.3rem 0;
+  margin: 0.25rem 0;
 }
 .search-excerpt {
   max-width: 85ch;
+  font-size: 0.95rem;
+}
+.search-excerpt.is-extended {
+  overflow: auto;
+  resize: vertical;
+  min-height: 4rem;
+  max-height: 70vh;
+  height: 12rem;
+}
+.search-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem 1.25rem;
+}
+.search-controls label {
+  margin: 0.5rem 0;
+  min-width: 0;
+  max-width: 100%;
+}
+.search-controls select,
+.search-controls input {
+  margin-top: 0.25rem;
+}
+.search-count input {
+  width: 7rem;
+}
+.search-controls .search-inactive {
+  align-self: center;
+  font-size: 0.85rem;
+}
+.search-result-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+}
+.search-result-heading small {
+  flex: 0 1 auto;
+  font-size: 0.8rem;
+}
+.search-results .search-chapter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.2rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
+}
+.search-chapter-toggle:hover {
+  background: var(--tint);
+}
+.search-result-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.search-result-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1rem;
+}
+.search-result-label small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: normal;
+}
+.search-result-body {
+  padding: 0.25rem 0 0.5rem 1.4rem;
+}
+.search-results .search-note-toggle,
+.search-results .search-preview-toggle {
+  font-size: 0.8rem;
+  padding: 0.15rem 0;
+}
+@media (max-width: 700px) {
+  .search-result-heading {
+    flex-direction: column;
+  }
+  .search-result-title {
+    max-width: 100%;
+  }
 }
 .entry-aliases {
   border: 0;

@@ -768,6 +768,7 @@ interface EntrySaveController {
 type MutationCoordinator = ReturnType<typeof useMutationCoordinator>;
 
 function EntryEditor({
+  onSearch,
   projectId,
   restoreFocusKey,
   initialEntry,
@@ -781,6 +782,7 @@ function EntryEditor({
   onRecoveryBackup,
   onEntriesChanged,
 }: {
+  onSearch: () => void;
   projectId: string;
   restoreFocusKey: string | null;
   initialEntry: Entry;
@@ -1045,6 +1047,9 @@ function EntryEditor({
           )}
         </div>
         <div className="row">
+          <button className="quiet-button" onClick={onSearch}>
+            Search this Entry
+          </button>
           <button className="quiet-button" onClick={() => setEntrySettingsOpen(true)}>
             Entry settings
           </button>
@@ -1716,6 +1721,7 @@ function EntryWorkflow({
               relationshipView: {
                 ...initialLocation.relationshipView,
                 relationshipId: target.relationshipId,
+                entryIds: target.perspectiveEntryId ? [target.perspectiveEntryId] : [],
               },
             };
     void requestNavigation({ location: next });
@@ -1897,6 +1903,19 @@ function EntryWorkflow({
           </div>
         )}
         <EntryEditor
+          onSearch={() =>
+            void requestNavigation({
+              location: {
+                ...initialLocation,
+                page: "search",
+                searchView: {
+                  ...initialLocation.searchView,
+                  entryId: selected.id,
+                  entryName: selected.authoredName ?? "[Unnamed Entry]",
+                },
+              },
+            })
+          }
           key={selected.id}
           projectId={projectId}
           restoreFocusKey={location.focusKey}
