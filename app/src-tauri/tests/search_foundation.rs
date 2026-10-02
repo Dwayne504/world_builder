@@ -580,7 +580,7 @@ fn schema_nine_upgrade_is_atomic_and_keeps_a_recovery_snapshot() {
     let e = f.entry("Earlier Entry");
     ProjectService::close_project(&f.state, f.project).unwrap();
     let db = f.db();
-    db.execute_batch("DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; PRAGMA user_version=9; UPDATE project_meta SET schema_version=9; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
+    db.execute_batch("DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; PRAGMA user_version=9; UPDATE project_meta SET schema_version=9; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
     let root = std::path::Path::new(&f.path);
     let manifest_path = root.join("manifest.json");
     let mut manifest = Manifest::read(&manifest_path).unwrap();
@@ -1022,7 +1022,7 @@ fn custom_roles_are_findable_before_assignment_and_usage_tracks_canonical_links(
                 r.get::<_, i64>(0)
             })
             .unwrap(),
-        3
+        4
     );
 }
 

@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-const INDEX_VERSION: i64 = 3;
+const INDEX_VERSION: i64 = 4;
 const CREATE_INDEX: &str = "CREATE VIRTUAL TABLE search_index USING fts5(payload UNINDEXED, terms, tokenize='unicode61 remove_diacritics 0')";
 fn invalid(message: impl ToString) -> PersistenceError {
     PersistenceError::Other(message.to_string())
@@ -287,6 +287,47 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
         let text=serde_json::from_str(&json).map_err(|e|e.to_string()).and_then(|v|crate::domain::story::document_text(version,&v)).map(|(text,_)|text).unwrap_or(preserved);
         result.push(doc("text",format!("document:{id}"),title.clone(),format!("{area} · Text match"),state.clone(),SearchTarget::Chapter{chapter_id:chapter,area},text));
     }
+    for o in super::timeline::read_occurrences(conn)? {
+        let title = if !o.title.trim().is_empty() {
+            o.title.clone()
+        } else {
+            o.event_entry
+                .as_ref()
+                .map(|e| e.label.clone())
+                .unwrap_or_else(|| "[Untitled occurrence]".into())
+        };
+        let mut d = doc(
+            "timeline",
+            format!("occurrence:{}", o.id),
+            title.clone(),
+            "Timeline occurrence".into(),
+            o.workspace_state,
+            SearchTarget::Occurrence {
+                occurrence_id: o.id.to_string(),
+            },
+            format!(
+                "{title} {} {} {}",
+                o.notes,
+                o.entries
+                    .iter()
+                    .map(|e| e.label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                o.chapters
+                    .iter()
+                    .map(|c| c.label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        );
+        d.entry_ids = o.entries.iter().map(|e| e.id.clone()).collect();
+        if let Some(event) = o.event_entry {
+            d.text.push_str(&format!(" {}", event.label));
+            d.entry_ids.push(event.id);
+        }
+        d.preview_text = Some(o.notes);
+        result.push(d);
+    }
     // Scope writing only through explicit Story links, never through prose mentions.
     for d in &mut result {
         if d.structured_kind.is_none() {
@@ -539,21 +580,28 @@ pub(super) fn query(
             .then_with(|| normalize_search(&x.hit.title).cmp(&normalize_search(&y.hit.title)))
             .then_with(|| x.hit.key.cmp(&y.hit.key))
     });
-    let groups = ["entries", "chapters", "roles", "structured", "text"]
-        .into_iter()
-        .map(|kind| {
-            let matching = matches
-                .iter()
-                .filter(|(_, d)| d.group == kind)
-                .map(|(_, d)| d.hit.clone())
-                .collect::<Vec<_>>();
-            SearchGroup {
-                kind: kind.into(),
-                total: matching.len(),
-                hits: matching.into_iter().take(request.limit_per_group).collect(),
-            }
-        })
-        .collect();
+    let groups = [
+        "entries",
+        "chapters",
+        "roles",
+        "structured",
+        "text",
+        "timeline",
+    ]
+    .into_iter()
+    .map(|kind| {
+        let matching = matches
+            .iter()
+            .filter(|(_, d)| d.group == kind)
+            .map(|(_, d)| d.hit.clone())
+            .collect::<Vec<_>>();
+        SearchGroup {
+            kind: kind.into(),
+            total: matching.len(),
+            hits: matching.into_iter().take(request.limit_per_group).collect(),
+        }
+    })
+    .collect();
     let result = SearchResults {
         global_revision: revision(conn)?,
         groups,

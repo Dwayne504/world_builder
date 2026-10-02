@@ -15,6 +15,7 @@ mod search;
 pub mod snapshot;
 mod spatial;
 mod story;
+mod timeline;
 pub mod worker;
 
 pub use error::PersistenceError;

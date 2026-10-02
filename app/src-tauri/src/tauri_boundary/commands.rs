@@ -17,6 +17,28 @@ use crate::preferences::{self, PreferencesError, PreferencesStore};
 use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
 #[tauri::command]
+pub fn read_timeline(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<crate::domain::timeline::TimelineSnapshot, AppErrorDto> {
+    ProjectService::read_timeline(&state, parse_project_id(&project_id)?).map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_timeline(
+    state: State<'_, AppState>,
+    project_id: String,
+    expected_revision: i64,
+    command: crate::domain::timeline::TimelineCommand,
+) -> Result<crate::domain::timeline::TimelineSnapshot, AppErrorDto> {
+    ProjectService::apply_timeline(
+        &state,
+        parse_project_id(&project_id)?,
+        expected_revision,
+        command,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
 pub fn search_project(
     state: State<'_, AppState>,
     project_id: String,

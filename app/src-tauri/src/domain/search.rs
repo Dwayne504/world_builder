@@ -57,6 +57,9 @@ pub enum StructuredKind {
     rename_all_fields = "camelCase"
 )]
 pub enum SearchTarget {
+    Occurrence {
+        occurrence_id: String,
+    },
     StoryRole {
         role_id: String,
         name: String,

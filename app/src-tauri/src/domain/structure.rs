@@ -44,6 +44,7 @@ stable_id!(ChoiceOptionId, "Choice option");
 stable_id!(RelationshipDefinitionId, "Relationship definition");
 stable_id!(RelationshipId, "Relationship");
 stable_id!(ChapterId, "Chapter");
+stable_id!(OccurrenceId, "Occurrence");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Category {

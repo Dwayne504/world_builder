@@ -12,6 +12,7 @@ pub mod search;
 pub mod spatial;
 pub mod story;
 pub mod structure;
+pub mod timeline;
 pub mod working_name;
 
 pub use error::DomainError;

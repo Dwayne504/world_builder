@@ -57,6 +57,14 @@ use crate::domain::structure::FieldId;
 
 use crate::domain::search::{AliasCommand, EntryAliases, SearchRequest, SearchResults};
 enum Job {
+    ReadTimeline {
+        reply: Reply<crate::domain::timeline::TimelineSnapshot>,
+    },
+    ApplyTimeline {
+        expected: i64,
+        command: crate::domain::timeline::TimelineCommand,
+        reply: Reply<crate::domain::timeline::TimelineSnapshot>,
+    },
     Search {
         request: SearchRequest,
         reply: Reply<SearchResults>,
@@ -373,6 +381,16 @@ impl ProjectDbWorker {
                         &mut conn, entry_id, expected, command,
                     ));
                 }
+                Job::ReadTimeline { reply } => {
+                    let _ = reply.send(super::timeline::read(&conn));
+                }
+                Job::ApplyTimeline {
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::timeline::apply(&mut conn, expected, command));
+                }
                 Job::ReadStory { reply } => {
                     let _ = reply.send(super::story::index(&conn));
                 }
@@ -588,6 +606,22 @@ impl ProjectDbWorker {
     ) -> Result<EntryAliases, PersistenceError> {
         self.call(|reply| Job::ApplyAlias {
             entry_id,
+            expected,
+            command,
+            reply,
+        })
+    }
+    pub fn read_timeline(
+        &self,
+    ) -> Result<crate::domain::timeline::TimelineSnapshot, PersistenceError> {
+        self.call(|reply| Job::ReadTimeline { reply })
+    }
+    pub fn apply_timeline(
+        &self,
+        expected: i64,
+        command: crate::domain::timeline::TimelineCommand,
+    ) -> Result<crate::domain::timeline::TimelineSnapshot, PersistenceError> {
+        self.call(|reply| Job::ApplyTimeline {
             expected,
             command,
             reply,
@@ -1502,7 +1536,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
+             DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
