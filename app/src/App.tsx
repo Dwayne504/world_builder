@@ -1,4 +1,6 @@
 import { RecentProjects } from "./RecentProjects";
+import { Timeline, TimelineUsage } from "./Timeline";
+import type { TimelineView } from "./timelineTypes";
 import { ChapterLibrary } from "./ChapterLibrary";
 import { ProjectSearch } from "./ProjectSearch";
 import { EntryAliasesEditor } from "./EntryAliasesEditor";
@@ -1451,7 +1453,7 @@ function EntryWorkflow({
     return { kind: successful && !creationDirtyRef.current ? "no-op" : "failed" };
   }, [waitForCreation]);
   useEffect(() => {
-    if (!selected && location.page !== "chapters")
+    if (!selected && location.page !== "chapters" && location.page !== "timeline")
       onController({
         state: mutations.state === "saving" ? "saving" : creationDirty ? "dirty" : "saved",
         submit: submitCreation,
@@ -1592,7 +1594,9 @@ function EntryWorkflow({
     if (
       mutations.isPending() ||
       controllerRef.current?.state === "saving" ||
-      (chapter && controllerRef.current?.autoFlush && controllerRef.current.state === "dirty")
+      ((chapter || location.page === "timeline") &&
+        controllerRef.current?.autoFlush &&
+        controllerRef.current.state === "dirty")
     ) {
       navigationRequestRef.current = true;
       setNavigating(true);
@@ -1612,7 +1616,10 @@ function EntryWorkflow({
       }
       return;
     }
-    if ((selected || chapter) && controllerRef.current?.state !== "saved") {
+    if (
+      (selected || chapter || location.page === "timeline") &&
+      controllerRef.current?.state !== "saved"
+    ) {
       setPendingNavigation(intent);
       setError("There are unsaved changes. Save or discard them before navigating.");
       return;
@@ -1666,6 +1673,10 @@ function EntryWorkflow({
       if (location.page !== "search")
         void requestNavigation({ location: { ...initialLocation, page: "search" } });
     },
+    onTimeline: () => {
+      if (location.page !== "timeline")
+        void requestNavigation({ location: { ...initialLocation, page: "timeline" } });
+    },
     onChapters: () => {
       if (!chapter && location.page === "chapters") return;
       void requestNavigation({ location: { ...initialLocation, page: "chapters" } });
@@ -1704,7 +1715,31 @@ function EntryWorkflow({
     historyRef.current = next;
     setHistory(next);
   }
+  function updateTimelineView(timelineView: TimelineView) {
+    const current = historyRef.current;
+    const next = {
+      ...current,
+      locations: current.locations.map((item, index) =>
+        index === current.index ? { ...item, timelineView } : item,
+      ),
+    };
+    historyRef.current = next;
+    setHistory(next);
+  }
+  function openTimelineOccurrence(id: string) {
+    void requestNavigation({
+      location: {
+        ...initialLocation,
+        page: "timeline",
+        timelineView: { ...initialLocation.timelineView, occurrenceId: id },
+      },
+    });
+  }
   function openSearchTarget(target: SearchTarget) {
+    if (target.kind === "occurrence") {
+      openTimelineOccurrence(target.occurrenceId);
+      return;
+    }
     if (target.kind === "story_role") {
       void requestNavigation({
         location: {
@@ -1800,6 +1835,53 @@ function EntryWorkflow({
     }
   }
 
+  if (location.page === "timeline") {
+    return (
+      <WorkspaceFrame {...navigationProps}>
+        {error && (
+          <div role="alert">
+            <p>{error}</p>
+            {pendingNavigation && (
+              <div className="row">
+                {controllerCanSubmit && (
+                  <button onClick={() => void saveAndNavigate()}>Save and continue</button>
+                )}
+                <button
+                  disabled={controllerState === "saving" || mutations.isPending() || navigating}
+                  onClick={discardAndNavigate}
+                >
+                  Discard and continue
+                </button>
+                <button
+                  onClick={() => {
+                    setPendingNavigation(null);
+                    setError(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        <Timeline
+          key={history.index}
+          projectId={projectId}
+          view={location.timelineView}
+          onViewChange={updateTimelineView}
+          locked={locked || navigating}
+          onController={receiveController}
+          onRevision={onGlobalRevision}
+          onEntry={(id) => void requestNavigation({ location: destination(id) })}
+          onChapter={(id) =>
+            void requestNavigation({
+              location: { ...initialLocation, page: "chapters", chapterId: id },
+            })
+          }
+        />
+      </WorkspaceFrame>
+    );
+  }
   if (location.page === "search") {
     return (
       <WorkspaceFrame {...navigationProps}>
@@ -1843,36 +1925,43 @@ function EntryWorkflow({
           </div>
         )}
         {chapter ? (
-          <ChapterEditor
-            categories={categories}
-            locked={locked || navigating}
-            key={chapter.chapter.id}
-            projectId={projectId}
-            initial={chapter}
-            initialArea={location.chapterArea}
-            onAreaChange={(chapterArea) => {
-              const current = historyRef.current;
-              const next = {
-                ...current,
-                locations: current.locations.map((item, index) =>
-                  index === current.index ? { ...item, chapterArea } : item,
-                ),
-              };
-              historyRef.current = next;
-              setHistory(next);
-            }}
-            positions={writingPositions.current}
-            onController={receiveController}
-            onChanged={(next) => {
-              onGlobalRevision(next.globalRevision);
-              setChapter(next);
-            }}
-            onFindRole={(role) =>
-              openSearchTarget({ kind: "story_role", roleId: role.id, name: role.name })
-            }
-            onEntry={(id) => void requestNavigation({ location: destination(id) })}
-            onBack={navigationProps.onChapters}
-          />
+          <>
+            <ChapterEditor
+              categories={categories}
+              locked={locked || navigating}
+              key={chapter.chapter.id}
+              projectId={projectId}
+              initial={chapter}
+              initialArea={location.chapterArea}
+              onAreaChange={(chapterArea) => {
+                const current = historyRef.current;
+                const next = {
+                  ...current,
+                  locations: current.locations.map((item, index) =>
+                    index === current.index ? { ...item, chapterArea } : item,
+                  ),
+                };
+                historyRef.current = next;
+                setHistory(next);
+              }}
+              positions={writingPositions.current}
+              onController={receiveController}
+              onChanged={(next) => {
+                onGlobalRevision(next.globalRevision);
+                setChapter(next);
+              }}
+              onFindRole={(role) =>
+                openSearchTarget({ kind: "story_role", roleId: role.id, name: role.name })
+              }
+              onEntry={(id) => void requestNavigation({ location: destination(id) })}
+              onBack={navigationProps.onChapters}
+            />
+            <TimelineUsage
+              projectId={projectId}
+              chapterId={chapter.chapter.id}
+              onOpen={openTimelineOccurrence}
+            />
+          </>
         ) : (
           <ChapterLibrary
             projectId={projectId}
@@ -1951,6 +2040,11 @@ function EntryWorkflow({
             setSelected(updated);
             setEntries((items) => items.map((item) => (item.id === updated.id ? updated : item)));
           }}
+        />
+        <TimelineUsage
+          projectId={projectId}
+          entryId={selected.id}
+          onOpen={openTimelineOccurrence}
         />
         <StoryUsage
           projectId={projectId}

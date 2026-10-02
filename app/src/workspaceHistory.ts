@@ -1,6 +1,8 @@
 /** Session navigation stores identity and presentation, never copies of authored data. */
+import { initialTimelineView } from "./timelineTypes";
 export interface WorkspaceLocation {
-  page: "entries" | "relationships" | "chapters" | "search";
+  timelineView: import("./timelineTypes").TimelineView;
+  page: "entries" | "relationships" | "chapters" | "search" | "timeline";
   searchView: import("./searchTypes").SearchView;
   chapterArea: import("./storyTypes").DocumentArea;
   chapterId: string | null;
@@ -31,6 +33,7 @@ export interface WorkspaceHistory {
 }
 export const initialLocation: WorkspaceLocation = {
   page: "entries",
+  timelineView: initialTimelineView,
   searchView: { query: "", includeInactive: false, limitPerGroup: 10 },
   chapterArea: "manuscript",
   chapterId: null,

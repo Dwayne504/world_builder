@@ -5,6 +5,18 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { TimelineCommand, TimelineSnapshot } from "./timelineTypes";
+export function readTimeline(projectId: string): Promise<TimelineSnapshot> {
+  return call("read_timeline", { projectId });
+}
+export function applyTimeline(
+  projectId: string,
+  expectedRevision: number,
+  command: TimelineCommand,
+): Promise<TimelineSnapshot> {
+  return call("apply_timeline", { projectId, expectedRevision, command });
+}
+
 import type { ChapterSnapshot, StoryCommand, StoryIndex, StoryUsage } from "./storyTypes";
 
 export function readStory(projectId: string): Promise<StoryIndex> {

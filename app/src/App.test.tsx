@@ -64,6 +64,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  readTimeline: vi.fn().mockResolvedValue({ globalRevision: 1, calendar: null, occurrences: [] }),
+  applyTimeline: vi.fn(),
   storyUsage: vi.fn().mockResolvedValue([]),
   readStory: vi.fn().mockResolvedValue({ globalRevision: 1, chapters: [] }),
   readChapter: vi.fn(),
@@ -126,6 +128,8 @@ vi.mock("./api", () => ({
 import App from "./App";
 import { chapterFixture, textDocument } from "./chapterTestFixtures";
 import {
+  readTimeline,
+  applyTimeline,
   searchProject,
   readAliases,
   applyAlias,
@@ -288,6 +292,10 @@ describe("Project screen Saved contract", () => {
     vi.mocked(readAliases).mockReset().mockResolvedValue({ globalRevision: 1, aliases: [] });
     vi.mocked(applyAlias).mockReset();
     vi.mocked(searchProject).mockReset().mockResolvedValue({ globalRevision: 1, groups: [] });
+    vi.mocked(readTimeline)
+      .mockReset()
+      .mockResolvedValue({ globalRevision: 1, calendar: null, occurrences: [] });
+    vi.mocked(applyTimeline).mockReset();
     vi.mocked(readStory).mockReset().mockResolvedValue({ globalRevision: 1, chapters: [] });
     vi.mocked(readChapter).mockReset();
     vi.mocked(applyStory).mockReset();
@@ -506,6 +514,81 @@ describe("Project screen Saved contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
     expect(screen.getByLabelText("New alias")).toHaveValue("The Captain");
     expect(applyAlias).not.toHaveBeenCalled();
+  });
+  it("drains timeline notes before native close and waits for acknowledgement", async () => {
+    enableTauriWindow();
+    const initial: import("./timelineTypes").TimelineSnapshot = {
+      globalRevision: 3,
+      calendar: null,
+      occurrences: [
+        {
+          id: "moment",
+          title: "Arrival",
+          notes: "",
+          date: null,
+          eventEntry: null,
+          entries: [],
+          chapters: [],
+          workspaceState: "active",
+        },
+      ],
+    };
+    vi.mocked(readTimeline).mockResolvedValue(initial);
+    const pending = deferred<typeof initial>();
+    vi.mocked(applyTimeline).mockReturnValue(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Timeline" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Arrival.*Moment/ }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Notes" }), {
+      target: { value: "Before closing" },
+    });
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    await waitFor(() =>
+      expect(applyTimeline).toHaveBeenCalledWith(
+        project.projectId,
+        3,
+        expect.objectContaining({
+          kind: "save",
+          draft: expect.objectContaining({ notes: "Before closing" }),
+        }),
+      ),
+    );
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ ...initial, globalRevision: 4 }));
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    expect(nativeWindowCloseMock).toHaveBeenCalled();
+  });
+  it("keeps a failed timeline edit open on native close", async () => {
+    enableTauriWindow();
+    vi.mocked(readTimeline).mockResolvedValue({
+      globalRevision: 3,
+      calendar: null,
+      occurrences: [
+        {
+          id: "moment",
+          title: "Arrival",
+          notes: "",
+          date: null,
+          eventEntry: null,
+          entries: [],
+          chapters: [],
+          workspaceState: "active",
+        },
+      ],
+    });
+    vi.mocked(applyTimeline).mockRejectedValue(new Error("Timeline disk full"));
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Timeline" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Arrival.*Moment/ }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Notes" }), {
+      target: { value: "Keep this occurrence" },
+    });
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    await screen.findByText("Timeline disk full");
+    expect(screen.getByRole("textbox", { name: "Notes" })).toHaveValue("Keep this occurrence");
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("save-state")).not.toHaveTextContent(/^Saved$/);
   });
   it("flushes Chapter manuscript on native close and waits for durable acknowledgement", async () => {
     enableTauriWindow();

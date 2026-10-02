@@ -5,6 +5,7 @@ import type { SearchHit, SearchResults, SearchTarget, SearchView } from "./searc
 const areaNames = { manuscript: "Manuscript", plan: "Plan", notes: "Notes" };
 
 const titles = {
+  timeline: "Timeline",
   entries: "Entries",
   chapters: "Chapters",
   roles: "Story Roles",
