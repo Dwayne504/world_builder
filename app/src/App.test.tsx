@@ -64,6 +64,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  applyStructure: vi.fn(),
+  previewCategoryDelete: vi.fn(),
   readTimeline: vi.fn().mockResolvedValue({ globalRevision: 1, calendar: null, occurrences: [] }),
   applyTimeline: vi.fn(),
   storyUsage: vi.fn().mockResolvedValue([]),
@@ -128,6 +130,7 @@ vi.mock("./api", () => ({
 import App from "./App";
 import { chapterFixture, textDocument } from "./chapterTestFixtures";
 import {
+  applyStructure,
   readTimeline,
   applyTimeline,
   searchProject,
@@ -224,6 +227,7 @@ function enableTauriWindow() {
 
 function mockEditableEntry() {
   const entry = {
+    workspaceState: "active" as const,
     id: "entry",
     categoryId: "characters",
     typeId: "human",
@@ -289,6 +293,7 @@ describe("Project screen Saved contract", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    vi.mocked(applyStructure).mockReset();
     vi.mocked(readAliases).mockReset().mockResolvedValue({ globalRevision: 1, aliases: [] });
     vi.mocked(applyAlias).mockReset();
     vi.mocked(searchProject).mockReset().mockResolvedValue({ globalRevision: 1, groups: [] });
@@ -352,6 +357,97 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("offers Category settings on the chosen Category page", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Project navigation" })).getByRole("button", {
+        name: "Places",
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Category settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Category settings" });
+    await within(dialog).findByText("Types in Places");
+    expect(within(dialog).getByRole("button", { name: "Delete Category…" })).toBeEnabled();
+  });
+
+  it("confirms Entry deletion, flushes the latest title, and waits before returning to the list", async () => {
+    const entry = mockEditableEntry();
+    getEntryMock.mockResolvedValue(entry);
+    const deletion = deferred<{ globalRevision: number; backupPath: null }>();
+    vi.mocked(applyStructure).mockReturnValueOnce(deletion.promise);
+    updateEntryNameMock.mockResolvedValue({
+      ...entry,
+      authoredName: "Captain",
+      displayName: "Captain",
+      revision: 2,
+      globalRevision: 2,
+    });
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByLabelText("entry-name");
+    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Entry…" }));
+    expect(applyStructure).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel deletion" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
+    fireEvent.change(screen.getByLabelText("entry-name"), { target: { value: "Captain" } });
+    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Entry…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Entry to Trash" }));
+    await waitFor(() =>
+      expect(applyStructure).toHaveBeenCalledWith(project.projectId, 2, {
+        kind: "set_entry_state",
+        id: "entry",
+        state: "trashed",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Move Entry to Trash" })).toBeDisabled();
+    listEntriesMock.mockResolvedValue([]);
+    await act(async () => deletion.resolve({ globalRevision: 3, backupPath: null }));
+    await waitFor(() => expect(screen.queryByLabelText("entry-name")).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Captain" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the Entry open when deletion fails", async () => {
+    const entry = mockEditableEntry();
+    getEntryMock.mockResolvedValue(entry);
+    vi.mocked(applyStructure).mockRejectedValueOnce(new Error("Could not save Trash state"));
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Entry settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Entry…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Entry to Trash" }));
+    await screen.findByText("Could not save Trash state");
+    expect(screen.getByLabelText("entry-name")).toHaveValue("Thron");
+  });
+
+  it("finds and restores trashed Entries while retaining active list defaults", async () => {
+    const entry = mockEditableEntry();
+    const trashed = { ...entry, workspaceState: "trashed", globalRevision: 4 };
+    listEntriesMock.mockImplementation((_id: string, state?: string) =>
+      Promise.resolve(state === "trashed" ? [trashed] : []),
+    );
+    getEntryMock.mockResolvedValue(trashed);
+    vi.mocked(applyStructure).mockResolvedValue({ globalRevision: 5, backupPath: null });
+    await openTheProjectScreen();
+    fireEvent.change(screen.getByLabelText("Entry state"), { target: { value: "trashed" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    const restore = await screen.findByRole("button", { name: "Restore Entry" });
+    expect(screen.queryByLabelText("entry-name")).not.toBeInTheDocument();
+    listEntriesMock.mockResolvedValue([entry]);
+    fireEvent.click(restore);
+    await waitFor(() =>
+      expect(applyStructure).toHaveBeenCalledWith(project.projectId, 4, {
+        kind: "set_entry_state",
+        id: "entry",
+        state: "active",
+      }),
+    );
+    expect(await screen.findByLabelText("Entry state")).toHaveValue("active");
+    expect(await screen.findByRole("button", { name: "Thron" })).toBeVisible();
   });
 
   it("opens Search results by identity and restores query and matching Chapter area with Back", async () => {

@@ -121,6 +121,10 @@ function CalendarForm({
         </label>
       </div>
       <p className="muted">
+        The era label is shown after the year, for example “120 After Landing”. It does not change
+        dates or calculations.
+      </p>
+      <p className="muted">
         Fixed month lengths, repeated every year.{" "}
         {locked
           ? "Existing dates keep month counts and lengths fixed. You can rename the labels."
@@ -607,8 +611,10 @@ export function Timeline({
                     onChange={(ids) => timeline.change({ ...draft, chapterIds: ids })}
                   />
                   <p className="muted">
-                    For a major event, use a full Entry with its own Fields and Relationships.
-                    Choosing it enables its Event feature.
+                    Choose the Entry describing the event itself, such as “The Coronation”, to give
+                    this occurrence a full page with Fields and Relationships. Link people and
+                    places under Entries above. Choosing an event page marks it as an Event; it does
+                    not copy its data or change its Category.
                   </p>
                   <LinkPicker
                     title="Event page"

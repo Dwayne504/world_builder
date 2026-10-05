@@ -7,6 +7,7 @@
 
 pub mod error;
 mod fields;
+pub mod lifecycle;
 pub mod lock;
 pub mod migrations;
 pub mod pragmas;

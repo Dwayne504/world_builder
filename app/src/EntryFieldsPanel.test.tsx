@@ -10,6 +10,7 @@ vi.mock("./api", () => ({
   deleteEntryField: vi.fn(),
 }));
 const entry: Entry = {
+  workspaceState: "active",
   id: "entry",
   categoryId: "category",
   typeId: "type",

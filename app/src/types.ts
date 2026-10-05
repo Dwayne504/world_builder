@@ -50,6 +50,7 @@ export interface TypeDef {
 }
 
 export interface Entry {
+  workspaceState: "active" | "archived" | "trashed";
   id: string;
   categoryId: string;
   typeId: string | null;
@@ -242,3 +243,20 @@ export type SpatialCommand =
       typeId: string | null;
     }
   | { kind: "set_default"; provider: CapabilityProvider; enabled: boolean };
+
+export interface CategoryDeletePreview {
+  globalRevision: number;
+  name: string;
+  entryCount: number;
+  typedEntryCount: number;
+  typeNames: string[];
+  defaultCount: number;
+}
+export type StructureCommand =
+  | { kind: "rename_category"; id: string; name: string }
+  | { kind: "delete_category"; id: string; destinationId: string; removeTypes: boolean }
+  | { kind: "set_entry_state"; id: string; state: "active" | "archived" | "trashed" };
+export interface StructureOutcome {
+  globalRevision: number;
+  backupPath: string | null;
+}

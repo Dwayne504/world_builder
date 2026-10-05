@@ -1,3 +1,4 @@
+import { applyStructure } from "./api";
 import { RecentProjects } from "./RecentProjects";
 import { Timeline, TimelineUsage } from "./Timeline";
 import type { TimelineView } from "./timelineTypes";
@@ -783,6 +784,7 @@ function EntryEditor({
   templateEpoch,
   onRecoveryBackup,
   onEntriesChanged,
+  onPutAside,
 }: {
   onSearch: () => void;
   projectId: string;
@@ -797,8 +799,10 @@ function EntryEditor({
   templateEpoch: number;
   onRecoveryBackup: (path: string) => void;
   onEntriesChanged: () => void;
+  onPutAside: (revision: number) => void;
 }) {
   const editor = useEntryName(projectId, initialEntry);
+  const [confirmTrash, setConfirmTrash] = useState(false);
   const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
   const [aliasDirty, setAliasDirty] = useState(false);
   const { submit: submitName, currentEntry, waitForPending: waitForName } = editor;
@@ -1014,6 +1018,27 @@ function EntryEditor({
     if (outcome.kind === "failed") {
       setStructureError(outcome.errorMessage);
     }
+  }
+
+  async function putAside(state: "archived" | "trashed") {
+    const result = await mutations.run(
+      async () => {
+        const saved = await submit(true);
+        if (saved.kind !== "committed" && saved.kind !== "no-op")
+          throw new Error("Finish or save the Entry's edits before removing it.");
+        return applyStructure(projectId, Math.max(getRevision(), currentEntry().globalRevision), {
+          kind: "set_entry_state",
+          id: initialEntry.id,
+          state,
+        });
+      },
+      (outcome) => {
+        setConfirmTrash(false);
+        setEntrySettingsOpen(false);
+        onPutAside(outcome.globalRevision);
+      },
+    );
+    if (result.kind === "failed") setStructureError(result.errorMessage);
   }
 
   return (
@@ -1238,6 +1263,48 @@ function EntryEditor({
           onDraftChange={setAliasDirty}
         />
         {entrySettingsOpen && structureError && <p role="alert">{structureError}</p>}
+        <section aria-label="Entry removal">
+          <h3>Put this Entry aside</h3>
+          <p className="muted">
+            Archive hides it from normal browsing. Trash is recoverable deletion. Both keep its
+            values, connections, Chapter links and timeline links; spatial children stay in place.
+          </p>
+          {confirmTrash ? (
+            <>
+              <p>
+                Move <strong>{editor.entry.authoredName ?? "this Entry"}</strong> to Trash? Restore
+                it from the Entries page whenever you need it.
+              </p>
+              <button
+                disabled={mutations.state === "saving" || aliasDirty || structureDirtyRef.current}
+                onClick={() => void putAside("trashed")}
+              >
+                Move Entry to Trash
+              </button>
+              <button
+                disabled={mutations.state === "saving"}
+                onClick={() => setConfirmTrash(false)}
+              >
+                Cancel deletion
+              </button>
+            </>
+          ) : (
+            <div className="row">
+              <button
+                disabled={mutations.state === "saving" || aliasDirty || structureDirtyRef.current}
+                onClick={() => void putAside("archived")}
+              >
+                Archive Entry
+              </button>
+              <button
+                disabled={mutations.state === "saving" || aliasDirty || structureDirtyRef.current}
+                onClick={() => setConfirmTrash(true)}
+              >
+                Delete Entry…
+              </button>
+            </div>
+          )}
+        </section>
         <details className="technical-details">
           <summary>Entry information</summary>
           <p className="package-preview">Entry ID: {editor.entry.id}</p>
@@ -1319,6 +1386,7 @@ function EntryWorkflow({
   mutations,
   templateEpoch,
   onRecoveryBackup,
+  onCategorySettings,
 }: {
   locked: boolean;
   projectId: string;
@@ -1327,9 +1395,11 @@ function EntryWorkflow({
   mutations: MutationCoordinator;
   templateEpoch: number;
   onRecoveryBackup: (path: string) => void;
+  onCategorySettings: (id: string) => void;
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [inactiveEntries, setInactiveEntries] = useState<Entry[]>([]);
   const [recentEntryIds, setRecentEntryIds] = useState<string[]>([]);
   function rememberEntry(id: string) {
     setRecentEntryIds((ids) => [id, ...ids.filter((value) => value !== id)].slice(0, 8));
@@ -1357,6 +1427,22 @@ function EntryWorkflow({
   const historyRef = useRef(history);
   const location = history.locations[history.index];
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  useEffect(() => {
+    let current = true;
+    setInactiveEntries([]);
+    if (location.entryState !== "active")
+      void listEntries(projectId, location.entryState)
+        .then((items) => {
+          if (current) setInactiveEntries(items);
+        })
+        .catch((reason) => {
+          if (current) setError(errorMessage(reason));
+        });
+    return () => {
+      current = false;
+    };
+  }, [projectId, location.entryState, templateEpoch]);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [browseTypes, setBrowseTypes] = useState<TypeDef[]>([]);
   const [typesLoading, setTypesLoading] = useState(false);
@@ -1980,6 +2066,46 @@ function EntryWorkflow({
     );
   }
 
+  if (selected && selected.workspaceState && selected.workspaceState !== "active") {
+    return (
+      <WorkspaceFrame {...navigationProps}>
+        <section className="panel">
+          <h2>{selected.displayName}</h2>
+          <p>
+            This Entry is in {selected.workspaceState === "trashed" ? "Trash" : "Archive"}. Its
+            values and links are preserved. Restore it to continue editing.
+          </p>
+          {error && <p role="alert">{error}</p>}
+          <button
+            disabled={mutations.state === "saving"}
+            onClick={() =>
+              void mutations
+                .run(
+                  () =>
+                    applyStructure(projectId, selected.globalRevision, {
+                      kind: "set_entry_state",
+                      id: selected.id,
+                      state: "active",
+                    }),
+                  (outcome) => {
+                    onGlobalRevision(outcome.globalRevision);
+                    void commitNavigation({ location: destination(null) });
+                  },
+                )
+                .then((result) => {
+                  if (result.kind === "failed") setError(result.errorMessage);
+                })
+            }
+          >
+            Restore Entry
+          </button>
+          <button className="quiet-button" onClick={closeEditor}>
+            Back to Entries
+          </button>
+        </section>
+      </WorkspaceFrame>
+    );
+  }
   if (selected) {
     return (
       <WorkspaceFrame {...navigationProps}>
@@ -2010,6 +2136,10 @@ function EntryWorkflow({
           </div>
         )}
         <EntryEditor
+          onPutAside={(revision) => {
+            onGlobalRevision(revision);
+            void commitNavigation({ location: destination(null) });
+          }}
           onSearch={() =>
             void requestNavigation({
               location: {
@@ -2075,7 +2205,7 @@ function EntryWorkflow({
     );
   }
 
-  const shownEntries = entries.filter(
+  const shownEntries = (location.entryState === "active" ? entries : inactiveEntries).filter(
     (entry) =>
       (!location.categoryId || entry.categoryId === location.categoryId) &&
       (!location.typeId ||
@@ -2092,19 +2222,51 @@ function EntryWorkflow({
                 "Entries"}
             </h2>
           </div>
-          <button
-            disabled={mutations.state === "saving"}
-            onClick={() => {
-              if (!creationDirty && location.categoryId) {
-                setCategoryId(location.categoryId);
-                setTypeId(location.typeId === "__untyped" ? "" : location.typeId);
-              }
-              setCreateOpen(true);
-            }}
-          >
-            Add Entry
-          </button>
+          <div className="row">
+            {location.categoryId && (
+              <button
+                className="quiet-button"
+                disabled={creationDirty || mutations.state === "saving" || navigating}
+                onClick={() => onCategorySettings(location.categoryId)}
+              >
+                Category settings
+              </button>
+            )}
+            <button
+              disabled={mutations.state === "saving" || location.entryState !== "active"}
+              onClick={() => {
+                if (!creationDirty && location.categoryId) {
+                  setCategoryId(location.categoryId);
+                  setTypeId(location.typeId === "__untyped" ? "" : location.typeId);
+                }
+                setCreateOpen(true);
+              }}
+            >
+              Add Entry
+            </button>
+          </div>
         </div>
+        <label className="browse-filter">
+          View
+          <select
+            aria-label="Entry state"
+            value={location.entryState}
+            disabled={navigating || mutations.state === "saving"}
+            onChange={(e) =>
+              void requestNavigation({
+                location: {
+                  ...location,
+                  entryId: null,
+                  entryState: e.target.value as Entry["workspaceState"],
+                },
+              })
+            }
+          >
+            <option value="active">Active Entries</option>
+            <option value="archived">Archive</option>
+            <option value="trashed">Trash</option>
+          </select>
+        </label>
         {location.categoryId && (
           <label className="browse-filter">
             Type
@@ -2128,10 +2290,10 @@ function EntryWorkflow({
             </select>
           </label>
         )}
-        {entries.length > 0 && shownEntries.length === 0 && (
+        {(entries.length > 0 || location.entryState !== "active") && shownEntries.length === 0 && (
           <p className="empty-state">No Entries match this view.</p>
         )}
-        {entries.length === 0 && (
+        {entries.length === 0 && location.entryState === "active" && (
           <p className="empty-state">Your world starts with one idea. Add your first Entry.</p>
         )}
         {!createOpen && error && <p role="alert">{error}</p>}
@@ -2365,6 +2527,8 @@ function ProjectScreen({
     setManagerState(controller.state);
   }, []);
   const entryControllerRef = useRef<EntrySaveController | null>(null);
+  const [managedCategoryId, setManagedCategoryId] = useState<string | undefined>();
+  const [structureEpoch, setStructureEpoch] = useState(0);
   const [entrySaveState, setEntrySaveState] = useState<SaveState>("saved");
   const saveStateRef = useRef<SaveState>(rename.saveState);
   const closeInFlight = useRef<Promise<void> | null>(null);
@@ -2659,7 +2823,10 @@ function ProjectScreen({
               <button
                 className="quiet-button"
                 disabled={entrySaveState !== "saved" || mutationState === "saving"}
-                onClick={() => openProjectDialog("categories")}
+                onClick={() => {
+                  setManagedCategoryId(undefined);
+                  openProjectDialog("categories");
+                }}
               >
                 Categories
               </button>
@@ -2751,6 +2918,12 @@ function ProjectScreen({
       </Dialog>
 
       <CategoryManager
+        initialCategoryId={managedCategoryId}
+        onDeleted={() => {
+          setManagedCategoryId(undefined);
+          setStructureEpoch((n) => n + 1);
+        }}
+        onRecoveryBackup={setLastRecoveryBackup}
         projectId={project.projectId}
         open={projectDialog === "categories"}
         onClose={() => setProjectDialog(null)}
@@ -2761,6 +2934,11 @@ function ProjectScreen({
         }}
       />
       <EntryWorkflow
+        key={structureEpoch}
+        onCategorySettings={(id) => {
+          setManagedCategoryId(id);
+          setProjectDialog("categories");
+        }}
         locked={busy}
         templateEpoch={templateEpoch}
         projectId={project.projectId}

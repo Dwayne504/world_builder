@@ -59,6 +59,8 @@ pub fn run() {
             tauri_boundary::read_field_catalog,
             tauri_boundary::apply_template_fields,
             tauri_boundary::delete_entry_field,
+            tauri_boundary::preview_category_delete,
+            tauri_boundary::apply_structure,
             tauri_boundary::automatic_backup_directory,
             tauri_boundary::read_fields,
             tauri_boundary::apply_fields,

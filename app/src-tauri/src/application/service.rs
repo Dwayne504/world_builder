@@ -21,6 +21,74 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn preview_category_delete(
+        state: &AppState,
+        project: ProjectId,
+        id: CategoryId,
+    ) -> Result<crate::domain::lifecycle::CategoryDeletePreview, AppError> {
+        Self::with_worker(state, project, |w| w.preview_category_delete(id))
+    }
+    pub fn apply_structure(
+        state: &AppState,
+        project: ProjectId,
+        expected: i64,
+        command: crate::domain::lifecycle::StructureCommand,
+        backup_root: Option<&Path>,
+    ) -> Result<crate::domain::lifecycle::StructureOutcome, AppError> {
+        use crate::domain::lifecycle::StructureCommand;
+        let open = state
+            .open_projects
+            .lock()
+            .expect("registry mutex poisoned")
+            .get(&project)
+            .cloned()
+            .ok_or(AppError::ProjectNotOpen(project))?;
+        let guard = open.worker.lock().expect("worker mutex poisoned");
+        let worker = guard.as_ref().ok_or(AppError::ProjectNotOpen(project))?;
+        let current = worker.read_meta()?.last_committed_revision;
+        if current != expected {
+            return Err(PersistenceError::StaleRevision { expected, current }.into());
+        }
+        let backup = if let StructureCommand::DeleteCategory {
+            id,
+            remove_types,
+            destination_id,
+        } = &command
+        {
+            let preview = worker.preview_category_delete(*id)?;
+            if !preview.type_names.is_empty() && !remove_types {
+                return Err(PersistenceError::Other(
+                    "Confirm removal of the reviewed Types first".into(),
+                )
+                .into());
+            }
+            if id == destination_id
+                || !worker
+                    .list_categories()?
+                    .iter()
+                    .any(|c| c.id == *destination_id)
+            {
+                return Err(PersistenceError::Other(
+                    "Choose another Category for these Entries".into(),
+                )
+                .into());
+            }
+            let root = backup_root.ok_or_else(|| {
+                PersistenceError::Other("A recovery backup location is required".into())
+            })?;
+            Some(
+                crate::backup_recovery::create_backup(worker, &open.paths, root)?
+                    .display()
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        let mut result = worker.apply_structure(expected, command)?;
+        result.backup_path = backup;
+        Ok(result)
+    }
+
     pub fn read_timeline(
         state: &AppState,
         project_id: ProjectId,

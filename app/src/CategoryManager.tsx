@@ -1,3 +1,5 @@
+import { CategoryDeleteReview } from "./CategoryDeleteReview";
+import { applyStructure } from "./api";
 import { FieldSuggestions } from "./FieldSuggestions";
 import { ProjectionConfiguration } from "./ProjectionConfiguration";
 import { FieldMergeReview } from "./FieldMergeReview";
@@ -42,7 +44,13 @@ export function CategoryManager({
   onClose,
   onController,
   onChanged,
+  initialCategoryId,
+  onDeleted,
+  onRecoveryBackup,
 }: {
+  initialCategoryId?: string;
+  onDeleted?: () => void;
+  onRecoveryBackup?: (path: string) => void;
   projectId: string;
   open: boolean;
   onClose: () => void;
@@ -56,6 +64,7 @@ export function CategoryManager({
   const [categoryId, setCategoryId] = useState("");
   const [typeId, setTypeId] = useState("");
   const [categoryName, setCategoryName] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [typeName, setTypeName] = useState("");
   const [parentId, setParentId] = useState("");
   const [fieldName, setFieldName] = useState("");
@@ -70,14 +79,16 @@ export function CategoryManager({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState<"category" | "type" | "field" | "reuse" | "merge" | null>(null);
+  const [form, setForm] = useState<
+    "category" | "type" | "field" | "reuse" | "merge" | "rename" | "delete" | null
+  >(null);
   const [mergeBackup, setMergeBackup] = useState<string | null>(null);
   const pending = useRef<Promise<SubmitOutcome> | null>(null);
   const generation = useRef(0);
   const changedRef = useRef(onChanged);
   changedRef.current = onChanged;
   const fieldDirty = !!(fieldName || unit || options || projection.relationshipDefinitionId);
-  const dirty = !!(categoryName || typeName || fieldDirty);
+  const dirty = !!(renaming || categoryName || typeName || fieldDirty);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const busy = saveState === "saving";
@@ -90,6 +101,12 @@ export function CategoryManager({
   const supplied = definitions.filter((d) =>
     d.bindings.some((b) => b.provider.kind === provider.kind && b.provider.id === provider.id),
   );
+  useEffect(() => {
+    if (open && initialCategoryId && !dirtyRef.current && !pending.current) {
+      setCategoryId(initialCategoryId);
+      setTypeId("");
+    }
+  }, [open, initialCategoryId]);
   const reload = useCallback(async () => {
     const request = ++generation.current;
     setLoading(true);
@@ -145,6 +162,7 @@ export function CategoryManager({
     setForm(null);
     setSaveState("saved");
     setCategoryName("");
+    setRenaming(false);
     setTypeName("");
     setParentId("");
     setFieldName("");
@@ -186,7 +204,15 @@ export function CategoryManager({
         () => setExistingField(""),
       );
   }
-  const activeDraft = fieldDirty ? "field" : typeName ? "type" : categoryName ? "category" : null;
+  const activeDraft = fieldDirty
+    ? "field"
+    : typeName
+      ? "type"
+      : renaming
+        ? "rename"
+        : categoryName
+          ? "category"
+          : null;
   const dismissForm = () => setForm(null);
   const formFeedback = (
     <>
@@ -216,7 +242,7 @@ export function CategoryManager({
       {!open && error && <p role="alert">{error}</p>}
       <Dialog
         open={open}
-        title="Categories and defaults"
+        title={initialCategoryId ? "Category settings" : "Categories and defaults"}
         onClose={onClose}
         className="category-dialog"
       >
@@ -263,6 +289,23 @@ export function CategoryManager({
                 ))}
               </select>
             </label>
+            {selectedCategory && !selectedCategory.isUncategorized && (
+              <div className="row">
+                <button
+                  disabled={busy || dirty || loading}
+                  onClick={() => {
+                    setRenaming(true);
+                    setCategoryName(selectedCategory.name);
+                    setForm("rename");
+                  }}
+                >
+                  Rename Category
+                </button>
+                <button disabled={busy || dirty || loading} onClick={() => setForm("delete")}>
+                  Delete Category…
+                </button>
+              </div>
+            )}
             <button
               disabled={busy || loading || (dirty && activeDraft !== "category")}
               onClick={() => setForm("category")}
@@ -422,6 +465,61 @@ export function CategoryManager({
             )}
           </div>
         </div>
+      </Dialog>
+      <Dialog open={open && form === "rename"} title="Rename Category" onClose={dismissForm}>
+        {form === "rename" && formFeedback}
+        <label>
+          New Category name
+          <input
+            disabled={busy}
+            value={categoryName}
+            onChange={(e) => setCategoryName(e.target.value)}
+          />
+        </label>
+        <button
+          disabled={busy || !categoryName.trim() || !catalog}
+          onClick={() =>
+            catalog &&
+            perform(() =>
+              applyStructure(projectId, catalog.globalRevision, {
+                kind: "rename_category",
+                id: categoryId,
+                name: categoryName,
+              }),
+            )
+          }
+        >
+          Save Category name
+        </button>
+        {cancelButton}
+      </Dialog>
+      <Dialog open={open && form === "delete"} title="Delete Category" onClose={dismissForm}>
+        {form === "delete" && selectedCategory && (
+          <>
+            {formFeedback}
+            <CategoryDeleteReview
+              projectId={projectId}
+              category={selectedCategory}
+              categories={categories}
+              busy={busy || loading}
+              onCancel={() => setForm(null)}
+              onConfirm={(revision, command) =>
+                perform(
+                  async () => {
+                    const outcome = await applyStructure(projectId, revision, command);
+                    if (outcome.backupPath) onRecoveryBackup?.(outcome.backupPath);
+                    return outcome;
+                  },
+                  () => {
+                    setCategoryId("");
+                    setTypeId("");
+                    onDeleted?.();
+                  },
+                )
+              }
+            />
+          </>
+        )}
       </Dialog>
       <Dialog open={open && form === "category"} title="Add Category" onClose={dismissForm}>
         <p>A broad home for Entries, such as Characters, Places, or Weapons.</p>

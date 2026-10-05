@@ -292,6 +292,13 @@ Uncategorized Category; unnamed Entries remain valid and display an unstored
 Categories, Types, and Entries, inline Category/Type creation during Entry
 creation, and revision-checked continuous saving of Entry names.
 
+Each Category page now has **Category settings** for its Types, defaults, rename
+and reviewed deletion. Deleting a Category moves its Entries to a chosen Category
+and saves a recovery copy first. **Entry settings → Delete Entry** moves only that
+Entry to recoverable Trash; the Entries **View** selector opens Archive or Trash
+for restoration. See the [Category settings and deletion note](docs/milestones/CATEGORY_SETTINGS_VERIFICATION.md)
+for preservation rules, verification, and the Windows checklist.
+
 Task 02B adds schema 3 and optional Short Text, Number, Boolean, Choice, and
 Multi-choice Fields. Stable definitions and option identities are separate from
 Entry-owned typed values and Category, Type/ancestor, or Entry-local availability.

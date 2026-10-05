@@ -162,6 +162,45 @@ pub fn automatic_backup_directory(
 }
 
 #[tauri::command]
+pub fn preview_category_delete(
+    state: State<'_, AppState>,
+    project_id: String,
+    category_id: String,
+) -> Result<crate::domain::lifecycle::CategoryDeletePreview, AppErrorDto> {
+    ProjectService::preview_category_delete(
+        &state,
+        parse_project_id(&project_id)?,
+        CategoryId::parse(&category_id).map_err(invalid_input)?,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_structure(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    preferences: State<'_, PreferencesStore>,
+    project_id: String,
+    expected_revision: i64,
+    command: crate::domain::lifecycle::StructureCommand,
+) -> Result<crate::domain::lifecycle::StructureOutcome, AppErrorDto> {
+    let backup = if matches!(
+        &command,
+        crate::domain::lifecycle::StructureCommand::DeleteCategory { .. }
+    ) {
+        Some(PathBuf::from(automatic_backup_directory(app, preferences)?))
+    } else {
+        None
+    };
+    ProjectService::apply_structure(
+        &state,
+        parse_project_id(&project_id)?,
+        expected_revision,
+        command,
+        backup.as_deref(),
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
 pub fn delete_entry_field(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -553,9 +592,22 @@ pub fn create_type(
 pub fn list_entries(
     state: State<'_, AppState>,
     project_id: String,
+    workspace_state: Option<crate::domain::story::WorkspaceState>,
 ) -> Result<Vec<EntryDto>, AppErrorDto> {
     ProjectService::list_entries(&state, parse_project_id(&project_id)?)
-        .map(|items| items.into_iter().map(Into::into).collect())
+        .map(|items| {
+            items
+                .into_iter()
+                .filter(|e| {
+                    e.workspace_state
+                        == workspace_state
+                            .as_ref()
+                            .map(|s| s.as_str())
+                            .unwrap_or("active")
+                })
+                .map(Into::into)
+                .collect()
+        })
         .map_err(Into::into)
 }
 

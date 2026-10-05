@@ -86,6 +86,7 @@ impl From<TypeDef> for TypeDto {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryDto {
+    pub workspace_state: String,
     pub id: String,
     pub category_id: String,
     pub type_id: Option<String>,
@@ -104,6 +105,7 @@ impl From<Entry> for EntryDto {
             type_id: value.type_id.map(|id| id.to_string()),
             authored_name: value.authored_name,
             display_name,
+            workspace_state: value.workspace_state,
             revision: value.revision,
             global_revision: value.global_revision,
         }

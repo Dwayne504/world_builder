@@ -208,6 +208,7 @@ it("searches a bounded list and creates a role-free canonical Story link", async
   vi.mocked(listEntries).mockResolvedValue(
     Array.from({ length: 30 }, (_, i) => ({
       id: `e${i}`,
+      workspaceState: "active" as const,
       displayName: `Person ${i}`,
       authoredName: `Person ${i}`,
       categoryId: "people",

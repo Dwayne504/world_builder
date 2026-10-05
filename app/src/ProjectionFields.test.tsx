@@ -24,6 +24,7 @@ vi.mock("./api", () => ({
   readProjectRelationships: vi.fn(),
 }));
 const entry: Entry = {
+  workspaceState: "active",
   id: "blade",
   categoryId: "weapons",
   typeId: null,

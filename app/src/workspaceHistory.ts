@@ -8,6 +8,7 @@ export interface WorkspaceLocation {
   chapterId: string | null;
   relationshipView: RelationshipView;
   entryId: string | null;
+  entryState: "active" | "archived" | "trashed";
   categoryId: string;
   typeId: string;
   scrollY: number;
@@ -39,6 +40,7 @@ export const initialLocation: WorkspaceLocation = {
   chapterId: null,
   relationshipView: initialRelationshipView,
   entryId: null,
+  entryState: "active",
   categoryId: "",
   typeId: "",
   scrollY: 0,
