@@ -16,6 +16,7 @@ import type {
 import type { SubmitOutcome } from "./useProjectRename";
 import { parseFieldDraft, useEntryFields, valueDraft, type FieldDraft } from "./useEntryFields";
 import { Dialog } from "./Dialog";
+import { useDesktopCommands } from "./desktopMenuContext";
 
 export interface FieldsController {
   state: SaveState;
@@ -309,6 +310,52 @@ export function EntryFieldsPanel({
     }
   }
 
+  const manageDisabled =
+    busy ||
+    !!newName ||
+    !!String(newValue) ||
+    !!newOptions ||
+    !!newUnit ||
+    !!projection.relationshipDefinitionId ||
+    !!projectionDrafts.length;
+  useDesktopCommands(
+    "entry-fields",
+    {
+      edit: [
+        {
+          id: "field",
+          label: "Field",
+          children: [
+            {
+              id: "field-add",
+              label: "Add field…",
+              disabled: configDisabled || !!renamed || !!optionLabel || !!projectionDrafts.length,
+              action: () => setCreateOpen(true),
+            },
+            {
+              id: "field-manage",
+              label: "Manage fields…",
+              disabled: manageDisabled,
+              action: () => setManageOpen(true),
+            },
+            ...(fields.snapshot?.fields.some((field) => field.hidden)
+              ? [
+                  {
+                    id: "field-hidden",
+                    label: showHidden ? "Hide hidden fields" : "Show hidden fields",
+                    checked: showHidden,
+                    disabled: configDisabled || formDirty,
+                    action: () => setShowHidden(!showHidden),
+                  },
+                ]
+              : []),
+          ],
+        },
+      ],
+    },
+    30,
+  );
+
   return (
     <section aria-label="Entry fields" className="fields-panel">
       <div className="section-heading">
@@ -316,37 +363,11 @@ export function EntryFieldsPanel({
           <h3>Fields</h3>
         </div>
         <div className="row panel-actions">
-          {!!fields.snapshot?.fields.some((f) => f.hidden) && (
-            <button
-              className="quiet-button"
-              aria-pressed={showHidden}
-              disabled={configDisabled || formDirty}
-              onClick={() => setShowHidden(!showHidden)}
-            >
-              {showHidden
-                ? "Hide hidden fields"
-                : `Show hidden fields (${fields.snapshot.fields.filter((f) => f.hidden).length})`}
-            </button>
-          )}
           <button
             disabled={configDisabled || !!renamed || !!optionLabel || !!projectionDrafts.length}
             onClick={() => setCreateOpen(true)}
           >
             Add field
-          </button>
-          <button
-            className="quiet-button"
-            disabled={
-              !!newName ||
-              !!String(newValue) ||
-              !!newOptions ||
-              !!newUnit ||
-              !!projection.relationshipDefinitionId ||
-              !!projectionDrafts.length
-            }
-            onClick={() => setManageOpen(true)}
-          >
-            Manage fields
           </button>
         </div>
       </div>

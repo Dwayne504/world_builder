@@ -1,13 +1,6 @@
+import { menuItem, renderWithMenu as render } from "./desktopMenuTestUtils";
 import { useState } from "react";
-import {
-  act,
-  fireEvent,
-  render,
-  renderHook,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { applyTimeline, listEntries, readStory, readTimeline } from "./api";
 import { Timeline, TimelineUsage } from "./Timeline";
@@ -158,7 +151,7 @@ it("retains invalid dates and failed edits and offers explicit retry instead of 
 });
 it("makes calendar rules explicit and prevents changing lengths of already used months", async () => {
   render(<Host />);
-  fireEvent.click(await screen.findByRole("button", { name: "Calendar settings" }));
+  fireEvent.click(await waitFor(() => menuItem("Edit", "Timeline", "Calendar settings…")));
   const dialog = screen.getByRole("dialog", { name: "World calendar" });
   expect(within(dialog).getAllByLabelText("Days")[0]).toBeDisabled();
   expect(within(dialog).getByRole("button", { name: "Add month" })).toBeDisabled();
@@ -189,7 +182,7 @@ it("allows undated writing before calendar setup and cancels a calendar draft sa
     occurrences: [{ ...occurrence(), date: null }],
   });
   render(<Host />);
-  fireEvent.click(await screen.findByRole("button", { name: "Set up calendar" }));
+  fireEvent.click(await waitFor(() => menuItem("Edit", "Timeline", "Set up calendar…")));
   fireEvent.change(screen.getByLabelText("Calendar name"), { target: { value: "Draft calendar" } });
   fireEvent.click(screen.getByRole("button", { name: "Cancel calendar edits" }));
   await waitFor(() => expect(controller.state).toBe("saved"));

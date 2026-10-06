@@ -360,3 +360,13 @@ export function applyStructure(
 ): Promise<import("./types").StructureOutcome> {
   return call("apply_structure", { projectId, expectedRevision, command });
 }
+
+export interface BuildInfo {
+  version: string;
+  supportedSchemaVersion: number;
+  supportedFormatVersion: number;
+}
+
+export function getBuildInfo(): Promise<BuildInfo> {
+  return call("get_build_info", {});
+}

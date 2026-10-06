@@ -1,3 +1,4 @@
+import { menuItem } from "./desktopMenuTestUtils";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Preferences, ProjectSummary, EntryFields, RelationshipSnapshot } from "./types";
@@ -192,9 +193,11 @@ async function openTheProjectScreen() {
 }
 
 function projectAction(name: string) {
-  const menu = screen.getByText("Project menu").closest("details")!;
-  if (!menu.open) fireEvent.click(menu.querySelector("summary")!);
-  fireEvent.click(within(menu).getByRole("button", { name }));
+  fireEvent.click(
+    name === "Categories"
+      ? menuItem("Edit", "Category", "Categories and defaults…")
+      : menuItem("File", name === "Close Project" ? name : `${name}…`),
+  );
 }
 
 function closeFromSettings() {
@@ -209,7 +212,7 @@ function visibleInput(label: string) {
   if (label.startsWith("new-entry-") && !screen.queryByRole("dialog", { name: "Add Entry" }))
     fireEvent.click(screen.getByRole("button", { name: "Add Entry" }));
   if (label === "entry-category" || label === "entry-type")
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
   if (label === "project-working-name") projectAction("Project settings");
   if (label === "backup-destination") projectAction("Backups");
   const input = screen.getByLabelText(label);
@@ -283,11 +286,14 @@ function mockEditableEntry() {
 describe("Project screen Saved contract", () => {
   it("keeps Close Project at the bottom of the menu, hidden until opened", async () => {
     await openTheProjectScreen();
-    expect(screen.getByRole("button", { name: "Close Project" })).not.toBeVisible();
-    fireEvent.click(screen.getByText("Project menu"));
-    const close = screen.getByRole("button", { name: "Close Project" });
+    expect(screen.queryByRole("menuitem", { name: "Close Project" })).not.toBeInTheDocument();
+    const close = menuItem("File", "Close Project");
     expect(close).toBeVisible();
-    expect(close.parentElement?.lastElementChild).toBe(close);
+    expect(
+      within(screen.getByRole("menu", { name: "File" }))
+        .getAllByRole("menuitem")
+        .slice(-1)[0],
+    ).toBe(close);
     expect(closeProjectMock).not.toHaveBeenCalled();
   });
 
@@ -367,7 +373,7 @@ describe("Project screen Saved contract", () => {
         name: "Places",
       }),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Category settings" }));
+    fireEvent.click(await waitFor(() => menuItem("Edit", "Category", "Category settings…")));
     const dialog = await screen.findByRole("dialog", { name: "Category settings" });
     await within(dialog).findByText("Types in Places");
     expect(within(dialog).getByRole("button", { name: "Delete Category…" })).toBeEnabled();
@@ -388,13 +394,13 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     await screen.findByLabelText("entry-name");
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     fireEvent.click(screen.getByRole("button", { name: "Delete Entry…" }));
     expect(applyStructure).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Cancel deletion" }));
     fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
     fireEvent.change(screen.getByLabelText("entry-name"), { target: { value: "Captain" } });
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     fireEvent.click(screen.getByRole("button", { name: "Delete Entry…" }));
     fireEvent.click(screen.getByRole("button", { name: "Move Entry to Trash" }));
     await waitFor(() =>
@@ -417,7 +423,7 @@ describe("Project screen Saved contract", () => {
     vi.mocked(applyStructure).mockRejectedValueOnce(new Error("Could not save Trash state"));
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Entry settings" }));
+    fireEvent.click(await waitFor(() => menuItem("Edit", "Entry", "Entry settings…")));
     fireEvent.click(screen.getByRole("button", { name: "Delete Entry…" }));
     fireEvent.click(screen.getByRole("button", { name: "Move Entry to Trash" }));
     await screen.findByText("Could not save Trash state");
@@ -559,14 +565,14 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     fireEvent.click(screen.getByRole("button", { name: "Chapters" }));
     fireEvent.click(await screen.findByRole("button", { name: "The First Step" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Chapter options" }));
+    fireEvent.click(await waitFor(() => menuItem("Edit", "Chapter", "Chapter options…")));
     fireEvent.change(screen.getByLabelText("New Story Role"), { target: { value: "Unapplied" } });
     fireEvent.click(screen.getByRole("button", { name: "Find Chapters using POV" }));
     expect(await screen.findByText(/unsaved changes.*before navigating/)).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Chapters using POV" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Chapter options" }));
+    fireEvent.click(menuItem("Edit", "Chapter", "Chapter options…"));
     expect(screen.getByLabelText("New Story Role")).toHaveValue("Unapplied");
   });
   it("searches an Entry's connections and linked Chapters through guarded navigation", async () => {
@@ -574,7 +580,7 @@ describe("Project screen Saved contract", () => {
     getEntryMock.mockResolvedValue(e);
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Search this Entry" }));
+    fireEvent.click(await waitFor(() => menuItem("Edit", "Entry", "Search this Entry")));
     expect(await screen.findByRole("heading", { name: "Search within Thron" })).toBeVisible();
     await waitFor(() =>
       expect(searchProject).toHaveBeenCalledWith(project.projectId, {
@@ -586,10 +592,10 @@ describe("Project screen Saved contract", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "← Back" }));
     await screen.findByLabelText("entry-name");
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     fireEvent.change(screen.getByLabelText("New alias"), { target: { value: "Unapplied" } });
     fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
-    fireEvent.click(screen.getByRole("button", { name: "Search this Entry" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Search this Entry"));
     expect(await screen.findByText(/unsaved changes.*before navigating/)).toBeVisible();
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
@@ -598,7 +604,7 @@ describe("Project screen Saved contract", () => {
     getEntryMock.mockResolvedValue(e);
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Entry settings" }));
+    fireEvent.click(await waitFor(() => menuItem("Edit", "Entry", "Entry settings…")));
     fireEvent.change(screen.getByLabelText("New alias"), { target: { value: "The Captain" } });
     expect(screen.getByLabelText("entry-category")).toBeDisabled();
     expect(screen.getByLabelText("entry-type")).toBeDisabled();
@@ -607,7 +613,7 @@ describe("Project screen Saved contract", () => {
     expect(await screen.findByText(/unsaved changes.*before navigating/)).toBeVisible();
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     expect(screen.getByLabelText("New alias")).toHaveValue("The Captain");
     expect(applyAlias).not.toHaveBeenCalled();
   });
@@ -1055,7 +1061,7 @@ describe("Project screen Saved contract", () => {
     expect(screen.getByLabelText("entry-name")).toHaveValue("Thron");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByLabelText("entry-name")).toHaveValue("Thron");
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Back to Entries" })));
+    await act(async () => fireEvent.click(menuItem("Edit", "Entry", "Back to Entries")));
     await act(async () =>
       fireEvent.click(screen.getByRole("button", { name: "Discard and continue" })),
     );
@@ -1263,6 +1269,27 @@ describe("Project screen Saved contract", () => {
     expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
   });
 
+  it("reopens the same Entry creation draft through Edit without resetting its name, Category, or Type", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Places" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Add Entry…"));
+    fireEvent.change(screen.getByLabelText("new-entry-name"), { target: { value: "A new idea" } });
+    fireEvent.change(screen.getByLabelText("new-entry-category"), {
+      target: { value: "characters" },
+    });
+    await screen.findByRole("option", { name: "Mage" });
+    fireEvent.change(screen.getByLabelText("new-entry-type"), { target: { value: "mage" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Add Entry" }));
+    expect(menuItem("Edit", "Entry", "Add Entry…")).toBeEnabled();
+    fireEvent.click(menuItem("Edit", "Entry", "Add Entry…"));
+    expect(screen.getByRole("dialog", { name: "Add Entry" })).toBeVisible();
+    expect(screen.getByLabelText("new-entry-name")).toHaveValue("A new idea");
+    expect(screen.getByLabelText("new-entry-category")).toHaveValue("characters");
+    expect(screen.getByLabelText("new-entry-type")).toHaveValue("mage");
+    expect(createEntryMock).not.toHaveBeenCalled();
+  });
+
   it("groups Entries under Category headings without repeating Category names on rows", async () => {
     const entry = mockEditableEntry();
     listEntriesMock.mockResolvedValue([
@@ -1309,7 +1336,7 @@ describe("Project screen Saved contract", () => {
     });
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     fireEvent.click(screen.getByRole("button", { name: "Create a Type in this Category" }));
     fireEvent.change(screen.getByLabelText("new-editor-type-name"), {
       target: { value: "Warrior" },
@@ -1344,12 +1371,7 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     await waitFor(() =>
-      expect(
-        within(screen.getByText("Project menu").closest("details")!).getByRole("button", {
-          name: "Categories",
-          hidden: true,
-        }),
-      ).toBeEnabled(),
+      expect(menuItem("Edit", "Category", "Categories and defaults…")).toBeEnabled(),
     );
     projectAction("Categories");
     fireEvent.click(await screen.findByRole("button", { name: "Add default field" }));
@@ -1444,9 +1466,9 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Manage relationships" })).toBeEnabled(),
+      expect(menuItem("Edit", "Relationship", "Manage relationships…")).toBeEnabled(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Manage relationships" }));
+    fireEvent.click(menuItem("Edit", "Relationship", "Manage relationships…"));
     for (const [label, value] of [
       ["Definition name", "Ownership"],
       ["Forward label", "owns"],
@@ -1480,9 +1502,9 @@ describe("Project screen Saved contract", () => {
       await openTheProjectScreen();
       fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Manage relationships" })).toBeEnabled(),
+        expect(menuItem("Edit", "Relationship", "Manage relationships…")).toBeEnabled(),
       );
-      fireEvent.click(screen.getByRole("button", { name: "Manage relationships" }));
+      fireEvent.click(menuItem("Edit", "Relationship", "Manage relationships…"));
       for (const [label, value] of [
         ["Definition name", "Ownership"],
         ["Forward label", "owns"],
@@ -1571,7 +1593,7 @@ describe("Project screen Saved contract", () => {
       target: { value: "Unsaved local field" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Close Add field" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back to Entries" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Back to Entries"));
     expect(screen.getByLabelText("new-field-name")).toHaveValue("Unsaved local field");
     fireEvent.click(screen.getByRole("button", { name: "Discard and continue" }));
     await waitFor(() => expect(screen.queryByLabelText("new-field-name")).not.toBeInTheDocument());
@@ -1761,7 +1783,7 @@ describe("Project screen Saved contract", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
     await waitFor(() => expect(changeEntryStructureMock).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "Back to Entries" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Back to Entries"));
     expect(screen.getByText("Entry ID: entry")).toBeInTheDocument();
     structureSave.resolve({
       ...entry,
@@ -1951,15 +1973,35 @@ describe("Project screen Saved contract", () => {
     expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Pending");
     expect(screen.getByTestId("save-state")).toHaveTextContent("Pending");
 
-    fireEvent.click(screen.getByRole("button", { name: "Back to Entries" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Back to Entries"));
     expect(screen.getByRole("button", { name: "Discard and continue" })).toBeInTheDocument();
     expect(changeEntryStructureMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Discard and continue" }));
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     await screen.findByRole("option", { name: "Human" });
     expect(visibleInput("entry-category")).toHaveValue("characters");
     expect(visibleInput("entry-type")).toHaveValue("human");
+  });
+
+  it("updates contextual menu availability and restores Category commands after discarding an Entry draft", async () => {
+    mockEditableEntry();
+    await openTheProjectScreen();
+    expect(menuItem("Edit", "Entry", "Entry settings…")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Characters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByLabelText("entry-name");
+    expect(menuItem("Edit", "Entry", "Entry settings…")).toBeEnabled();
+    fireEvent.change(visibleInput("entry-category"), { target: { value: "places" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Entry settings" }));
+    expect(menuItem("Edit", "Category", "Category settings…")).toBeDisabled();
+    fireEvent.click(menuItem("Edit", "Entry", "Back to Entries"));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard and continue" }));
+    await waitFor(() => expect(screen.queryByLabelText("entry-name")).not.toBeInTheDocument());
+    expect(menuItem("Edit", "Category", "Category settings…")).toBeEnabled();
+    expect(menuItem("Edit", "Type", "Types and defaults…")).toBeEnabled();
+    expect(menuItem("Edit", "Entry", "Entry settings…")).toBeDisabled();
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
   });
 
   it("requires explicit discard on native close with an unapplied Type", async () => {
@@ -1968,7 +2010,7 @@ describe("Project screen Saved contract", () => {
     await openTheProjectScreen();
     await waitFor(() => expect(onCloseRequestedMock).toHaveBeenCalledTimes(1));
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     await screen.findByRole("option", { name: "Mage" });
     fireEvent.change(visibleInput("entry-type"), { target: { value: "mage" } });
 
@@ -1984,7 +2026,7 @@ describe("Project screen Saved contract", () => {
     mockEditableEntry();
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     await screen.findByRole("option", { name: "Mage" });
     fireEvent.change(visibleInput("entry-type"), { target: { value: "mage" } });
     expect(screen.getByTestId("entry-save-state")).toHaveTextContent("Pending");
@@ -1999,7 +2041,7 @@ describe("Project screen Saved contract", () => {
     changeEntryStructureMock.mockReturnValue(pending.promise);
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     await screen.findByRole("option", { name: "Mage" });
     fireEvent.change(visibleInput("entry-type"), { target: { value: "mage" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
@@ -2021,7 +2063,7 @@ describe("Project screen Saved contract", () => {
     closeProjectMock.mockResolvedValue(undefined);
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
-    fireEvent.click(screen.getByRole("button", { name: "Entry settings" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
     await screen.findByRole("option", { name: "Mage" });
     fireEvent.change(visibleInput("entry-type"), { target: { value: "mage" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply Category / Type" }));
@@ -2652,7 +2694,7 @@ describe("Home screen preferences and native pickers", () => {
       defaultProjectsDirExists: true,
     });
     await renderApp();
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(menuItem("File", "Preferences…"));
     fireEvent.click(screen.getAllByRole("button", { name: "Choose…" })[0]);
     await waitFor(() => expect(visibleInput("new-project-location")).toHaveValue("/new"));
     await act(async () =>
@@ -2677,7 +2719,7 @@ describe("Home screen preferences and native pickers", () => {
     pickDirectoryMock.mockResolvedValueOnce("/backups");
     setDefaultBackupsDirMock.mockResolvedValueOnce(updated);
     await renderApp();
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(menuItem("File", "Preferences…"));
     fireEvent.click(screen.getAllByRole("button", { name: "Choose…" })[1]);
     await screen.findByText("/backups");
     getPreferencesMock.mockResolvedValue(updated);
@@ -2779,7 +2821,7 @@ describe("Home screen preferences and native pickers", () => {
     await renderApp();
     await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(menuItem("File", "Preferences…"));
     const chooseButtons = await screen.findAllByRole("button", { name: "Choose…" });
     fireEvent.click(chooseButtons[0]);
 
@@ -2863,7 +2905,7 @@ describe("Home screen preferences and native pickers", () => {
     await renderApp();
     await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(menuItem("File", "Preferences…"));
     const chooseButtons = await screen.findAllByRole("button", { name: "Choose…" });
     fireEvent.click(chooseButtons[0]);
 
@@ -2965,7 +3007,7 @@ describe("Focused workspace", () => {
     fireEvent.change(screen.getByLabelText("new-project-name"), {
       target: { value: "A new world" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(menuItem("File", "Preferences…"));
     expect(screen.getByRole("dialog", { name: "Application settings" })).toBeVisible();
     fireEvent(screen.getByRole("dialog"), new Event("cancel", { cancelable: true }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -2977,7 +3019,7 @@ describe("Focused workspace", () => {
     pickDirectoryMock.mockReturnValueOnce(picked.promise);
     setDefaultProjectsDirMock.mockRejectedValueOnce(new Error("Folder unavailable"));
     await renderApp();
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(menuItem("File", "Preferences…"));
     fireEvent.click(screen.getAllByRole("button", { name: "Choose…" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Close Application settings" }));
     await act(async () => picked.resolve("/test/projects"));
@@ -3002,7 +3044,7 @@ describe("Focused workspace", () => {
   it("preserves the restore form when dismissed and reopened", async () => {
     await renderApp();
     await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("button", { name: "Restore a backup…" }));
+    fireEvent.click(menuItem("File", "Restore Backup as Copy…"));
     fireEvent.change(screen.getByLabelText("restore-backup-path"), {
       target: { value: "/test/backup" },
     });
@@ -3011,7 +3053,7 @@ describe("Focused workspace", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Close Restore Backup as Copy" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Restore a backup…" }));
+    fireEvent.click(menuItem("File", "Restore Backup as Copy…"));
     expect(screen.getByLabelText("restore-backup-path")).toHaveValue("/test/backup");
     expect(screen.getByLabelText("restore-new-name")).toHaveValue("Recovered world");
   });
@@ -3026,7 +3068,7 @@ describe("Focused workspace", () => {
     expect(await screen.findByLabelText("entry-name")).toBeVisible();
     expect(screen.getByLabelText("entry-category")).not.toBeVisible();
     expect(screen.getByLabelText("new-field-name")).not.toBeVisible();
-    expect(screen.getByRole("button", { name: "Manage fields" })).toBeVisible();
+    expect(menuItem("Edit", "Field", "Manage fields…")).toBeVisible();
   });
 
   it("keeps deletion simple and puts the automatic recovery receipt under Backups", async () => {
@@ -3053,7 +3095,7 @@ describe("Focused workspace", () => {
     await openTheProjectScreen();
     fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
     await screen.findByLabelText("Value: Age");
-    fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+    fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
     fireEvent.click(screen.getByRole("button", { name: "Delete from Entry: Age" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await screen.findByRole("button", { name: "Add to Entry: Age" });
@@ -3119,7 +3161,7 @@ describe("desktop session recovery", () => {
     expect(await screen.findByRole("heading", { name: "Committed rename" })).toBeVisible();
     expect(openProjectMock.mock.calls.length).toBe(opens);
     closeFromSettings();
-    fireEvent.click(screen.getByRole("button", { name: "Close Project" }));
+    fireEvent.click(menuItem("File", "Close Project"));
     await waitFor(() => expect(screen.queryByTestId("project-id")).not.toBeInTheDocument());
     expect(screen.queryByRole("region", { name: "Open Projects" })).not.toBeInTheDocument();
   });

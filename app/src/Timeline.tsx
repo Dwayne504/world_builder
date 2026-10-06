@@ -3,6 +3,7 @@ import { listEntries, readStory, readTimeline } from "./api";
 import { Dialog } from "./Dialog";
 import type { ChapterController } from "./storyTypes";
 import { useTimeline } from "./useTimeline";
+import { useDesktopCommands } from "./desktopMenuContext";
 import {
   dateError,
   dateLabel,
@@ -321,6 +322,36 @@ export function Timeline({
           .toLocaleLowerCase()
           .includes(view.query.toLocaleLowerCase()),
     ) ?? [];
+  function openCalendar() {
+    setCalendarValue(snapshot?.calendar ?? newCalendar());
+    setCalendarOpen(true);
+  }
+  useDesktopCommands(
+    "timeline",
+    {
+      edit: [
+        {
+          id: "timeline",
+          label: "Timeline",
+          children: [
+            {
+              id: "occurrence-add",
+              label: "Add occurrence",
+              disabled: !snapshot || busy || !!draft,
+              action: () => void create(),
+            },
+            {
+              id: "calendar",
+              label: snapshot?.calendar ? "Calendar settings…" : "Set up calendar…",
+              disabled: !snapshot || busy || !!draft,
+              action: openCalendar,
+            },
+          ],
+        },
+      ],
+    },
+    20,
+  );
   return (
     <section className="panel timeline" aria-label="Timeline">
       <div className="section-heading">
@@ -331,16 +362,6 @@ export function Timeline({
         <div className="row">
           <button disabled={!snapshot || busy || !!draft} onClick={() => void create()}>
             Add occurrence
-          </button>
-          <button
-            className="quiet-button"
-            disabled={!snapshot || busy || !!draft}
-            onClick={() => {
-              setCalendarValue(snapshot?.calendar ?? newCalendar());
-              setCalendarOpen(true);
-            }}
-          >
-            {snapshot?.calendar ? "Calendar settings" : "Set up calendar"}
           </button>
         </div>
       </div>

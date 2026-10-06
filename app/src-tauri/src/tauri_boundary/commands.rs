@@ -16,6 +16,16 @@ use crate::preferences::{self, PreferencesError, PreferencesStore};
 
 use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
+/// Read-only information about this backend, independent of any open Project.
+#[tauri::command]
+pub fn get_build_info() -> super::dto::BuildInfoDto {
+    super::dto::BuildInfoDto {
+        version: env!("CARGO_PKG_VERSION").into(),
+        supported_schema_version: crate::persistence::migrations::CURRENT_SCHEMA_VERSION,
+        supported_format_version: crate::package::FORMAT_VERSION,
+    }
+}
+
 #[tauri::command]
 pub fn read_timeline(
     state: State<'_, AppState>,

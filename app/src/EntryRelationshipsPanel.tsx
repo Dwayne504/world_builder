@@ -2,6 +2,7 @@ import { RelationshipGroup } from "./RelationshipGroup";
 import { groupRelationships } from "./relationshipPresentation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "./Dialog";
+import { useDesktopCommands } from "./desktopMenuContext";
 import type { FieldsController } from "./EntryFieldsPanel";
 import type {
   Category,
@@ -274,6 +275,32 @@ export function EntryRelationshipsPanel({
       ),
     );
   }
+  useDesktopCommands(
+    "entry-relationships",
+    {
+      edit: [
+        {
+          id: "relationship",
+          label: "Relationship",
+          children: [
+            {
+              id: "relationship-add",
+              label: "Add relationship…",
+              disabled: configDisabled || formDirty,
+              action: () => setLinkOpen(true),
+            },
+            {
+              id: "relationship-manage",
+              label: "Manage relationships…",
+              disabled: configDisabled || linkDirty,
+              action: () => setManageOpen(true),
+            },
+          ],
+        },
+      ],
+    },
+    30,
+  );
   return (
     <section className="relationships-panel">
       <div className="section-heading">
@@ -283,13 +310,6 @@ export function EntryRelationshipsPanel({
         <div className="row">
           <button disabled={configDisabled || formDirty} onClick={() => setLinkOpen(true)}>
             Add relationship
-          </button>
-          <button
-            className="quiet-button"
-            disabled={configDisabled || linkDirty}
-            onClick={() => setManageOpen(true)}
-          >
-            Manage relationships
           </button>
         </div>
       </div>

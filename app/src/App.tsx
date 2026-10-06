@@ -23,7 +23,10 @@ import {
   type WorkspaceLocation,
 } from "./workspaceHistory";
 import { PointerLight } from "./PointerLight";
-import { AppearanceButton, AppearanceProvider } from "./AppearanceProvider";
+import { AppearanceProvider } from "./AppearanceProvider";
+import { DesktopMenu } from "./DesktopMenu";
+import { DesktopMenuProvider, useDesktopCommands } from "./desktopMenuContext";
+import { AppHelp } from "./AppHelp";
 import { useAppearance } from "./appearanceContext";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -192,6 +195,7 @@ function HomeScreen({
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const newProjectNameRef = useRef<HTMLInputElement>(null);
   // Set when (and only when) the backend reports `lock_recovery_required`
   // for the current open path. The path input itself is never cleared, so
   // the user keeps what they typed after a failed open.
@@ -456,6 +460,35 @@ function HomeScreen({
     }
   }
 
+  useDesktopCommands("home", {
+    file: [
+      {
+        id: "new-project",
+        label: "New Project…",
+        disabled: busy,
+        action: () => newProjectNameRef.current?.focus(),
+      },
+      {
+        id: "open-project",
+        label: "Open Project…",
+        disabled: busy,
+        action: () => void handleChooseOpenPath(),
+      },
+      {
+        id: "restore",
+        label: "Restore Backup as Copy…",
+        disabled: busy,
+        action: () => setHomeDialog("restore"),
+      },
+      {
+        id: "preferences",
+        label: "Preferences…",
+        separatorBefore: true,
+        action: () => setHomeDialog("settings"),
+      },
+    ],
+  });
+
   return (
     <main className="container home-screen">
       {notice && <p role="alert">{notice}</p>}
@@ -464,12 +497,6 @@ function HomeScreen({
           <p className="eyebrow">YOUR WORLDS, AT YOUR PACE</p>
           <h1>Worldcrafter</h1>
         </div>
-        <nav className="toolbar" aria-label="App settings">
-          <button className="quiet-button" onClick={() => setHomeDialog("settings")}>
-            Settings
-          </button>
-          <AppearanceButton />
-        </nav>
       </header>
       <p className="intro">
         A place for your characters, places, and ideas. Start small and build as you go.
@@ -595,6 +622,7 @@ function HomeScreen({
             Working name
             <input
               aria-label="new-project-name"
+              ref={newProjectNameRef}
               value={newName}
               onChange={(e) => setNewName(e.currentTarget.value)}
               placeholder="Tortuga"
@@ -687,9 +715,6 @@ function HomeScreen({
       </div>
       <footer className="home-footer">
         <span className="muted">Your work stays on your computer.</span>
-        <button className="quiet-button" onClick={() => setHomeDialog("restore")}>
-          Restore a backup…
-        </button>
       </footer>
       <Dialog
         open={homeDialog === "restore"}
@@ -771,6 +796,7 @@ interface EntrySaveController {
 type MutationCoordinator = ReturnType<typeof useMutationCoordinator>;
 
 function EntryEditor({
+  locked,
   onSearch,
   projectId,
   restoreFocusKey,
@@ -786,6 +812,7 @@ function EntryEditor({
   onEntriesChanged,
   onPutAside,
 }: {
+  locked: boolean;
   onSearch: () => void;
   projectId: string;
   restoreFocusKey: string | null;
@@ -1041,6 +1068,29 @@ function EntryEditor({
     if (result.kind === "failed") setStructureError(result.errorMessage);
   }
 
+  useDesktopCommands(
+    "entry-editor",
+    {
+      edit: [
+        {
+          id: "entry",
+          label: "Entry",
+          children: [
+            {
+              id: "entry-settings",
+              label: "Entry settings…",
+              disabled: locked,
+              action: () => setEntrySettingsOpen(true),
+            },
+            { id: "entry-search", label: "Search this Entry", disabled: locked, action: onSearch },
+            { id: "entry-close", label: "Back to Entries", disabled: locked, action: onClose },
+          ],
+        },
+      ],
+    },
+    20,
+  );
+
   return (
     <section className="entry-editor">
       <div className="section-heading">
@@ -1072,17 +1122,6 @@ function EntryEditor({
           {editor.entry.typeId && titleType?.id === editor.entry.typeId && (
             <p className="entry-type">{titleType.name}</p>
           )}
-        </div>
-        <div className="row">
-          <button className="quiet-button" onClick={onSearch}>
-            Search this Entry
-          </button>
-          <button className="quiet-button" onClick={() => setEntrySettingsOpen(true)}>
-            Entry settings
-          </button>
-          <button className="quiet-button" onClick={onClose}>
-            Back to Entries
-          </button>
         </div>
       </div>
       <span data-testid="entry-save-state" className="sr-only">
@@ -1315,6 +1354,7 @@ function EntryEditor({
         entryId={editor.entry.id}
         categories={categories}
         disabled={
+          locked ||
           mutations.state === "saving" ||
           editor.saveState !== "saved" ||
           fieldsState !== "saved" ||
@@ -1335,6 +1375,7 @@ function EntryEditor({
           projectId={projectId}
           entry={editor.entry}
           disabled={
+            locked ||
             mutations.state === "saving" ||
             editor.saveState === "saving" ||
             relationshipsState !== "saved" ||
@@ -1357,6 +1398,7 @@ function EntryEditor({
           entryId={editor.entry.id}
           categories={categories}
           disabled={
+            locked ||
             mutations.state === "saving" ||
             editor.saveState !== "saved" ||
             fieldsState !== "saved" ||
@@ -1647,6 +1689,8 @@ function EntryWorkflow({
       setHistory(next);
       setCollapsedGroups(next.locations[next.index].collapsedGroups);
       controllerRef.current = null;
+      setControllerState("saved");
+      setControllerCanSubmit(true);
       onController(null);
       setSelected(entry);
       setChapter(nextChapter);
@@ -1777,6 +1821,131 @@ function EntryWorkflow({
     busy: navigating,
     browsingDisabled: creationDirty || locked,
   };
+
+  const navigationDisabled = navigating || creationDirty || locked;
+  const creationInCurrentView =
+    location.page === "entries" && !selected && location.entryState === "active";
+  const entryCreationDisabled =
+    navigating ||
+    locked ||
+    mutations.state === "saving" ||
+    (!creationInCurrentView && (creationDirty || !categories.length));
+  const contextCategoryId = selected?.categoryId || location.categoryId;
+  const categoryCommandsDisabled =
+    !contextCategoryId ||
+    navigationDisabled ||
+    ((!!selected || !!chapter || location.page === "timeline") && controllerState !== "saved") ||
+    mutations.state === "saving";
+  function openEntryCreation() {
+    if (entryCreationDisabled) return;
+    const id =
+      contextCategoryId || categories.find((item) => item.isUncategorized)?.id || categories[0]?.id;
+    if (creationInCurrentView) {
+      if (!creationDirty && location.categoryId) {
+        setCategoryId(location.categoryId);
+        setTypeId(location.typeId === "__untyped" ? "" : location.typeId);
+      }
+      setCreateOpen(true);
+    } else if (id) navigationProps.onAddEntry(id);
+  }
+  useDesktopCommands(
+    "workspace",
+    {
+      edit: [
+        {
+          id: "entry",
+          label: "Entry",
+          children: [
+            {
+              id: "entry-new",
+              label: "Add Entry…",
+              disabled: entryCreationDisabled,
+              action: openEntryCreation,
+            },
+          ],
+        },
+        {
+          id: "category",
+          label: "Category",
+          children: [
+            {
+              id: "category-settings",
+              label: "Category settings…",
+              disabled: categoryCommandsDisabled,
+              action: () => onCategorySettings(contextCategoryId),
+            },
+          ],
+        },
+        {
+          id: "type",
+          label: "Type",
+          children: [
+            {
+              id: "type-settings",
+              label: "Types and defaults…",
+              disabled: categoryCommandsDisabled,
+              action: () => onCategorySettings(contextCategoryId),
+            },
+          ],
+        },
+      ],
+      view: [
+        {
+          id: "search",
+          label: "Search",
+          disabled: navigationDisabled,
+          action: navigationProps.onSearch,
+        },
+        {
+          id: "all-entries",
+          label: "All Entries",
+          disabled: navigationDisabled,
+          action: () => navigationProps.onBrowse(""),
+        },
+        {
+          id: "relationships",
+          label: "Relationships",
+          disabled: navigationDisabled,
+          action: navigationProps.onRelationships,
+        },
+        {
+          id: "chapters",
+          label: "Chapters",
+          disabled: navigationDisabled,
+          action: navigationProps.onChapters,
+        },
+        {
+          id: "timeline",
+          label: "Timeline",
+          disabled: navigationDisabled,
+          action: navigationProps.onTimeline,
+        },
+        {
+          id: "back",
+          label: "Back",
+          shortcut: "Alt+←",
+          separatorBefore: true,
+          disabled: navigationDisabled || !navigationProps.canBack,
+          action: navigationProps.onBack,
+        },
+        {
+          id: "forward",
+          label: "Forward",
+          shortcut: "Alt+→",
+          disabled: navigationDisabled || !navigationProps.canForward,
+          action: navigationProps.onForward,
+        },
+        {
+          id: "sidebar",
+          label: sidebarCollapsed ? "Show sidebar" : "Hide sidebar",
+          checked: !sidebarCollapsed,
+          separatorBefore: true,
+          action: navigationProps.onToggle,
+        },
+      ],
+    },
+    10,
+  );
 
   function updateRelationshipView(relationshipView: RelationshipView) {
     const current = historyRef.current;
@@ -2050,6 +2219,7 @@ function EntryWorkflow({
           </>
         ) : (
           <ChapterLibrary
+            locked={locked || navigating}
             projectId={projectId}
             onController={receiveController}
             onRevision={onGlobalRevision}
@@ -2136,6 +2306,7 @@ function EntryWorkflow({
           </div>
         )}
         <EntryEditor
+          locked={locked || navigating}
           onPutAside={(revision) => {
             onGlobalRevision(revision);
             void commitNavigation({ location: destination(null) });
@@ -2223,15 +2394,6 @@ function EntryWorkflow({
             </h2>
           </div>
           <div className="row">
-            {location.categoryId && (
-              <button
-                className="quiet-button"
-                disabled={creationDirty || mutations.state === "saving" || navigating}
-                onClick={() => onCategorySettings(location.categoryId)}
-              >
-                Category settings
-              </button>
-            )}
             <button
               disabled={mutations.state === "saving" || location.entryState !== "active"}
               onClick={() => {
@@ -2494,12 +2656,7 @@ function ProjectScreen({
   const [projectDialog, setProjectDialog] = useState<"settings" | "backup" | "categories" | null>(
     null,
   );
-  const projectMenuRef = useRef<HTMLDetailsElement>(null);
   function openProjectDialog(dialog: "settings" | "backup" | "categories") {
-    if (projectMenuRef.current) {
-      projectMenuRef.current.open = false;
-      projectMenuRef.current.querySelector("summary")?.focus();
-    }
     setProjectDialog(dialog);
   }
   const rename = useProjectRename(project);
@@ -2802,6 +2959,89 @@ function ProjectScreen({
     };
   }, []);
 
+  const structureManagementDisabled =
+    busy || entrySaveState !== "saved" || mutationState === "saving";
+  useDesktopCommands("project", {
+    file: [
+      {
+        id: "backups",
+        label: "Backups…",
+        disabled: busy,
+        action: () => openProjectDialog("backup"),
+      },
+      {
+        id: "project-settings",
+        label: "Project settings…",
+        disabled: busy,
+        action: () => openProjectDialog("settings"),
+      },
+      {
+        id: "project-close",
+        label: "Close Project",
+        separatorBefore: true,
+        disabled: busy,
+        action: handleClose,
+      },
+      ...(isTauriWindow()
+        ? [
+            {
+              id: "exit",
+              label: "Exit Worldcrafter",
+              disabled: busy,
+              action: () => requestClose("native-window"),
+            },
+          ]
+        : []),
+    ],
+    edit: [
+      {
+        id: "entry",
+        label: "Entry",
+        children: [{ id: "entry-settings", label: "Entry settings…", disabled: true }],
+      },
+      {
+        id: "category",
+        label: "Category",
+        children: [
+          {
+            id: "category-manage",
+            label: "Categories and defaults…",
+            disabled: structureManagementDisabled,
+            action: () => {
+              if (managerState === "saved") setManagedCategoryId(undefined);
+              openProjectDialog("categories");
+            },
+          },
+        ],
+      },
+      {
+        id: "type",
+        label: "Type",
+        children: [{ id: "type-settings", label: "Types and defaults…", disabled: true }],
+      },
+      {
+        id: "field",
+        label: "Field",
+        children: [{ id: "field-manage", label: "Manage fields…", disabled: true }],
+      },
+      {
+        id: "relationship",
+        label: "Relationship",
+        children: [{ id: "relationship-manage", label: "Manage relationships…", disabled: true }],
+      },
+      {
+        id: "chapter",
+        label: "Chapter",
+        children: [{ id: "chapter-options", label: "Chapter options…", disabled: true }],
+      },
+      {
+        id: "timeline",
+        label: "Timeline",
+        children: [{ id: "calendar", label: "Calendar settings…", disabled: true }],
+      },
+    ],
+  });
+
   return (
     <main className="container project-screen">
       <header className="app-header">
@@ -2809,7 +3049,7 @@ function ProjectScreen({
           <p className="eyebrow">WORLDCRAFTER</p>
           <h1>{rename.committedName}</h1>
         </div>
-        <nav className="toolbar" aria-label="Project actions">
+        <div className="toolbar">
           <span
             data-testid="save-state"
             role="status"
@@ -2817,39 +3057,7 @@ function ProjectScreen({
           >
             {saveStateLabel(combinedSaveState)}
           </span>
-          <details className="project-menu" ref={projectMenuRef}>
-            <summary>Project menu</summary>
-            <div className="project-menu-panel">
-              <button
-                className="quiet-button"
-                disabled={entrySaveState !== "saved" || mutationState === "saving"}
-                onClick={() => {
-                  setManagedCategoryId(undefined);
-                  openProjectDialog("categories");
-                }}
-              >
-                Categories
-              </button>
-              <button className="quiet-button" onClick={() => openProjectDialog("backup")}>
-                Backups
-              </button>
-              <button className="quiet-button" onClick={() => openProjectDialog("settings")}>
-                Project settings
-              </button>
-              <AppearanceButton />
-              <button
-                className="quiet-button project-menu-close"
-                disabled={busy}
-                onClick={() => {
-                  if (projectMenuRef.current) projectMenuRef.current.open = false;
-                  handleClose();
-                }}
-              >
-                Close Project
-              </button>
-            </div>
-          </details>
-        </nav>
+        </div>
       </header>
       {rename.recentProjectsWarning && (
         <p role="alert">
@@ -2936,7 +3144,8 @@ function ProjectScreen({
       <EntryWorkflow
         key={structureEpoch}
         onCategorySettings={(id) => {
-          setManagedCategoryId(id);
+          if (structureManagementDisabled) return;
+          if (managerState === "saved") setManagedCategoryId(id);
           setProjectDialog("categories");
         }}
         locked={busy}
@@ -3124,8 +3333,12 @@ function Workspace() {
 function App() {
   return (
     <AppearanceProvider>
-      <PointerLight />
-      <Workspace />
+      <DesktopMenuProvider>
+        <PointerLight />
+        <DesktopMenu />
+        <AppHelp />
+        <Workspace />
+      </DesktopMenuProvider>
     </AppearanceProvider>
   );
 }
