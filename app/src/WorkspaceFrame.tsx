@@ -8,7 +8,6 @@ export function WorkspaceFrame({
   page,
   categoryId,
   collapsed,
-  onToggle,
   onBrowse,
   onRelationships,
   onChapters,
@@ -28,7 +27,6 @@ export function WorkspaceFrame({
   page: "entries" | "relationships" | "chapters" | "search" | "timeline";
   categoryId: string;
   collapsed: boolean;
-  onToggle: () => void;
   onBrowse: (id: string) => void;
   onRelationships: () => void;
   onChapters: () => void;
@@ -84,14 +82,6 @@ export function WorkspaceFrame({
           title="Forward (Alt+Right)"
         >
           Forward →
-        </button>
-        <button
-          className="quiet-button"
-          aria-expanded={!collapsed}
-          aria-controls="project-navigation"
-          onClick={onToggle}
-        >
-          {collapsed ? "Show sidebar" : "Hide sidebar"}
         </button>
         {busy && (
           <span role="status" className="muted">

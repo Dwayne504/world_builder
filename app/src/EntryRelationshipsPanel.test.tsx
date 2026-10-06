@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { menuItem, renderWithMenu as render } from "./desktopMenuTestUtils";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { EntryRelationshipsPanel } from "./EntryRelationshipsPanel";
 import { applyRelationships, readRelationships } from "./api";
@@ -306,7 +307,7 @@ it("retains a newer note draft when an older note is acknowledged", async () => 
 });
 it("creates symmetric definitions with matching labels and expectations", async () => {
   await mount();
-  fireEvent.click(screen.getByRole("button", { name: "Manage relationships" }));
+  fireEvent.click(menuItem("Edit", "Relationship", "Manage relationships…"));
   change("Definition name", "Alliance");
   change("Direction", "symmetric");
   change("Relationship label", "allied with");

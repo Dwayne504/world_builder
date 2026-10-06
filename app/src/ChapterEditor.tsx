@@ -15,6 +15,7 @@ import {
 import type { Category, Entry, EntryFields, EntryRelationships, SpatialSnapshot } from "./types";
 import { spatialPath } from "./spatialPresentation";
 import { useChapter } from "./useChapter";
+import { useDesktopCommands } from "./desktopMenuContext";
 
 function EntryPreview({
   projectId,
@@ -217,6 +218,34 @@ export function ChapterEditor({
     Object.keys(recovery.draft.documents).every((area) =>
       chapter.snapshot.documents.some((d) => d.area === area && !d.readOnlyReason),
     );
+  useDesktopCommands(
+    "chapter-editor",
+    {
+      edit: [
+        {
+          id: "chapter",
+          label: "Chapter",
+          children: [
+            {
+              id: "chapter-options",
+              label: "Chapter options…",
+              disabled: locked,
+              action: () => setOptionsOpen(true),
+            },
+          ],
+        },
+      ],
+      view: [
+        {
+          id: "chapter-context",
+          label: contextOpen ? "Hide Chapter context" : "Show Chapter context",
+          checked: contextOpen,
+          action: () => setContextOpen((value) => !value),
+        },
+      ],
+    },
+    20,
+  );
   return (
     <section
       className={`panel chapter-editor ${contextOpen ? "" : "context-collapsed"}`}
@@ -240,17 +269,6 @@ export function ChapterEditor({
           />
         </div>
         <div className="row">
-          <button
-            className="quiet-button"
-            aria-expanded={contextOpen}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setContextOpen((v) => !v)}
-          >
-            {contextOpen ? "Hide context" : "Show context"}
-          </button>
-          <button className="quiet-button" onClick={() => setOptionsOpen(true)}>
-            Chapter options
-          </button>
           <button className="quiet-button" onClick={onBack}>
             All Chapters
           </button>

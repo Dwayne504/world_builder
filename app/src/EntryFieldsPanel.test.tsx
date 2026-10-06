@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { menuItem, renderWithMenu as render } from "./desktopMenuTestUtils";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryFieldsPanel } from "./EntryFieldsPanel";
@@ -182,7 +183,7 @@ describe("Field authoring", () => {
   it("keeps a shared-definition draft when its dialog closes with Escape", async () => {
     const onController = show();
     await screen.findByLabelText("Value: Eye colour");
-    fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+    fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
     fireEvent.click(screen.getByRole("button", { name: "Edit definition: Eye colour" }));
     fireEvent.change(screen.getByLabelText("rename-field"), { target: { value: "Eyes" } });
     fireEvent(
@@ -207,7 +208,7 @@ describe("Field authoring", () => {
     vi.mocked(applyFields).mockRejectedValueOnce(new Error("Disk full"));
     show();
     await screen.findByLabelText("Value: Eye colour");
-    fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+    fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
     fireEvent.click(screen.getByRole("button", { name: "Edit definition: Eye colour" }));
     fireEvent.change(screen.getByLabelText("rename-field"), { target: { value: "Eyes" } });
     fireEvent.click(screen.getByRole("button", { name: "Rename definition" }));
@@ -270,7 +271,7 @@ describe("Field authoring", () => {
   it("promotes the same definition to the current Type without rewriting a value", async () => {
     show();
     await screen.findByLabelText("Value: Eye colour");
-    fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+    fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
     fireEvent.click(screen.getByRole("button", { name: "Edit definition: Eye colour" }));
     await act(async () =>
       fireEvent.click(
@@ -333,7 +334,7 @@ it("lists current Fields and reusable defaults in separate compact tables", asyn
   });
   show();
   await screen.findByLabelText("Value: Eye colour");
-  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
   const tables = within(screen.getByRole("dialog", { name: "Manage fields" })).getAllByRole(
     "table",
   );
@@ -363,7 +364,7 @@ it("hides locally, previews hidden values without writing, and unhides explicitl
     .mockResolvedValueOnce({ ...snapshot, globalRevision: 4 });
   show();
   await screen.findByLabelText("Value: Eye colour");
-  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
   fireEvent.click(screen.getByRole("button", { name: "Hide field: Eye colour" }));
   await screen.findByRole("button", { name: "Show field: Eye colour" });
   expect(applyFields).toHaveBeenCalledWith("project", "entry", 2, {
@@ -373,11 +374,11 @@ it("hides locally, previews hidden values without writing, and unhides explicitl
   });
   fireEvent.click(screen.getByRole("button", { name: "Close Manage fields" }));
   expect(screen.queryByLabelText("Value: Eye colour")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Show hidden fields (1)" }));
+  fireEvent.click(menuItem("Edit", "Field", "Show hidden fields"));
   expect(screen.getByLabelText("Value: Eye colour")).toHaveValue("green");
   expect(applyFields).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Hide hidden fields" }));
-  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(menuItem("Edit", "Field", "Hide hidden fields"));
+  fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
   fireEvent.click(screen.getByRole("button", { name: "Show field: Eye colour" }));
   await waitFor(() =>
     expect(applyFields).toHaveBeenLastCalledWith("project", "entry", 3, {
@@ -393,7 +394,7 @@ it("keeps values and exposes failures when hiding fails", async () => {
   vi.mocked(applyFields).mockRejectedValueOnce(new Error("Disk full"));
   show();
   await screen.findByLabelText("Value: Eye colour");
-  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
   fireEvent.click(screen.getByRole("button", { name: "Hide field: Eye colour" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Disk full");
   expect(screen.getByRole("button", { name: "Hide field: Eye colour" })).toBeEnabled();
@@ -405,7 +406,7 @@ it("reviews local deletion, preserves the value on backup failure, and waits for
   vi.mocked(deleteEntryField).mockRejectedValueOnce(new Error("Backup failed"));
   const controller = show();
   await screen.findByLabelText("Value: Eye colour");
-  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
   fireEvent.click(screen.getByRole("button", { name: "Delete from Entry: Eye colour" }));
   expect(deleteEntryField).not.toHaveBeenCalled();
   expect(screen.getByText("Current value: Green")).toBeVisible();
@@ -444,7 +445,7 @@ it("reviews local deletion, preserves the value on backup failure, and waits for
 it("offers a simple cancel without loading backup settings or deleting", async () => {
   show();
   await screen.findByLabelText("Value: Eye colour");
-  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
   fireEvent.click(screen.getByRole("button", { name: "Delete from Entry: Eye colour" }));
   const dialog = screen.getByRole("dialog", { name: "Delete Eye colour from this Entry?" });
   expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();

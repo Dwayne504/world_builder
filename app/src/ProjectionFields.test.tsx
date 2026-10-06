@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { menuItem, renderWithMenu as render } from "./desktopMenuTestUtils";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { EntryFieldsPanel, type FieldsController } from "./EntryFieldsPanel";
 import {
@@ -262,11 +263,11 @@ it("removes only the Field display and reports only visible relationships", asyn
     fields: [{ ...snapshot.fields[0], hidden: true }],
   });
   show();
-  await screen.findByRole("button", { name: "Show hidden fields (1)" });
+  await waitFor(() => menuItem("Edit", "Field", "Show hidden fields"));
   expect(presented).toHaveBeenLastCalledWith([]);
-  fireEvent.click(screen.getByRole("button", { name: "Show hidden fields (1)" }));
+  fireEvent.click(menuItem("Edit", "Field", "Show hidden fields"));
   expect(presented).toHaveBeenLastCalledWith(["connection"]);
-  fireEvent.click(screen.getByRole("button", { name: "Manage fields" }));
+  fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
   const manager = within(screen.getByRole("dialog", { name: "Manage fields" }));
   expect(
     manager.queryByRole("button", { name: "Delete from Entry: Current owner" }),

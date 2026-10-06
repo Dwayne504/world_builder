@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { menuItem, renderWithMenu as render } from "./desktopMenuTestUtils";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ChapterEditor } from "./ChapterEditor";
 import { ChapterLibrary } from "./ChapterLibrary";
@@ -43,7 +44,7 @@ it("opens manuscript first, keeps three documents separate, and hides context wi
   show();
   const prose = await screen.findByRole("textbox", { name: "Manuscript" });
   expect(prose).toHaveTextContent("Thron arrived.");
-  fireEvent.click(screen.getByRole("button", { name: "Hide context" }));
+  fireEvent.click(menuItem("View", "Hide Chapter context"));
   expect(screen.getByRole("textbox", { name: "Manuscript" })).toBe(prose);
   expect(screen.queryByRole("complementary", { name: "Chapter context" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
@@ -314,7 +315,7 @@ it("makes a new Role available without silently assigning it and returns to the 
   expect(controller.canSubmit).toBe(false);
   fireEvent.click(within(options).getByRole("button", { name: "Create Role" }));
   await within(options).findByText(/Intro is available/);
-  expect(controller.canSubmit).toBe(true);
+  await waitFor(() => expect(controller.canSubmit).toBe(true));
   expect(applyStory).toHaveBeenCalledTimes(1);
   expect(applyStory).toHaveBeenCalledWith("project", 3, {
     kind: "create_role",
@@ -353,7 +354,7 @@ it("shows current Chapter assignments in the Role catalog and opens exact Projec
     },
   ];
   show(initial);
-  fireEvent.click(screen.getByRole("button", { name: "Chapter options" }));
+  fireEvent.click(menuItem("Edit", "Chapter", "Chapter options…"));
   const options = screen.getByRole("dialog", { name: "Chapter options" });
   expect(within(options).getByText("In this Chapter: Traveller")).toBeVisible();
   fireEvent.change(within(options).getByLabelText("Find an available Role"), {

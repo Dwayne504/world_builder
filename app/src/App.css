@@ -1844,6 +1844,33 @@ dialog::after {
   z-index: 1;
 }
 
+/* The persistent menu bar carries commands; the Project heading stays compact. */
+.container {
+  min-height: calc(100vh - 38px);
+}
+.project-screen {
+  padding-top: 20px;
+}
+.project-screen .app-header {
+  padding: 12px 20px;
+  margin-bottom: 16px;
+}
+.project-screen .app-header h1 {
+  font-size: 1.65rem;
+}
+.project-screen .app-header .eyebrow {
+  margin: 0 0 2px;
+  font-size: 10px;
+}
+.app-help-reference dt {
+  margin-top: 1rem;
+  font-weight: 600;
+}
+.app-help-reference dd {
+  margin: 0.25rem 0 0;
+  max-width: 65ch;
+}
+
 /* Project-wide connections stay readable as cards in either writing style. */
 .relationship-filters {
   display: flex;

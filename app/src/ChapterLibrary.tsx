@@ -9,17 +9,20 @@ import {
   type WorkspaceState,
 } from "./storyTypes";
 import type { SubmitOutcome } from "./useProjectRename";
+import { useDesktopCommands } from "./desktopMenuContext";
 
 export function ChapterLibrary({
   projectId,
   onOpen,
   onController,
   onRevision,
+  locked = false,
 }: {
   projectId: string;
   onOpen: (id: string, snapshot?: ChapterSnapshot) => void;
   onController: (controller: ChapterController) => void;
   onRevision: (revision: number) => void;
+  locked?: boolean;
 }) {
   const [index, setIndex] = useState<StoryIndex | null>(null);
   const [view, setView] = useState<WorkspaceState>("active");
@@ -68,6 +71,26 @@ export function ChapterLibrary({
     pending.current = task;
   }
   const chapters = index?.chapters.filter((c) => c.workspaceState === view) ?? [];
+  useDesktopCommands(
+    "chapter-library",
+    {
+      edit: [
+        {
+          id: "chapter",
+          label: "Chapter",
+          children: [
+            {
+              id: "chapter-new",
+              label: "New Chapter",
+              disabled: !index || busy || locked,
+              action: () => perform({ kind: "create", title: "" }, true),
+            },
+          ],
+        },
+      ],
+    },
+    20,
+  );
   return (
     <section className="panel chapter-library" aria-label="Chapters">
       <div className="section-heading">

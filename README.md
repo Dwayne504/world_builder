@@ -292,7 +292,7 @@ Uncategorized Category; unnamed Entries remain valid and display an unstored
 Categories, Types, and Entries, inline Category/Type creation during Entry
 creation, and revision-checked continuous saving of Entry names.
 
-Each Category page now has **Category settings** for its Types, defaults, rename
+Each Category page has **Edit → Category → Category settings** for its Types, defaults, rename
 and reviewed deletion. Deleting a Category moves its Entries to a chosen Category
 and saves a recovery copy first. **Entry settings → Delete Entry** moves only that
 Entry to recoverable Trash; the Entries **View** selector opens Archive or Trash
@@ -363,7 +363,7 @@ Category's total; collapse the Category section or use a row's **+** to create a
 Entry in that Category. **Relationships** opens a card view with five connections
 initially and **Show more** for the rest. Filter by participating Entries, the
 relationship definition, and current/ended state. Maintenance actions and
-**Close Project** are under **Project menu**.
+**Close Project** are under **File**.
 Entry relationships now group by meaning and direction, with an ellipsized
 preview, expandable participants/notes and search within each group. The Project
 Relationships picker shows bounded search results and eight recent session
@@ -427,6 +427,25 @@ maps, location-specific Explore filters, Books/Scenes, passage links, publishing
 export, rich Entry descriptions, advanced Explore filters, Tags/Statuses, Entry
 Archive/Trash, shared-definition permanent deletion, final Recent/Pinned navigation,
 and any final visual design system.
+
+### Desktop menus and Project compatibility
+
+The desktop workspace has a themed **File / Edit / View / Help** menu bar.
+**File** contains Project operations; **Edit** contains the current Entry,
+Category, Type, Field, Relationship, Chapter and Timeline management commands;
+**View** contains workspace navigation, sidebar visibility and Appearance.
+Commands that need an open record are disabled until that record is available.
+Inline creation and manuscript formatting remain beside the content.
+Menu navigation uses the same unfinished-draft and save guards as the workspace.
+See the [desktop menu note](docs/milestones/DESKTOP_MENU_VERIFICATION.md).
+
+**Help → About Worldcrafter** reports the running backend's version and supported
+Project storage versions. A Project's schema version identifies its internal
+storage layout, not the author's content or writing quality. A build supporting
+schema 10 cannot safely edit a Project already using schema 11. Open such a
+Project with the build that last saved it or a newer compatible build. The
+compatibility refusal remains fail-closed; never lower the version in a manifest
+or database to bypass it. This navigation change does not add a migration.
 
 ### Manual native-close verification
 
