@@ -11,10 +11,13 @@ export function PointerLight() {
     let x = 0;
     let y = 0;
     let enabled = false;
+    let illuminated: HTMLElement | null = null;
     const clear = () => {
       cancelAnimationFrame(frame);
       frame = 0;
       delete root.dataset.pointerLight;
+      illuminated?.removeAttribute("data-illuminated");
+      illuminated = null;
     };
     const mediaChanged = () => {
       enabled = !reduced.matches && !contrast.matches;
@@ -28,12 +31,28 @@ export function PointerLight() {
       }
       x = event.clientX;
       y = event.clientY;
+      const surface =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>(
+              ".panel, .entries-panel, .app-header, .project-sidebar, dialog[open], .desktop-menu-panel",
+            )
+          : null;
+      if (illuminated !== surface) {
+        illuminated?.removeAttribute("data-illuminated");
+        illuminated = surface;
+      }
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         root.style.setProperty("--pointer-x", `${x}px`);
         root.style.setProperty("--pointer-y", `${y}px`);
         root.dataset.pointerLight = "on";
+        if (illuminated) {
+          const bounds = illuminated.getBoundingClientRect();
+          illuminated.style.setProperty("--surface-pointer-x", `${x - bounds.left}px`);
+          illuminated.style.setProperty("--surface-pointer-y", `${y - bounds.top}px`);
+          illuminated.dataset.illuminated = "on";
+        }
       });
     };
     const leave = (event: PointerEvent) => {

@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import type { SubmitOutcome } from "./useProjectRename";
 import { useEntryRelationships } from "./useEntryRelationships";
+import { ManagerSearchSelect } from "./ManagerSearchSelect";
 
 const emptyDefinition: RelationshipDraft = {
   name: "",
@@ -270,6 +271,7 @@ export function EntryRelationshipsPanel({
           {...group}
           entryId={entryId}
           initialOpen={group.relationships.some(restores)}
+          restoreRelationshipId={group.relationships.find(restores)?.id}
           connection={connection}
         />
       ),
@@ -350,28 +352,24 @@ export function EntryRelationshipsPanel({
       )}
       <Dialog open={linkOpen} title="Add relationship" onClose={() => setLinkOpen(false)}>
         <p className="muted">One connection, visible from both Entries.</p>
-        <label>
-          Relationship definition
-          <select
-            aria-label="Relationship definition"
-            disabled={busy}
-            value={definitionId}
-            onChange={(e) => {
-              setDefinitionId(e.target.value);
-              setReplace([]);
-              setPerspective("source");
-            }}
-          >
-            <option value="">Choose a definition</option>
-            {data.snapshot?.definitions
-              .filter((d) => !d.retired)
-              .map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-          </select>
-        </label>
+        <ManagerSearchSelect
+          label="Relationship definition"
+          disabled={busy}
+          value={definitionId}
+          onChange={(id) => {
+            setDefinitionId(id);
+            setReplace([]);
+            setPerspective("source");
+          }}
+          emptyLabel="Choose a definition"
+          choices={(data.snapshot?.definitions ?? [])
+            .filter((d) => !d.retired)
+            .map((d) => ({
+              id: d.id,
+              label: d.name,
+              searchText: `${d.forwardLabel} ${d.inverseLabel}`,
+            }))}
+        />
         {!data.snapshot?.definitions.some((d) => !d.retired) && (
           <button
             disabled={busy}
@@ -422,43 +420,29 @@ export function EntryRelationshipsPanel({
                     onChange={(e) => setTargetName(e.target.value)}
                   />
                 </label>
-                <label>
-                  New Entry Category
-                  <select
-                    aria-label="New Entry Category"
-                    disabled={busy}
-                    value={categoryId}
-                    onChange={(e) => setCategoryId(e.target.value)}
-                  >
-                    <option value="">Uncategorized</option>
-                    {categories
-                      .filter((c) => !c.isUncategorized)
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
+                <ManagerSearchSelect
+                  label="New Entry Category"
+                  disabled={busy}
+                  value={categoryId}
+                  onChange={setCategoryId}
+                  emptyLabel="Uncategorized"
+                  choices={categories
+                    .filter((c) => !c.isUncategorized)
+                    .map((c) => ({ id: c.id, label: c.name }))}
+                />
               </>
             ) : (
-              <label>
-                Other Entry
-                <select
-                  aria-label="Other Entry"
-                  disabled={busy}
-                  value={target}
-                  onChange={(e) => setTarget(e.target.value)}
-                >
-                  <option value="">Choose an Entry</option>
-                  {data.snapshot?.entries.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.label} · {e.categoryName}
-                      {e.id === entryId ? " (this Entry)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <ManagerSearchSelect
+                label="Other Entry"
+                disabled={busy}
+                value={target}
+                onChange={setTarget}
+                emptyLabel="Choose an Entry"
+                choices={(data.snapshot?.entries ?? []).map((entry) => ({
+                  id: entry.id,
+                  label: `${entry.label} · ${entry.categoryName}${entry.id === entryId ? " (this Entry)" : ""}`,
+                }))}
+              />
             )}
             <label>
               Note (optional)
@@ -498,6 +482,7 @@ export function EntryRelationshipsPanel({
         {data.error && <p role="alert">{data.error}</p>}
         <div className="row">
           <button
+            className="primary-button"
             disabled={busy || !definition || (!createTarget && !target)}
             onClick={() =>
               void run(
@@ -528,27 +513,33 @@ export function EntryRelationshipsPanel({
         onClose={() => setManageOpen(false)}
       >
         <p className="muted">Define the meaning once, then reuse it throughout this Project.</p>
-        <label>
-          Definition to edit
-          <select
-            aria-label="Definition to edit"
-            disabled={busy || definitionDirty}
-            value={editId}
-            onChange={(e) => {
-              const d = data.snapshot?.definitions.find((d) => d.id === e.target.value);
-              if (d) editDefinition(d);
-              else resetDefinition();
-            }}
-          >
-            <option value="">New definition</option>
-            {data.snapshot?.definitions.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-                {d.retired ? " (retired)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ManagerSearchSelect
+          label="Definition to edit"
+          disabled={busy || definitionDirty}
+          value={editId}
+          onChange={(id) => {
+            const d = data.snapshot?.definitions.find((d) => d.id === id);
+            if (d) editDefinition(d);
+            else resetDefinition();
+          }}
+          emptyLabel="New definition"
+          choices={(data.snapshot?.definitions ?? []).map((d) => ({
+            id: d.id,
+            label: `${d.name}${d.retired ? " (retired)" : ""}`,
+            searchText: `${d.forwardLabel} ${d.inverseLabel}`,
+          }))}
+        />
+        <p className="manager-current-scope">
+          {editId ? (
+            <>
+              Editing{" "}
+              <strong>{data.snapshot?.definitions.find((d) => d.id === editId)?.name}</strong> ·
+              shared across this Project
+            </>
+          ) : (
+            "New reusable relationship definition"
+          )}
+        </p>
         <label>
           Definition name
           <input
@@ -631,6 +622,7 @@ export function EntryRelationshipsPanel({
         {data.error && <p role="alert">{data.error}</p>}
         <div className="row">
           <button
+            className="primary-button"
             disabled={
               busy ||
               !draft.name.trim() ||
@@ -667,7 +659,13 @@ export function EntryRelationshipsPanel({
           >
             Cancel definition
           </button>
-          {editId && (
+        </div>
+        {editId && (
+          <details className="manager-secondary">
+            <summary>Definition lifecycle</summary>
+            <p className="field-note">
+              Retiring prevents new use. Existing connections and their notes are kept.
+            </p>
             <button
               disabled={busy || definitionDirty}
               onClick={() =>
@@ -688,8 +686,8 @@ export function EntryRelationshipsPanel({
                 ? "Restore definition"
                 : "Retire definition"}
             </button>
-          )}
-        </div>
+          </details>
+        )}
       </Dialog>
       {!linkOpen && linkDirty && (
         <button onClick={() => setLinkOpen(true)}>Continue relationship draft</button>

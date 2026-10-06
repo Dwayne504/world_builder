@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, expect, it, vi } from "vitest";
 import { SpatialPanel } from "./SpatialPanel";
 import { applySpatial, readSpatial } from "./api";
-import type { SpatialSnapshot } from "./types";
+import type { Category, SpatialSnapshot } from "./types";
 import type { FieldsController } from "./EntryFieldsPanel";
 import { spatialPath, spatialDescendants } from "./spatialPresentation";
 
@@ -36,13 +36,17 @@ let controller: FieldsController;
 const onRevision = vi.fn();
 const onNavigate = vi.fn();
 const onEntriesChanged = vi.fn();
-function mount(entryId = "Arak", relations?: import("./types").RelationshipSnapshot) {
+function mount(
+  entryId = "Arak",
+  relations?: import("./types").RelationshipSnapshot,
+  categories: Category[] = [],
+) {
   return render(
     <SpatialPanel
       projectId="world"
       relations={relations}
       entryId={entryId}
-      categories={[]}
+      categories={categories}
       disabled={false}
       onController={(next) => {
         controller = next;
@@ -201,6 +205,43 @@ it("retains a dismissed child draft and waits for the creation acknowledgement",
   expect(controller.state).toBe("saved");
   expect(onEntriesChanged).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "Observatory" })).toBeInTheDocument();
+});
+
+it("searches a hundred child Categories and keeps the chosen Category in a dismissed draft", async () => {
+  const categories = Array.from({ length: 125 }, (_, index) => ({
+    id: `category-${index}`,
+    name: `Category ${index}`,
+    isUncategorized: false,
+    revision: 1,
+    globalRevision: 8,
+  }));
+  vi.mocked(applySpatial).mockResolvedValue({ ...snapshot, globalRevision: 10 });
+  mount("Arak", undefined, categories);
+  fireEvent.click(await screen.findByRole("button", { name: "Arrange places" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create child" }));
+  const select = screen.getByRole("combobox", { name: "Child Category" });
+  expect(within(select).getAllByRole("option")).toHaveLength(21);
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search Child Category" }), {
+    target: { value: "Category 124" },
+  });
+  fireEvent.change(select, { target: { value: "category-124" } });
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search Child Category" }), {
+    target: { value: "No matching Category" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Close Arrange places" }));
+  expect(controller.canSubmit).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Continue Spatial draft" }));
+  expect(select).toHaveValue("category-124");
+  fireEvent.click(screen.getByRole("button", { name: "Create place inside Arak" }));
+  await waitFor(() =>
+    expect(applySpatial).toHaveBeenCalledWith("world", 9, {
+      kind: "create_child",
+      parentId: "Arak",
+      name: null,
+      categoryId: "category-124",
+      typeId: null,
+    }),
+  );
 });
 
 it("enables Spatial explicitly without asking for reclassification and blocks removal with dependents", async () => {

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { listEntries, readStory, readTimeline } from "./api";
 import { Dialog } from "./Dialog";
+import { TimelineRail } from "./TimelineRail";
+import { occurrenceDateKey } from "./TimelineRail.helpers";
 import type { ChapterController } from "./storyTypes";
 import { useTimeline } from "./useTimeline";
 import { useDesktopCommands } from "./desktopMenuContext";
@@ -13,6 +15,43 @@ import {
   type WorldCalendar,
   type TimelineSnapshot,
 } from "./timelineTypes";
+
+function LinkPages({
+  page,
+  total,
+  label,
+  onPage,
+}: {
+  page: number;
+  total: number;
+  label: string;
+  onPage: (page: number) => void;
+}) {
+  if (total <= 10) return null;
+  return (
+    <nav className="timeline-link-pages" aria-label={`${label} pages`}>
+      <small>
+        {page * 10 + 1}–{Math.min(page * 10 + 10, total)} of {total}
+      </small>
+      <button
+        className="quiet-button"
+        aria-label={`Previous ${label}`}
+        disabled={page === 0}
+        onClick={() => onPage(page - 1)}
+      >
+        Previous
+      </button>
+      <button
+        className="quiet-button"
+        aria-label={`Next ${label}`}
+        disabled={(page + 1) * 10 >= total}
+        onClick={() => onPage(page + 1)}
+      >
+        Next
+      </button>
+    </nav>
+  );
+}
 
 function LinkPicker({
   title,
@@ -28,13 +67,19 @@ function LinkPicker({
   single?: boolean;
 }) {
   const [query, setQuery] = useState("");
-  const selectedItems = items.filter((e) => selected.includes(e.id));
+  const [page, setPage] = useState(0);
+  const selectedIds = new Set(selected);
+  const search = query.trim().toLocaleLowerCase();
+  const selectedItems = items.filter(
+    (e) => selectedIds.has(e.id) && e.label.toLocaleLowerCase().includes(search),
+  );
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(selectedItems.length / 10) - 1));
   const matches = items
     .filter(
       (e) =>
         e.workspaceState === "active" &&
-        !selected.includes(e.id) &&
-        e.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+        !selectedIds.has(e.id) &&
+        e.label.toLocaleLowerCase().includes(search),
     )
     .slice(0, 10);
   return (
@@ -42,10 +87,30 @@ function LinkPicker({
       <summary>
         {title} <small>{selected.length || "None"}</small>
       </summary>
-      <ul className="timeline-link-list">
-        {selectedItems.map((item) => (
+      <label>
+        Find {title.toLowerCase()}
+        <input
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setPage(0);
+          }}
+          type="search"
+        />
+      </label>
+      {!!selected.length && (
+        <p className="timeline-picker-heading">
+          Linked {title.toLowerCase()} · {selectedItems.length}
+        </p>
+      )}
+      <ul
+        key={`${currentPage}:${search}`}
+        className="timeline-link-list"
+        aria-label={`Selected ${title}`}
+      >
+        {selectedItems.slice(currentPage * 10, currentPage * 10 + 10).map((item) => (
           <li key={item.id}>
-            <span>
+            <span className="timeline-picker-label" title={item.label}>
               {item.label}
               {item.workspaceState !== "active" ? ` · ${item.workspaceState}` : ""}
             </span>
@@ -59,19 +124,28 @@ function LinkPicker({
           </li>
         ))}
       </ul>
-      <label>
-        Find {title.toLowerCase()}
-        <input value={query} onChange={(e) => setQuery(e.target.value)} type="search" />
-      </label>
-      <ul className="timeline-link-list">
+      {!!selected.length && !selectedItems.length && (
+        <p className="muted">No linked records match this search.</p>
+      )}
+      <LinkPages
+        page={currentPage}
+        total={selectedItems.length}
+        label={`selected ${title}`}
+        onPage={setPage}
+      />
+      <p className="timeline-picker-heading">Available {title.toLowerCase()}</p>
+      <ul className="timeline-link-list" aria-label={`Available ${title}`}>
         {matches.map((item) => (
           <li key={item.id}>
-            <span>{item.label}</span>
+            <span className="timeline-picker-label" title={item.label}>
+              {item.label}
+            </span>
             <button
               className="quiet-button"
               onClick={() => {
                 onChange(single ? [item.id] : [...selected, item.id]);
                 setQuery("");
+                setPage(0);
               }}
               aria-label={`Link ${item.label}`}
             >
@@ -80,8 +154,60 @@ function LinkPicker({
           </li>
         ))}
       </ul>
-      {!matches.length && <p className="muted">No matching records.</p>}
+      {!matches.length && <p className="muted">No matching unlinked records.</p>}
       <small className="muted">Up to 10 matches. Type to narrow the list.</small>
+    </details>
+  );
+}
+
+function LinkedNavigation({
+  items,
+  onOpen,
+}: {
+  items: (TimelineLink & { kind: "Entry" | "Chapter" })[];
+  onOpen: (id: string, kind: "Entry" | "Chapter") => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const matches = items.filter((item) =>
+    item.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+  );
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(matches.length / 10) - 1));
+  if (!items.length) return null;
+  return (
+    <details className="timeline-picker timeline-linked-pages">
+      <summary>
+        Open linked pages <small>{items.length}</small>
+      </summary>
+      {items.length > 10 && (
+        <label>
+          Find a linked page
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(0);
+            }}
+          />
+        </label>
+      )}
+      <ul key={`${currentPage}:${query}`} className="timeline-link-list" aria-label="Linked pages">
+        {matches.slice(currentPage * 10, currentPage * 10 + 10).map((item) => (
+          <li key={`${item.kind}:${item.id}`}>
+            <button
+              className="quiet-button timeline-picker-label"
+              title={item.label}
+              onClick={() => onOpen(item.id, item.kind)}
+            >
+              {item.label}
+            </button>
+            <small className="muted">{item.kind}</small>
+          </li>
+        ))}
+      </ul>
+      {!matches.length && <p className="muted">No linked pages match this search.</p>}
+      <LinkPages page={currentPage} total={matches.length} label="linked pages" onPage={setPage} />
     </details>
   );
 }
@@ -229,6 +355,8 @@ export function Timeline({
   const [calendarValue, setCalendarValue] = useState<WorldCalendar>(newCalendar);
   const [entryFilter, setEntryFilter] = useState("");
   const [chapterFilter, setChapterFilter] = useState("");
+  const [presentation, setPresentation] = useState<"rail" | "list">("rail");
+  const [page, setPage] = useState({ filter: "", index: 0 });
   useEffect(() => {
     let current = true;
     void Promise.all([listEntries(projectId), readStory(projectId)])
@@ -322,6 +450,27 @@ export function Timeline({
           .toLocaleLowerCase()
           .includes(view.query.toLocaleLowerCase()),
     ) ?? [];
+  const filterKey = JSON.stringify([
+    projectId,
+    view.query,
+    view.state,
+    view.entryId,
+    view.chapterId,
+  ]);
+  useEffect(() => {
+    setPage({ filter: filterKey, index: 0 });
+  }, [filterKey]);
+  const pageIndex =
+    page.filter === filterKey
+      ? Math.min(page.index, Math.max(0, Math.ceil(matches.length / 50) - 1))
+      : 0;
+  const pageStart = pageIndex * 50;
+  const visibleLimit = Math.min(50, Math.max(10, view.limit));
+  const visible = matches.slice(pageStart, pageStart + visibleLimit);
+  const filtered = !!(view.query || view.entryId || view.chapterId);
+  function clearFilters() {
+    onViewChange({ ...view, entryId: "", chapterId: "", query: "", limit: 10 });
+  }
   function openCalendar() {
     setCalendarValue(snapshot?.calendar ?? newCalendar());
     setCalendarOpen(true);
@@ -360,6 +509,13 @@ export function Timeline({
           <h2>Timeline</h2>
         </div>
         <div className="row">
+          <button
+            className="quiet-button"
+            disabled={!snapshot || busy || !!draft}
+            onClick={openCalendar}
+          >
+            {snapshot?.calendar ? "Calendar settings" : "Set up calendar"}
+          </button>
           <button disabled={!snapshot || busy || !!draft} onClick={() => void create()}>
             Add occurrence
           </button>
@@ -375,13 +531,14 @@ export function Timeline({
           <button onClick={() => void timeline.reload()}>Reload timeline</button>
         </div>
       )}
-      <div className="timeline-filters">
+      <div className="timeline-workspace-toolbar">
         <label>
           Search timeline
           <input
             type="search"
+            placeholder="Find a moment, person, place…"
             value={view.query}
-            onChange={(e) => onViewChange({ ...view, query: e.target.value })}
+            onChange={(e) => onViewChange({ ...view, query: e.target.value, limit: 10 })}
           />
         </label>
         <label>
@@ -389,7 +546,7 @@ export function Timeline({
           <select
             value={view.state}
             onChange={(e) =>
-              onViewChange({ ...view, state: e.target.value as TimelineView["state"] })
+              onViewChange({ ...view, state: e.target.value as TimelineView["state"], limit: 10 })
             }
           >
             <option value="active">Timeline</option>
@@ -397,6 +554,14 @@ export function Timeline({
             <option value="trashed">Trash</option>
           </select>
         </label>
+        <div className="timeline-view-switch" role="group" aria-label="Timeline presentation">
+          <button aria-pressed={presentation === "rail"} onClick={() => setPresentation("rail")}>
+            Timeline
+          </button>
+          <button aria-pressed={presentation === "list"} onClick={() => setPresentation("list")}>
+            List
+          </button>
+        </div>
       </div>
       <details className="timeline-filters-more">
         <summary>
@@ -413,7 +578,7 @@ export function Timeline({
             <select
               aria-label="Linked Entry filter"
               value={view.entryId}
-              onChange={(e) => onViewChange({ ...view, entryId: e.target.value })}
+              onChange={(e) => onViewChange({ ...view, entryId: e.target.value, limit: 10 })}
             >
               <option value="">All Entries</option>
               {allEntries
@@ -441,7 +606,7 @@ export function Timeline({
             <select
               aria-label="Linked Chapter filter"
               value={view.chapterId}
-              onChange={(e) => onViewChange({ ...view, chapterId: e.target.value })}
+              onChange={(e) => onViewChange({ ...view, chapterId: e.target.value, limit: 10 })}
             >
               <option value="">All Chapters</option>
               {allChapters
@@ -461,53 +626,101 @@ export function Timeline({
           </label>
         </div>
         <small className="muted">Up to 10 matches per picker. Search to find others.</small>
-        <button
-          className="quiet-button"
-          onClick={() => onViewChange({ ...view, entryId: "", chapterId: "", query: "" })}
-        >
-          Clear filters
-        </button>
       </details>
-      <p className="muted">
-        {matches.length} occurrences
-        {snapshot?.calendar ? ` · ${snapshot.calendar.name}` : " · No calendar set up"}
-      </p>
-      <ol className="timeline-list">
-        {matches.slice(0, view.limit).map((o, i) => (
-          <li key={o.id}>
-            {(i === 0 ||
-              dateLabel(matches[i - 1].date, snapshot?.calendar ?? null) !==
-                dateLabel(o.date, snapshot?.calendar ?? null)) && (
-              <h3 className="timeline-date-heading">
-                {dateLabel(o.date, snapshot?.calendar ?? null)}
-              </h3>
-            )}
-            <button
-              className="timeline-occurrence quiet-button"
-              data-navigation-focus={`occurrence-${o.id}`}
-              onClick={() => void openOccurrence(o.id)}
-              disabled={busy}
-            >
-              <span>{occurrenceLabel(o)}</span>
-              <small className="muted">
-                {[
-                  o.eventEntry ? "Event" : "Moment",
-                  ...o.entries.map((e) => e.label),
-                  ...o.chapters.map((c) => c.label),
-                ].join(" · ")}
-              </small>
-              <span aria-hidden="true">›</span>
-            </button>
-          </li>
-        ))}
-      </ol>
-      {snapshot && !matches.length && (
-        <p>No occurrences here yet. Add a moment now; give it a date whenever you are ready.</p>
+      <div className="timeline-results-heading">
+        <p className="muted" role="status">
+          {matches.length} occurrences
+          {snapshot?.calendar ? ` · ${snapshot.calendar.name}` : " · No calendar set up"}
+        </p>
+        {filtered && (
+          <button className="quiet-button" onClick={clearFilters}>
+            Clear filters
+          </button>
+        )}
+      </div>
+      {presentation === "rail" ? (
+        <TimelineRail
+          occurrences={visible}
+          calendar={snapshot?.calendar ?? null}
+          selectedId={view.occurrenceId}
+          viewKey={`${filterKey}:${pageIndex}`}
+          disabled={busy}
+          onSelect={(id) => void openOccurrence(id)}
+        />
+      ) : (
+        <ol className="timeline-list" aria-label="Timeline occurrences">
+          {visible.map((o, i) => (
+            <li key={o.id}>
+              {(i === 0 ||
+                occurrenceDateKey(visible[i - 1].date) !== occurrenceDateKey(o.date)) && (
+                <h3 className="timeline-date-heading">
+                  {dateLabel(o.date, snapshot?.calendar ?? null)}
+                </h3>
+              )}
+              <button
+                className="timeline-occurrence quiet-button"
+                data-navigation-focus={`occurrence-${o.id}`}
+                aria-pressed={view.occurrenceId === o.id}
+                onClick={() => void openOccurrence(o.id)}
+                disabled={busy}
+              >
+                <span>{occurrenceLabel(o)}</span>
+                <small className="muted">
+                  {[
+                    o.eventEntry ? "Event" : "Moment",
+                    ...o.entries.map((e) => e.label),
+                    ...o.chapters.map((c) => c.label),
+                  ].join(" · ")}
+                </small>
+                <span aria-hidden="true">›</span>
+              </button>
+            </li>
+          ))}
+        </ol>
       )}
-      {matches.length > view.limit && (
-        <button onClick={() => onViewChange({ ...view, limit: view.limit + 10 })}>
-          Show 10 more
-        </button>
+      {snapshot && !matches.length && (
+        <div className="timeline-empty">
+          <h3>
+            {filtered
+              ? "No moments match these filters"
+              : view.state === "active"
+                ? "Every world begins with a moment"
+                : view.state === "archived"
+                  ? "Your archive is clear"
+                  : "No occurrences in Trash"}
+          </h3>
+          <p>
+            {filtered
+              ? "Try another name, search the notes, or clear your filters to see the whole timeline."
+              : view.state === "active"
+                ? "Add your first occurrence above. A title, a date, and links can all come later."
+                : "Occurrences you move here keep their dates, notes, and links."}
+          </p>
+        </div>
+      )}
+      {matches.length > 0 && (
+        <div className="timeline-pagination">
+          <p>
+            Showing {pageStart + 1}–{pageStart + visible.length} of {matches.length}
+          </p>
+          <div className="row">
+            {pageIndex > 0 && (
+              <button onClick={() => setPage({ filter: filterKey, index: pageIndex - 1 })}>
+                Previous 50
+              </button>
+            )}
+            {pageStart + visible.length < matches.length && visibleLimit < 50 && (
+              <button onClick={() => onViewChange({ ...view, limit: visibleLimit + 10 })}>
+                Show 10 more
+              </button>
+            )}
+            {visibleLimit === 50 && pageStart + 50 < matches.length && (
+              <button onClick={() => setPage({ filter: filterKey, index: pageIndex + 1 })}>
+                Next 50
+              </button>
+            )}
+          </div>
+        </div>
       )}
       <Dialog
         open={!!chosen && !!draft}
@@ -521,131 +734,148 @@ export function Timeline({
               className="plain-fieldset"
               disabled={locked || chosen.workspaceState !== "active"}
             >
-              <label>
-                Occurrence title (optional)
-                <input
-                  value={draft.title}
-                  maxLength={1000}
-                  placeholder={chosen.eventEntry?.label ?? "A moment in your world"}
-                  onChange={(e) => timeline.change({ ...draft, title: e.target.value })}
-                />
-              </label>
-              <div className="row">
-                <label className="timeline-check">
+              <section className="timeline-editor-section" aria-label="The moment">
+                <h3>The moment</h3>
+                <label>
+                  Occurrence title (optional)
                   <input
-                    type="checkbox"
-                    disabled={!snapshot?.calendar}
-                    checked={!!draft.date}
-                    onChange={(e) =>
-                      timeline.change({
-                        ...draft,
-                        date: e.target.checked ? { year: 1, month: 1, day: 1 } : null,
-                      })
-                    }
+                    value={draft.title}
+                    maxLength={1000}
+                    placeholder={chosen.eventEntry?.label ?? "A moment in your world"}
+                    onChange={(e) => timeline.change({ ...draft, title: e.target.value })}
                   />
-                  Give this occurrence a date
                 </label>
-                {!snapshot?.calendar && (
-                  <small className="muted">Set up your calendar from the Timeline first.</small>
-                )}
-              </div>
-              {draft.date && snapshot?.calendar && (
-                <div className="timeline-date">
-                  <label>
-                    Year
-                    <input
-                      type="number"
-                      min={-1000000}
-                      max={1000000}
-                      value={Number.isFinite(draft.date.year) ? draft.date.year : ""}
-                      onChange={(e) =>
-                        timeline.change({
-                          ...draft,
-                          date: {
-                            ...draft.date!,
-                            year: e.target.value === "" ? NaN : Number(e.target.value),
-                          },
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Month
-                    <select
-                      value={draft.date.month}
-                      onChange={(e) =>
-                        timeline.change({
-                          ...draft,
-                          date: { ...draft.date!, month: Number(e.target.value) },
-                        })
-                      }
-                    >
-                      {snapshot.calendar.months.map((m, i) => (
-                        <option key={i} value={i + 1}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Day
-                    <input
-                      type="number"
-                      min={1}
-                      max={snapshot.calendar.months[draft.date.month - 1]?.days}
-                      value={draft.date.day || ""}
-                      onChange={(e) =>
-                        timeline.change({
-                          ...draft,
-                          date: { ...draft.date!, day: Number(e.target.value) },
-                        })
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-              {problem && <p role="alert">{problem}</p>}
-              <label>
-                Notes
-                <textarea
-                  rows={4}
-                  value={draft.notes}
-                  onChange={(e) => timeline.change({ ...draft, notes: e.target.value })}
-                />
-              </label>
-              {catalogError ? (
-                <p role="alert">
-                  Entry and Chapter choices could not be loaded. Reopen the Timeline to retry.
+                <label>
+                  Notes
+                  <textarea
+                    rows={5}
+                    value={draft.notes}
+                    placeholder="What happened, and why does it matter?"
+                    onChange={(e) => timeline.change({ ...draft, notes: e.target.value })}
+                  />
+                </label>
+              </section>
+              <section className="timeline-editor-section" aria-label="When it happened">
+                <h3>When it happened</h3>
+                <p className="muted">
+                  Dates are optional. Moments on the same day share a date, with no time of day
+                  implied.
                 </p>
-              ) : (
-                <>
-                  <LinkPicker
-                    title="Entries"
-                    items={allEntries}
-                    selected={draft.entryIds}
-                    onChange={(ids) => timeline.change({ ...draft, entryIds: ids })}
-                  />
-                  <LinkPicker
-                    title="Chapters"
-                    items={allChapters}
-                    selected={draft.chapterIds}
-                    onChange={(ids) => timeline.change({ ...draft, chapterIds: ids })}
-                  />
-                  <p className="muted">
-                    Choose the Entry describing the event itself, such as “The Coronation”, to give
-                    this occurrence a full page with Fields and Relationships. Link people and
-                    places under Entries above. Choosing an event page marks it as an Event; it does
-                    not copy its data or change its Category.
+                <div className="row">
+                  <label className="timeline-check">
+                    <input
+                      type="checkbox"
+                      disabled={!snapshot?.calendar}
+                      checked={!!draft.date}
+                      onChange={(e) =>
+                        timeline.change({
+                          ...draft,
+                          date: e.target.checked ? { year: 1, month: 1, day: 1 } : null,
+                        })
+                      }
+                    />
+                    Give this occurrence a date
+                  </label>
+                  {!snapshot?.calendar && (
+                    <small className="muted">Set up your calendar from the Timeline first.</small>
+                  )}
+                </div>
+                {draft.date && snapshot?.calendar && (
+                  <div className="timeline-date">
+                    <label>
+                      Year
+                      <input
+                        type="number"
+                        min={-1000000}
+                        max={1000000}
+                        value={Number.isFinite(draft.date.year) ? draft.date.year : ""}
+                        onChange={(e) =>
+                          timeline.change({
+                            ...draft,
+                            date: {
+                              ...draft.date!,
+                              year: e.target.value === "" ? NaN : Number(e.target.value),
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Month
+                      <select
+                        value={draft.date.month}
+                        onChange={(e) =>
+                          timeline.change({
+                            ...draft,
+                            date: { ...draft.date!, month: Number(e.target.value) },
+                          })
+                        }
+                      >
+                        {snapshot.calendar.months.map((m, i) => (
+                          <option key={i} value={i + 1}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Day
+                      <input
+                        type="number"
+                        min={1}
+                        max={snapshot.calendar.months[draft.date.month - 1]?.days}
+                        value={draft.date.day || ""}
+                        onChange={(e) =>
+                          timeline.change({
+                            ...draft,
+                            date: { ...draft.date!, day: Number(e.target.value) },
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+                {problem && <p role="alert">{problem}</p>}
+              </section>
+              <section className="timeline-editor-section" aria-label="Connections">
+                <h3>Connections</h3>
+                <p className="muted">Connect the people, places, and Chapters involved.</p>
+                {catalogError ? (
+                  <p role="alert">
+                    Entry and Chapter choices could not be loaded. Reopen the Timeline to retry.
                   </p>
-                  <LinkPicker
-                    title="Event page"
-                    single
-                    items={allEntries}
-                    selected={draft.eventEntryId ? [draft.eventEntryId] : []}
-                    onChange={(ids) => timeline.change({ ...draft, eventEntryId: ids[0] ?? null })}
-                  />
-                </>
-              )}
+                ) : (
+                  <>
+                    <LinkPicker
+                      title="Entries"
+                      items={allEntries}
+                      selected={draft.entryIds}
+                      onChange={(ids) => timeline.change({ ...draft, entryIds: ids })}
+                    />
+                    <LinkPicker
+                      title="Chapters"
+                      items={allChapters}
+                      selected={draft.chapterIds}
+                      onChange={(ids) => timeline.change({ ...draft, chapterIds: ids })}
+                    />
+                    <p className="muted">
+                      Choose the Entry describing the event itself, such as “The Coronation”, to
+                      give this occurrence a full page with Fields and Relationships. Link people
+                      and places under Entries above. Choosing an event page marks it as an Event;
+                      it does not copy its data or change its Category.
+                    </p>
+                    <LinkPicker
+                      title="Event page"
+                      single
+                      items={allEntries}
+                      selected={draft.eventEntryId ? [draft.eventEntryId] : []}
+                      onChange={(ids) =>
+                        timeline.change({ ...draft, eventEntryId: ids[0] ?? null })
+                      }
+                    />
+                  </>
+                )}
+              </section>
             </fieldset>
             {error && (
               <div role="alert">
@@ -664,36 +894,22 @@ export function Timeline({
                 </button>
               </div>
             )}
-            <div className="timeline-linked-navigation">
-              {mergeLinks(chosen.entries, chosen.eventEntry ? [chosen.eventEntry] : []).map((e) => (
-                <button
-                  className="quiet-button"
-                  key={e.id}
-                  onClick={async () => {
-                    const result = await flush();
-                    if (result.kind === "no-op" || result.kind === "committed") {
-                      onEntry(e.id);
-                    }
-                  }}
-                >
-                  {e.label}
-                </button>
-              ))}
-              {chosen.chapters.map((c) => (
-                <button
-                  className="quiet-button"
-                  key={c.id}
-                  onClick={async () => {
-                    const result = await flush();
-                    if (result.kind === "no-op" || result.kind === "committed") {
-                      onChapter(c.id);
-                    }
-                  }}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
+            <LinkedNavigation
+              key={chosen.id}
+              items={[
+                ...mergeLinks(chosen.entries, chosen.eventEntry ? [chosen.eventEntry] : []).map(
+                  (item) => ({ ...item, kind: "Entry" as const }),
+                ),
+                ...chosen.chapters.map((item) => ({ ...item, kind: "Chapter" as const })),
+              ]}
+              onOpen={async (id, kind) => {
+                const result = await flush();
+                if (result.kind === "no-op" || result.kind === "committed") {
+                  if (kind === "Entry") onEntry(id);
+                  else onChapter(id);
+                }
+              }}
+            />
             <details>
               <summary>Archive &amp; Trash</summary>
               <p className="muted">

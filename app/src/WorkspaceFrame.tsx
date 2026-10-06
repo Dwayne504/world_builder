@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Category, Entry } from "./types";
+import { useSidebarProximity } from "./useSidebarProximity";
 
 export function WorkspaceFrame({
   children,
@@ -41,6 +42,9 @@ export function WorkspaceFrame({
   browsingDisabled: boolean;
 }) {
   const [categoriesOpen, setCategoriesOpen] = useState(true);
+  const [categoryQuery, setCategoryQuery] = useState("");
+  const sidebarRef = useRef<HTMLElement>(null);
+  useSidebarProximity(sidebarRef);
   const counts = new Map<string, number>();
   for (const entry of entries)
     counts.set(entry.categoryId, (counts.get(entry.categoryId) ?? 0) + 1);
@@ -90,7 +94,12 @@ export function WorkspaceFrame({
         )}
       </nav>
       <div className={`workspace-layout ${collapsed ? "sidebar-collapsed" : ""}`}>
-        <aside id="project-navigation" className="project-sidebar" hidden={collapsed}>
+        <aside
+          ref={sidebarRef}
+          id="project-navigation"
+          className="project-sidebar"
+          hidden={collapsed}
+        >
           <nav aria-label="Project navigation">
             <button
               className="sidebar-destination"
@@ -98,7 +107,7 @@ export function WorkspaceFrame({
               disabled={busy || browsingDisabled}
               onClick={onSearch}
             >
-              Search
+              <span>Search</span>
             </button>
             <button
               className="sidebar-destination"
@@ -120,7 +129,7 @@ export function WorkspaceFrame({
               disabled={busy || browsingDisabled}
               onClick={onRelationships}
             >
-              Relationships
+              <span>Relationships</span>
             </button>
             <button
               className="sidebar-destination"
@@ -128,7 +137,7 @@ export function WorkspaceFrame({
               disabled={busy || browsingDisabled}
               onClick={onChapters}
             >
-              Chapters
+              <span>Chapters</span>
             </button>
             <button
               className="sidebar-destination"
@@ -136,7 +145,7 @@ export function WorkspaceFrame({
               disabled={busy || browsingDisabled}
               onClick={onTimeline}
             >
-              Timeline
+              <span>Timeline</span>
             </button>
             <button
               className="sidebar-section-toggle"
@@ -147,35 +156,59 @@ export function WorkspaceFrame({
               Categories <span aria-hidden="true">{categoriesOpen ? "▾" : "▸"}</span>
             </button>
             <div id="sidebar-categories" hidden={!categoriesOpen}>
-              {categories.map((category) => (
-                <div className="sidebar-category" key={category.id}>
-                  <button
-                    className="sidebar-destination"
-                    aria-label={category.name}
-                    aria-describedby={`category-count-${category.id}`}
-                    aria-current={
-                      page === "entries" && categoryId === category.id ? "page" : undefined
-                    }
-                    disabled={busy || browsingDisabled}
-                    onClick={() => onBrowse(category.id)}
-                  >
-                    <span>{category.name}</span>
-                    <small id={`category-count-${category.id}`} className="sidebar-count">
-                      {counts.get(category.id) ?? 0}
-                      <span className="sr-only"> Entries</span>
-                    </small>
-                  </button>
-                  <button
-                    className="sidebar-add quiet-button"
-                    aria-label={`Add Entry to ${category.name}`}
-                    title={`Add Entry to ${category.name}`}
-                    disabled={busy || browsingDisabled}
-                    onClick={() => onAddEntry(category.id)}
-                  >
-                    <span aria-hidden="true">+</span>
-                  </button>
-                </div>
-              ))}
+              {(categories.length > 8 || !!categoryQuery) && (
+                <label className="sidebar-search">
+                  <span className="sr-only">Find a Category</span>
+                  <input
+                    type="search"
+                    placeholder="Find a Category…"
+                    value={categoryQuery}
+                    onChange={(event) => setCategoryQuery(event.target.value)}
+                  />
+                </label>
+              )}
+              {categories
+                .filter((category) =>
+                  category.name
+                    .toLocaleLowerCase()
+                    .includes(categoryQuery.trim().toLocaleLowerCase()),
+                )
+                .map((category) => (
+                  <div className="sidebar-category" key={category.id}>
+                    <button
+                      className="sidebar-destination"
+                      aria-label={category.name}
+                      title={category.name}
+                      aria-describedby={`category-count-${category.id}`}
+                      aria-current={
+                        page === "entries" && categoryId === category.id ? "page" : undefined
+                      }
+                      disabled={busy || browsingDisabled}
+                      onClick={() => onBrowse(category.id)}
+                    >
+                      <span>{category.name}</span>
+                      <small id={`category-count-${category.id}`} className="sidebar-count">
+                        {counts.get(category.id) ?? 0}
+                        <span className="sr-only"> Entries</span>
+                      </small>
+                    </button>
+                    <button
+                      className="sidebar-add quiet-button"
+                      aria-label={`Add Entry to ${category.name}`}
+                      title={`Add Entry to ${category.name}`}
+                      disabled={busy || browsingDisabled}
+                      onClick={() => onAddEntry(category.id)}
+                    >
+                      <span aria-hidden="true">+</span>
+                    </button>
+                  </div>
+                ))}
+              {categoryQuery &&
+                !categories.some((category) =>
+                  category.name
+                    .toLocaleLowerCase()
+                    .includes(categoryQuery.trim().toLocaleLowerCase()),
+                ) && <p className="muted sidebar-empty">No matching Categories.</p>}
             </div>
           </nav>
         </aside>

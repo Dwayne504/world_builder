@@ -106,6 +106,7 @@ it("shows five cards initially and reveals the rest without duplicating symmetri
 it("filters by either participant, combines selected Entries, and intersects definition and state filters", async () => {
   render(<Harness />);
   await screen.findByText("Showing 5 of 7 relationships");
+  fireEvent.click(screen.getByText(/^Filter by Entry/));
   fireEvent.change(screen.getByLabelText("Find an Entry"), { target: { value: "Object 2" } });
   fireEvent.click(screen.getByRole("checkbox", { name: "Object 2 · active" }));
   expect(screen.getByText("Showing 1 of 1 matching relationships")).toBeVisible();
@@ -142,6 +143,7 @@ it("distinguishes records by ID when names collide and keeps unavailable partici
   vi.mocked(readProjectRelationships).mockResolvedValue(snapshot);
   render(<Harness />);
   await screen.findByText("Showing 2 of 2 relationships");
+  fireEvent.click(screen.getByText(/^Filter by Entry/));
   expect(screen.getByText("Former object")).toBeVisible();
   expect(
     screen.queryByRole("button", { name: /Former object|Old object/ }),
@@ -190,6 +192,7 @@ it("bounds suggestions for a thousand Entries and keeps selected and recent choi
   render(<Harness />);
   await screen.findByText("Showing 5 of 7 relationships");
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText(/^Filter by Entry/));
   const search = screen.getByLabelText("Find an Entry");
   fireEvent.change(search, { target: { value: "Person" } });
   expect(screen.getAllByRole("checkbox")).toHaveLength(10);
@@ -222,6 +225,7 @@ it("puts a selected symmetric target first without changing the relationship, an
   vi.mocked(readProjectRelationships).mockResolvedValue(snapshot);
   render(<Harness />);
   await screen.findByRole("article");
+  fireEvent.click(screen.getByText(/^Filter by Entry/));
   fireEvent.change(screen.getByLabelText("Find an Entry"), { target: { value: "Engineer" } });
   fireEvent.click(screen.getByRole("checkbox", { name: "Engineer · active" }));
   const card = screen.getByRole("article", { name: "Engineer allied with Pilot" });
@@ -230,4 +234,47 @@ it("puts a selected symmetric target first without changing the relationship, an
   fireEvent.click(screen.getByRole("checkbox", { name: "Pilot · active" }));
   expect(card).toHaveAccessibleName("Engineer allied with Pilot");
   expect(JSON.stringify(snapshot)).toBe(original);
+});
+
+it("searches across more than one hundred connections including notes and inverse meaning", async () => {
+  const snapshot = data();
+  snapshot.relationships = Array.from({ length: 125 }, (_, index) => ({
+    ...snapshot.relationships[0],
+    id: `connection-${index}`,
+    target: { id: `object-${index}`, label: `Object ${index}`, workspaceState: "active" },
+    note: index === 124 ? "Hidden inheritance" : "",
+    warnings: index === 124 ? ["Expected one owner; found two."] : [],
+  }));
+  vi.mocked(readProjectRelationships).mockResolvedValue(snapshot);
+  render(<Harness />);
+  await screen.findByText("Showing 5 of 125 relationships");
+  expect(screen.getAllByRole("article")).toHaveLength(5);
+  const search = screen.getByRole("searchbox", { name: "Search relationships" });
+  fireEvent.change(search, { target: { value: "inheritance" } });
+  expect(screen.getByText("Showing 1 of 1 matching relationships")).toBeVisible();
+  expect(screen.getByRole("article")).toHaveAccessibleName("Navigator owns Object 124");
+  expect(screen.getByText("Expected one owner; found two.")).toBeVisible();
+  fireEvent.change(search, { target: { value: "owned by" } });
+  expect(screen.getByText("Showing 5 of 125 matching relationships")).toBeVisible();
+  fireEvent.change(search, { target: { value: "Missing person" } });
+  expect(screen.getByText("No relationships match these filters.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(search).toHaveValue("");
+  expect(screen.getAllByRole("article")).toHaveLength(5);
+});
+
+it("restores a saved relationship search from the workspace view", async () => {
+  render(
+    <RelationshipsBrowser
+      projectId="project"
+      view={{ ...initialRelationshipView, query: "An authored note" }}
+      onViewChange={vi.fn()}
+      onNavigate={navigate}
+    />,
+  );
+  await screen.findByText("Showing 1 of 1 matching relationships");
+  expect(screen.getByRole("searchbox", { name: "Search relationships" })).toHaveValue(
+    "An authored note",
+  );
+  expect(screen.getByRole("article")).toHaveAccessibleName("Navigator owns Object 0");
 });

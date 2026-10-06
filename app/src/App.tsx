@@ -2,7 +2,7 @@ import { applyStructure } from "./api";
 import { RecentProjects } from "./RecentProjects";
 import { Timeline, TimelineUsage } from "./Timeline";
 import type { TimelineView } from "./timelineTypes";
-import { ChapterLibrary } from "./ChapterLibrary";
+import { ChapterLibrary, type ChapterBrowseState } from "./ChapterLibrary";
 import { ProjectSearch } from "./ProjectSearch";
 import { EntryAliasesEditor } from "./EntryAliasesEditor";
 import type { SearchTarget, SearchView } from "./searchTypes";
@@ -13,6 +13,7 @@ import type { ChapterSnapshot } from "./storyTypes";
 import type { WritingPosition } from "./RichTextEditor";
 import { WorkspaceFrame } from "./WorkspaceFrame";
 import { RelationshipsBrowser } from "./RelationshipsBrowser";
+import { ManagerSearchSelect } from "./ManagerSearchSelect";
 import type { RelationshipView } from "./workspaceHistory";
 import {
   capture,
@@ -31,6 +32,7 @@ import { useAppearance } from "./appearanceContext";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
+import "./WorkspaceUsability.css";
 import {
   AppCommandError,
   automaticBackupDirectory,
@@ -831,6 +833,9 @@ function EntryEditor({
   const editor = useEntryName(projectId, initialEntry);
   const [confirmTrash, setConfirmTrash] = useState(false);
   const [entrySettingsOpen, setEntrySettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<"structure" | "names" | "lifecycle">(
+    "structure",
+  );
   const [aliasDirty, setAliasDirty] = useState(false);
   const { submit: submitName, currentEntry, waitForPending: waitForName } = editor;
   const { isPending: isStructurePending, waitForPending: waitForStructure } = mutations;
@@ -1147,13 +1152,36 @@ function EntryEditor({
         title="Entry settings"
         onClose={() => setEntrySettingsOpen(false)}
       >
-        <p className="muted">
-          Organize this Entry and choose its available fields. Existing values are preserved.
-        </p>
-        <label>
-          Category
-          <select
-            aria-label="entry-category"
+        <nav className="settings-sections" aria-label="Entry settings sections">
+          <button
+            aria-pressed={settingsSection === "structure"}
+            onClick={() => setSettingsSection("structure")}
+          >
+            Category & Type{categoryTypeDirty || newTypeName ? " · draft" : ""}
+          </button>
+          <button
+            aria-pressed={settingsSection === "names"}
+            onClick={() => setSettingsSection("names")}
+          >
+            Other names{aliasDirty ? " · draft" : ""}
+          </button>
+          <button
+            aria-pressed={settingsSection === "lifecycle"}
+            onClick={() => setSettingsSection("lifecycle")}
+          >
+            Archive & delete
+          </button>
+        </nav>
+        {entrySettingsOpen && structureError && <p role="alert">{structureError}</p>}
+        <section
+          className="settings-panel"
+          hidden={settingsSection !== "structure"}
+          aria-label="Category and Type"
+        >
+          <p className="muted">Organize this Entry. Existing field values are preserved.</p>
+          <ManagerSearchSelect
+            label="Category"
+            ariaLabel="entry-category"
             disabled={
               aliasDirty ||
               mutations.state === "saving" ||
@@ -1161,25 +1189,17 @@ function EntryEditor({
               spatialState !== "saved"
             }
             value={categoryId}
-            onChange={(event) => {
+            onChange={(id) => {
               setTypes([]);
-              setCategoryId(event.currentTarget.value);
-              setStructureTypeChosen(
-                event.currentTarget.value === editor.entry.categoryId || !typeId,
-              );
+              setCategoryId(id);
+              setStructureTypeChosen(id === editor.entry.categoryId || !typeId);
             }}
-          >
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Type (optional)
-          <select
-            aria-label="entry-type"
+            choices={categories.map((category) => ({ id: category.id, label: category.name }))}
+          />
+          <ManagerSearchSelect
+            key={categoryId}
+            label="Type (optional)"
+            ariaLabel="entry-type"
             disabled={
               aliasDirty ||
               mutations.state === "saving" ||
@@ -1187,122 +1207,132 @@ function EntryEditor({
               spatialState !== "saved"
             }
             value={typeId}
-            onChange={(event) => {
-              setTypeId(event.currentTarget.value);
+            onChange={(id) => {
+              setTypeId(id);
               setStructureTypeChosen(true);
             }}
-          >
-            <option value="">No Type</option>
-            {typeId && !types.some((type) => type.id === typeId) && (
-              <option value={typeId} disabled>
-                Incompatible current Type — choose explicitly
-              </option>
-            )}
-            {types.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          disabled={
-            aliasDirty ||
-            mutations.state === "saving" ||
-            relationshipsState === "saving" ||
-            fieldsState !== "saved"
-          }
-          onClick={() => setShowTypeCreator(true)}
-        >
-          Create a Type in this Category
-        </button>
-        {showTypeCreator && (
-          <fieldset
-            className="inline-creator"
-            disabled={
-              aliasDirty ||
-              mutations.state === "saving" ||
-              relationshipsState === "saving" ||
-              spatialState !== "saved"
-            }
-          >
-            <legend>New Type</legend>
-            <label>
-              Type name
-              <input
-                aria-label="new-editor-type-name"
-                value={newTypeName}
-                onChange={(e) => setNewTypeName(e.target.value)}
-              />
-            </label>
-            <div className="row">
-              <button
-                disabled={!newTypeName.trim()}
-                onClick={() =>
-                  void mutations
-                    .run(
-                      () => createType(projectId, categoryId, newTypeName),
-                      (created) => {
-                        setTypes((items) => [...items, created]);
-                        setTypeId(created.id);
-                        setStructureTypeChosen(true);
-                        setNewTypeName("");
-                        setShowTypeCreator(false);
-                        receiveRevision(created.globalRevision);
-                      },
-                    )
-                    .then((result) => {
-                      if (result.kind === "failed") setStructureError(result.errorMessage);
-                    })
-                }
-              >
-                Create Type and select
-              </button>
-              <button
-                onClick={() => {
-                  setNewTypeName("");
-                  setShowTypeCreator(false);
-                }}
-              >
-                Cancel new Type
-              </button>
-            </div>
-          </fieldset>
-        )}
-        <div className="row">
+            emptyLabel="No Type"
+            choices={[
+              ...(typeId && !types.some((type) => type.id === typeId)
+                ? [
+                    {
+                      id: typeId,
+                      label: "Incompatible current Type — choose explicitly",
+                      disabled: true,
+                    },
+                  ]
+                : []),
+              ...types.map((type) => ({ id: type.id, label: type.name })),
+            ]}
+          />
           <button
             disabled={
               aliasDirty ||
               mutations.state === "saving" ||
               relationshipsState === "saving" ||
-              spatialState !== "saved" ||
-              !categoryTypeDirty ||
-              !!newTypeName ||
-              (categoryId !== editor.entry.categoryId && !structureTypeChosen)
+              fieldsState !== "saved"
             }
-            onClick={() => void saveStructure()}
+            onClick={() => setShowTypeCreator(true)}
           >
-            Apply Category / Type
+            Create a Type in this Category
           </button>
-        </div>
-        <EntryAliasesEditor
-          projectId={projectId}
-          entryId={editor.entry.id}
-          disabled={
-            categoryTypeDirty ||
-            mutations.state === "saving" ||
-            editor.saveState !== "saved" ||
-            fieldsState !== "saved" ||
-            relationshipsState !== "saved" ||
-            spatialState !== "saved"
-          }
-          mutations={mutations}
-          getRevision={getRevision}
-          onRevision={receiveRevision}
-          onDraftChange={setAliasDirty}
-        />
-        {entrySettingsOpen && structureError && <p role="alert">{structureError}</p>}
-        <section aria-label="Entry removal">
+          {showTypeCreator && (
+            <fieldset
+              className="inline-creator"
+              disabled={
+                aliasDirty ||
+                mutations.state === "saving" ||
+                relationshipsState === "saving" ||
+                spatialState !== "saved"
+              }
+            >
+              <legend>New Type</legend>
+              <label>
+                Type name
+                <input
+                  aria-label="new-editor-type-name"
+                  value={newTypeName}
+                  onChange={(e) => setNewTypeName(e.target.value)}
+                />
+              </label>
+              <div className="row">
+                <button
+                  disabled={!newTypeName.trim()}
+                  onClick={() =>
+                    void mutations
+                      .run(
+                        () => createType(projectId, categoryId, newTypeName),
+                        (created) => {
+                          setTypes((items) => [...items, created]);
+                          setTypeId(created.id);
+                          setStructureTypeChosen(true);
+                          setNewTypeName("");
+                          setShowTypeCreator(false);
+                          receiveRevision(created.globalRevision);
+                        },
+                      )
+                      .then((result) => {
+                        if (result.kind === "failed") setStructureError(result.errorMessage);
+                      })
+                  }
+                >
+                  Create Type and select
+                </button>
+                <button
+                  onClick={() => {
+                    setNewTypeName("");
+                    setShowTypeCreator(false);
+                  }}
+                >
+                  Cancel new Type
+                </button>
+              </div>
+            </fieldset>
+          )}
+          <div className="row">
+            <button
+              disabled={
+                aliasDirty ||
+                mutations.state === "saving" ||
+                relationshipsState === "saving" ||
+                spatialState !== "saved" ||
+                !categoryTypeDirty ||
+                !!newTypeName ||
+                (categoryId !== editor.entry.categoryId && !structureTypeChosen)
+              }
+              onClick={() => void saveStructure()}
+            >
+              Apply Category / Type
+            </button>
+          </div>
+        </section>
+        <section
+          className="settings-panel"
+          hidden={settingsSection !== "names"}
+          aria-label="Other names settings"
+        >
+          <EntryAliasesEditor
+            projectId={projectId}
+            entryId={editor.entry.id}
+            disabled={
+              categoryTypeDirty ||
+              mutations.state === "saving" ||
+              editor.saveState !== "saved" ||
+              fieldsState !== "saved" ||
+              relationshipsState !== "saved" ||
+              spatialState !== "saved"
+            }
+            mutations={mutations}
+            getRevision={getRevision}
+            onRevision={receiveRevision}
+            onDraftChange={setAliasDirty}
+          />
+        </section>
+        <section
+          className="settings-panel"
+          hidden={settingsSection !== "lifecycle"}
+          aria-label="Entry removal"
+        >
           <h3>Put this Entry aside</h3>
           <p className="muted">
             Archive hides it from normal browsing. Trash is recoverable deletion. Both keep its
@@ -1343,11 +1373,11 @@ function EntryEditor({
               </button>
             </div>
           )}
+          <details className="technical-details">
+            <summary>Entry information</summary>
+            <p className="package-preview">Entry ID: {editor.entry.id}</p>
+          </details>
         </section>
-        <details className="technical-details">
-          <summary>Entry information</summary>
-          <p className="package-preview">Entry ID: {editor.entry.id}</p>
-        </details>
       </Dialog>
       <SpatialPanel
         projectId={projectId}
@@ -1462,6 +1492,10 @@ function EntryWorkflow({
   const [error, setError] = useState<string | null>(null);
   const controllerRef = useRef<EntrySaveController | null>(null);
   const [pendingNavigation, setPendingNavigation] = useState<NavigationIntent | null>(null);
+  const chapterBrowse = useRef<ChapterBrowseState | undefined>(undefined);
+  const rememberChapterBrowse = useCallback((state: ChapterBrowseState) => {
+    chapterBrowse.current = state;
+  }, []);
   const [history, setHistory] = useState<WorkspaceHistory>({
     locations: [initialLocation],
     index: 0,
@@ -1959,6 +1993,20 @@ function EntryWorkflow({
     setHistory(next);
   }
 
+  function updateEntryBrowse(
+    change: Partial<Pick<WorkspaceLocation, "entryQuery" | "entryPage" | "entryPageSize">>,
+  ) {
+    const current = historyRef.current;
+    const next = {
+      ...current,
+      locations: current.locations.map((item, index) =>
+        index === current.index ? { ...item, ...change } : item,
+      ),
+    };
+    historyRef.current = next;
+    setHistory(next);
+  }
+
   function updateSearchView(searchView: SearchView) {
     const current = historyRef.current;
     const next = {
@@ -2219,6 +2267,8 @@ function EntryWorkflow({
           </>
         ) : (
           <ChapterLibrary
+            initialBrowseState={chapterBrowse.current}
+            onBrowseStateChange={rememberChapterBrowse}
             locked={locked || navigating}
             projectId={projectId}
             onController={receiveController}
@@ -2376,11 +2426,25 @@ function EntryWorkflow({
     );
   }
 
-  const shownEntries = (location.entryState === "active" ? entries : inactiveEntries).filter(
+  const matchingEntries = (location.entryState === "active" ? entries : inactiveEntries).filter(
     (entry) =>
+      entry.displayName
+        .toLocaleLowerCase()
+        .includes((location.entryQuery ?? "").trim().toLocaleLowerCase()) &&
       (!location.categoryId || entry.categoryId === location.categoryId) &&
       (!location.typeId ||
         (location.typeId === "__untyped" ? !entry.typeId : entry.typeId === location.typeId)),
+  );
+  const entryPageSize = location.entryPageSize ?? 20;
+  const entryPageCount = Math.max(1, Math.ceil(matchingEntries.length / entryPageSize));
+  const entryPage = Math.min(location.entryPage ?? 0, entryPageCount - 1);
+  // Page in the same Category order in which rows are drawn.
+  const orderedEntries = categories.flatMap((category) =>
+    matchingEntries.filter((entry) => entry.categoryId === category.id),
+  );
+  const shownEntries = orderedEntries.slice(
+    entryPage * entryPageSize,
+    (entryPage + 1) * entryPageSize,
   );
   return (
     <WorkspaceFrame {...navigationProps}>
@@ -2408,49 +2472,106 @@ function EntryWorkflow({
             </button>
           </div>
         </div>
-        <label className="browse-filter">
-          View
-          <select
-            aria-label="Entry state"
-            value={location.entryState}
-            disabled={navigating || mutations.state === "saving"}
-            onChange={(e) =>
-              void requestNavigation({
-                location: {
-                  ...location,
-                  entryId: null,
-                  entryState: e.target.value as Entry["workspaceState"],
-                },
-              })
-            }
-          >
-            <option value="active">Active Entries</option>
-            <option value="archived">Archive</option>
-            <option value="trashed">Trash</option>
-          </select>
-        </label>
-        {location.categoryId && (
-          <label className="browse-filter">
-            Type
-            <select
-              aria-label="Filter by Type"
-              value={location.typeId}
-              disabled={typesLoading || navigating || creationDirty}
+        <div className="browse-tools">
+          <label className="browse-query">
+            Find an Entry
+            <input
+              type="search"
+              value={location.entryQuery ?? ""}
+              placeholder="Search Entry names…"
+              disabled={navigating || creationDirty}
               onChange={(event) =>
+                updateEntryBrowse({ entryQuery: event.target.value, entryPage: 0 })
+              }
+            />
+          </label>
+          <label className="browse-filter">
+            View
+            <select
+              aria-label="Entry state"
+              value={location.entryState}
+              disabled={navigating || mutations.state === "saving"}
+              onChange={(e) =>
                 void requestNavigation({
-                  location: destination(null, location.categoryId, event.currentTarget.value),
+                  location: {
+                    ...location,
+                    entryId: null,
+                    entryState: e.target.value as Entry["workspaceState"],
+                    entryPage: 0,
+                  },
                 })
               }
             >
-              <option value="">All Types</option>
-              <option value="__untyped">No Type</option>
-              {browseTypes.map((type) => (
-                <option value={type.id} key={type.id}>
-                  {type.name}
-                </option>
-              ))}
+              <option value="active">Active Entries</option>
+              <option value="archived">Archive</option>
+              <option value="trashed">Trash</option>
             </select>
           </label>
+          {location.categoryId && (
+            <label className="browse-filter">
+              Type
+              <select
+                aria-label="Filter by Type"
+                value={location.typeId}
+                disabled={typesLoading || navigating || creationDirty}
+                onChange={(event) =>
+                  void requestNavigation({
+                    location: {
+                      ...location,
+                      entryId: null,
+                      typeId: event.currentTarget.value,
+                      entryPage: 0,
+                    },
+                  })
+                }
+              >
+                <option value="">All Types</option>
+                <option value="__untyped">No Type</option>
+                {browseTypes.map((type) => (
+                  <option value={type.id} key={type.id}>
+                    {type.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label>
+            Entries per page
+            <select
+              value={entryPageSize}
+              onChange={(event) =>
+                updateEntryBrowse({ entryPageSize: Number(event.target.value), entryPage: 0 })
+              }
+            >
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </label>
+        </div>
+        {matchingEntries.length > 0 && (
+          <nav className="browse-pagination" aria-label="Entry pages">
+            <span className="muted">
+              Showing {entryPage * entryPageSize + 1}–
+              {Math.min((entryPage + 1) * entryPageSize, matchingEntries.length)} of{" "}
+              {matchingEntries.length} Entries
+            </span>
+            <button
+              disabled={entryPage === 0}
+              onClick={() => updateEntryBrowse({ entryPage: entryPage - 1 })}
+            >
+              Previous Entries
+            </button>
+            <span>
+              Page {entryPage + 1} of {entryPageCount}
+            </span>
+            <button
+              disabled={entryPage + 1 === entryPageCount}
+              onClick={() => updateEntryBrowse({ entryPage: entryPage + 1 })}
+            >
+              Next Entries
+            </button>
+          </nav>
         )}
         {(entries.length > 0 || location.entryState !== "active") && shownEntries.length === 0 && (
           <p className="empty-state">No Entries match this view.</p>
@@ -2490,7 +2611,9 @@ function EntryWorkflow({
               >
                 <summary>
                   <h3>{category.name}</h3>
-                  <span className="muted">{members.length}</span>
+                  <span className="muted">
+                    {matchingEntries.filter((entry) => entry.categoryId === category.id).length}
+                  </span>
                 </summary>
                 <ul className="entry-list">
                   {members.map((entry) => (
@@ -2521,26 +2644,19 @@ function EntryWorkflow({
                 onChange={(event) => setDraftName(event.currentTarget.value)}
               />
             </label>
-            <label>
-              Category
-              <select
-                aria-label="new-entry-category"
-                disabled={mutations.state === "saving"}
-                value={categoryId}
-                onChange={(event) => {
-                  setTypes([]);
-                  setCategoryId(event.currentTarget.value);
-                  setTypeId("");
-                  setCreationTouched(true);
-                }}
-              >
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ManagerSearchSelect
+              label="Category"
+              ariaLabel="new-entry-category"
+              disabled={mutations.state === "saving"}
+              value={categoryId}
+              onChange={(id) => {
+                setTypes([]);
+                setCategoryId(id);
+                setTypeId("");
+                setCreationTouched(true);
+              }}
+              choices={categories.map((category) => ({ id: category.id, label: category.name }))}
+            />
             <button
               disabled={mutations.state === "saving"}
               onClick={() => setShowCategoryCreator(true)}
@@ -2577,25 +2693,19 @@ function EntryWorkflow({
                 </div>
               </fieldset>
             )}
-            <label>
-              Type (optional)
-              <select
-                aria-label="new-entry-type"
-                disabled={mutations.state === "saving"}
-                value={typeId}
-                onChange={(event) => {
-                  setTypeId(event.currentTarget.value);
-                  setCreationTouched(true);
-                }}
-              >
-                <option value="">No Type</option>
-                {types.map((type) => (
-                  <option key={type.id} value={type.id}>
-                    {type.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ManagerSearchSelect
+              key={categoryId}
+              label="Type (optional)"
+              ariaLabel="new-entry-type"
+              disabled={mutations.state === "saving"}
+              value={typeId}
+              onChange={(id) => {
+                setTypeId(id);
+                setCreationTouched(true);
+              }}
+              emptyLabel="No Type"
+              choices={types.map((type) => ({ id: type.id, label: type.name }))}
+            />
             <button
               disabled={!categoryId || mutations.state === "saving"}
               onClick={() => setShowTypeCreator(true)}
