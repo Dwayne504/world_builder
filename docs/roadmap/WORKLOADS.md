@@ -105,7 +105,7 @@ Each packet defines a user outcome, bounded slices, code starting points and acc
 
 **Deferred:** arbitrary SQL, user formulas, graph visualization and historical “at time” queries until W13.
 
-**Session selection:** W07a is ready without Tags/Statuses; read Milestone 01 Explore requirements before choosing operators. Branch suggestion: `feature/explore`.
+**Status:** W07a is implemented on `feature/explore`: AND-combined Category, exact Type, capability, name/alias and workspace-state filters, plus one current relationship clause with an explicit side and exact/contained other Entry. It uses canonical reads without a schema change; invalid selections remain visible. See [Explore verification](../milestones/EXPLORE_FOUNDATION_VERIFICATION.md) for precise semantics, checks and manual acceptance. W07b saved views and future Tags/Statuses remain planned; historical queries still depend on W13.
 
 ## W08 Managed images and attachments
 

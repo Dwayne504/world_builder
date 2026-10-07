@@ -2448,3 +2448,62 @@ dialog::after {
     grid-template-columns: 1fr;
   }
 }
+
+.explore-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.explore-filters label {
+  min-width: 0;
+}
+.explore-relationship {
+  margin: 1.2rem 0;
+}
+.explore-other {
+  display: grid;
+  gap: 0.35rem;
+}
+.explore-results,
+.explore-picker-list {
+  padding: 0;
+  list-style: none;
+}
+.explore-results li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0;
+}
+.explore-results li button,
+.explore-picker-list button {
+  display: grid;
+  text-align: left;
+  gap: 0.2rem;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.explore-results li small,
+.explore-picker-list small {
+  font-weight: normal;
+}
+.explore-results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.explore-results-header label {
+  max-width: 8rem;
+}
+.explore-picker {
+  border-top: 1px solid var(--line);
+  padding: 1rem 0;
+}
+.explore-picker-list {
+  max-height: 20rem;
+  overflow-y: auto;
+}

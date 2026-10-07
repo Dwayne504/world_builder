@@ -5,6 +5,10 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { ExploreView, ExploreResults } from "./exploreTypes";
+export function exploreProject(projectId: string, request: ExploreView): Promise<ExploreResults> {
+  return call("explore_project", { projectId, request });
+}
 import type { TimelineCommand, TimelineSnapshot } from "./timelineTypes";
 export function readTimeline(projectId: string): Promise<TimelineSnapshot> {
   return call("read_timeline", { projectId });

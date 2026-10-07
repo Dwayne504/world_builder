@@ -49,6 +49,16 @@ pub fn apply_timeline(
     .map_err(Into::into)
 }
 #[tauri::command]
+pub fn explore_project(
+    state: State<'_, AppState>,
+    project_id: String,
+    request: crate::domain::explore::ExploreRequest,
+) -> Result<crate::domain::explore::ExploreResults, AppErrorDto> {
+    ProjectService::explore_project(&state, parse_project_id(&project_id)?, request)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn search_project(
     state: State<'_, AppState>,
     project_id: String,

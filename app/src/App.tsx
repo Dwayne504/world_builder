@@ -4,6 +4,8 @@ import { Timeline, TimelineUsage } from "./Timeline";
 import type { TimelineView } from "./timelineTypes";
 import { ChapterLibrary, type ChapterBrowseState } from "./ChapterLibrary";
 import { ProjectSearch } from "./ProjectSearch";
+import { Explore } from "./Explore";
+import { initialExploreView, type ExploreView } from "./exploreTypes";
 import { EntryAliasesEditor } from "./EntryAliasesEditor";
 import type { SearchTarget, SearchView } from "./searchTypes";
 import { ChapterEditor } from "./ChapterEditor";
@@ -1833,6 +1835,10 @@ function EntryWorkflow({
       if (!selected && location.page === "relationships") return;
       void requestNavigation({ location: { ...initialLocation, page: "relationships" } });
     },
+    onExplore: () => {
+      if (location.page !== "explore")
+        void requestNavigation({ location: { ...initialLocation, page: "explore" } });
+    },
     onSearch: () => {
       if (location.page !== "search")
         void requestNavigation({ location: { ...initialLocation, page: "search" } });
@@ -1925,6 +1931,12 @@ function EntryWorkflow({
       ],
       view: [
         {
+          id: "explore",
+          label: "Explore",
+          disabled: navigationDisabled,
+          action: navigationProps.onExplore,
+        },
+        {
           id: "search",
           label: "Search",
           disabled: navigationDisabled,
@@ -2007,6 +2019,17 @@ function EntryWorkflow({
     setHistory(next);
   }
 
+  function updateExploreView(exploreView: ExploreView) {
+    const current = historyRef.current;
+    const next = {
+      ...current,
+      locations: current.locations.map((item, index) =>
+        index === current.index ? { ...item, exploreView } : item,
+      ),
+    };
+    historyRef.current = next;
+    setHistory(next);
+  }
   function updateSearchView(searchView: SearchView) {
     const current = historyRef.current;
     const next = {
@@ -2181,6 +2204,20 @@ function EntryWorkflow({
               location: { ...initialLocation, page: "chapters", chapterId: id },
             })
           }
+        />
+      </WorkspaceFrame>
+    );
+  }
+  if (location.page === "explore") {
+    return (
+      <WorkspaceFrame {...navigationProps}>
+        {error && <p role="alert">{error}</p>}
+        <Explore
+          projectId={projectId}
+          view={location.exploreView ?? initialExploreView}
+          onViewChange={updateExploreView}
+          refreshKey={templateEpoch}
+          onOpen={(id) => openSearchTarget({ kind: "entry", entryId: id })}
         />
       </WorkspaceFrame>
     );

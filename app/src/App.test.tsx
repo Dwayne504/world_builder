@@ -105,6 +105,7 @@ vi.mock("./api", () => ({
   readAliases: vi.fn().mockResolvedValue({ globalRevision: 0, aliases: [] }),
   applyAlias: vi.fn(),
   searchProject: vi.fn(),
+  exploreProject: vi.fn(),
   createProject: vi.fn(),
   openProject: (...args: unknown[]) => openProjectMock(...args),
   restoreBackupAsCopy: vi.fn(),
@@ -156,6 +157,7 @@ import {
   readRelationships,
   applyRelationships,
   readProjectRelationships,
+  exploreProject,
 } from "./api";
 
 async function renderApp() {
@@ -675,6 +677,58 @@ describe("Project screen Saved contract", () => {
     fireEvent.click(menuItem("Edit", "Chapter", "Chapter options…"));
     expect(screen.getByLabelText("New Story Role")).toHaveValue("Unapplied");
   });
+  it("keeps Explore filters and paging across Entry navigation and Back/Forward", async () => {
+    const entry = mockEditableEntry();
+    getEntryMock.mockResolvedValue(entry);
+    vi.mocked(exploreProject).mockImplementation(async (_project, request) => ({
+      globalRevision: 1,
+      categories: [],
+      types: [],
+      capabilities: ["base", "spatial", "event"],
+      definitions: [],
+      selectedOther: null,
+      issues: [],
+      page: request.page,
+      pageSize: request.pageSize,
+      total: 45,
+      entries: [
+        {
+          id: entry.id,
+          name: "Explore result",
+          category: "Character",
+          typeName: null,
+          workspaceState: "active",
+          spatial: false,
+          relationshipMatch: null,
+        },
+      ],
+    }));
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Explore" }));
+    await screen.findByRole("button", { name: "Explore result Character" });
+    fireEvent.change(screen.getByLabelText("Name or alias"), { target: { value: "Captain" } });
+    await waitFor(() =>
+      expect(exploreProject).toHaveBeenLastCalledWith(
+        project.projectId,
+        expect.objectContaining({ query: "Captain" }),
+      ),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(exploreProject).toHaveBeenLastCalledWith(
+        project.projectId,
+        expect.objectContaining({ query: "Captain", page: 1 }),
+      ),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Explore result Character" }));
+    await screen.findByLabelText("entry-name");
+    fireEvent.click(screen.getByRole("button", { name: "← Back" }));
+    expect(await screen.findByLabelText("Name or alias")).toHaveValue("Captain");
+    expect(await screen.findByText("Page 2")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Forward →" }));
+    await screen.findByLabelText("entry-name");
+  });
+
   it("searches an Entry's connections and linked Chapters through guarded navigation", async () => {
     const e = mockEditableEntry();
     getEntryMock.mockResolvedValue(e);

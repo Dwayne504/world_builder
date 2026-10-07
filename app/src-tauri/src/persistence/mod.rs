@@ -6,6 +6,7 @@
 //! `application` and `tauri_boundary`.
 
 pub mod error;
+mod explore;
 mod fields;
 pub mod lifecycle;
 pub mod lock;

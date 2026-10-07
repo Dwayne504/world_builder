@@ -103,6 +103,14 @@ impl ProjectService {
     ) -> Result<crate::domain::timeline::TimelineSnapshot, AppError> {
         Self::with_worker(state, project_id, |w| w.apply_timeline(expected, command))
     }
+    pub fn explore_project(
+        state: &AppState,
+        project: ProjectId,
+        request: crate::domain::explore::ExploreRequest,
+    ) -> Result<crate::domain::explore::ExploreResults, AppError> {
+        Self::with_worker(state, project, |worker| worker.explore_project(request))
+    }
+
     pub fn search_project(
         state: &AppState,
         project_id: ProjectId,
