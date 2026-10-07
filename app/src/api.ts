@@ -5,6 +5,17 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { NavigationCommand, NavigationSnapshot } from "./workspaceNavigationTypes";
+
+export function readWorkspaceNavigation(projectId: string): Promise<NavigationSnapshot> {
+  return call("read_workspace_navigation", { projectId });
+}
+export function applyWorkspaceNavigation(
+  projectId: string,
+  command: NavigationCommand,
+): Promise<NavigationSnapshot> {
+  return call("apply_workspace_navigation", { projectId, command });
+}
 import type { JSONContent } from "@tiptap/react";
 import type { EntryDescriptionSnapshot } from "./entryDescriptionTypes";
 
