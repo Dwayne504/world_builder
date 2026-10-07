@@ -26,6 +26,11 @@ The first goal is to prove the core loop:
 
 ## Documentation
 
+### Upcoming coding sessions
+
+See the [development workload roadmap](docs/roadmap/README.md) for the next slices,
+acceptance tests, open product decisions and reusable session handoffs.
+
 ### Product Concept
 
 `docs/concept/The_Worldcrafter_Concept_V0.02.docx`
