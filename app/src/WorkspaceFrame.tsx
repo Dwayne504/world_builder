@@ -21,6 +21,9 @@ export function WorkspaceFrame({
   canForward,
   busy,
   browsingDisabled,
+  recordNavigation,
+  navigationTools,
+  navigationNotice,
 }: {
   children: ReactNode;
   categories: Category[];
@@ -40,6 +43,9 @@ export function WorkspaceFrame({
   canForward: boolean;
   busy: boolean;
   browsingDisabled: boolean;
+  recordNavigation?: ReactNode;
+  navigationTools?: ReactNode;
+  navigationNotice?: ReactNode;
 }) {
   const [categoriesOpen, setCategoriesOpen] = useState(true);
   const [categoryQuery, setCategoryQuery] = useState("");
@@ -92,6 +98,7 @@ export function WorkspaceFrame({
             Opening…
           </span>
         )}
+        {navigationNotice}
       </nav>
       <div className={`workspace-layout ${collapsed ? "sidebar-collapsed" : ""}`}>
         <aside
@@ -210,12 +217,14 @@ export function WorkspaceFrame({
                     .includes(categoryQuery.trim().toLocaleLowerCase()),
                 ) && <p className="muted sidebar-empty">No matching Categories.</p>}
             </div>
+            {recordNavigation}
           </nav>
         </aside>
         <fieldset className="workspace-content navigation-guard" disabled={busy}>
           {children}
         </fieldset>
       </div>
+      {navigationTools}
     </>
   );
 }
