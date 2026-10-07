@@ -15,7 +15,7 @@ use rusqlite::{Connection, Transaction};
 use super::error::PersistenceError;
 
 /// The newest schema version this build knows how to read and write.
-pub const CURRENT_SCHEMA_VERSION: i64 = 13;
+pub const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 /// Ordered (version, sql) pairs. Each migration is applied at most once and
 /// migrations must be applied in order starting just above the database's
@@ -92,6 +92,11 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 13,
         sql: include_str!("migrations/0013_workspace_navigation.sql"),
+        after_sql: None,
+    },
+    Migration {
+        version: 14,
+        sql: include_str!("migrations/0014_rich_text_fields.sql"),
         after_sql: None,
     },
 ];
@@ -217,6 +222,76 @@ fn add_story_roles(tx: &Transaction<'_>) -> Result<(), PersistenceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rich_fields_upgrade_preserves_populated_values_documents_and_navigation_and_rolls_back() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "legacy_alter_table", true)
+            .unwrap();
+        apply_pending_chain(
+            &conn,
+            0,
+            &MIGRATIONS
+                .iter()
+                .filter(|m| m.version <= 13)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        conn.execute_batch("INSERT INTO project_meta(id,project_id,format_version,schema_version,working_name,created_at,updated_at) VALUES(1,'project',1,13,'Fixture','now','now');
+        INSERT INTO record_identity VALUES('entry','entry','active','now','now');
+        INSERT INTO entry SELECT 'entry',id,NULL,'Original','now','now',1 FROM category WHERE is_uncategorized=1;
+        INSERT INTO field_definition VALUES('text','Description','short_text',NULL,'now','now',1,NULL),('choice','Choice','choice',NULL,'now','now',1,NULL);
+        INSERT INTO field_value(id,entry_id,field_id,value_kind,text_value,created_at,updated_at,revision) VALUES('text-value','entry','text','short_text','Keep this','now','now',1);
+        INSERT INTO field_value(id,entry_id,field_id,value_kind,created_at,updated_at,revision) VALUES('choice-value','entry','choice','choice','now','now',1);
+        INSERT INTO choice_option VALUES('option','choice','Keep choice',NULL,'now','now',1);
+        INSERT INTO field_choice_value VALUES('choice-value','choice','option');
+        INSERT INTO rich_document VALUES('description','entry','entry','description',99,'original unsupported bytes','cached text',2,'current','now','now',7);
+        INSERT INTO project_pin VALUES('entry','entry',1);
+        CREATE TRIGGER fail_rich_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        assert!(migrate(&conn).is_err());
+        assert_eq!(user_version(&conn).unwrap(), 13);
+        assert!(conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+            .unwrap());
+        assert!(conn.prepare("SELECT document_id FROM field_value").is_err());
+        conn.execute_batch("DROP TRIGGER fail_rich_upgrade")
+            .unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            conn.query_row(
+                "SELECT text_value FROM field_value WHERE id='text-value'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "Keep this"
+        );
+        assert_eq!(
+            conn.query_row("SELECT canonical_json FROM rich_document", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "original unsupported bytes"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM field_choice_value", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM project_pin", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(!conn
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
+    }
 
     #[test]
     fn fresh_database_migrates_to_current_version() {

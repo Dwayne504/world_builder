@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-const INDEX_VERSION: i64 = 5;
+const INDEX_VERSION: i64 = 6;
 const CREATE_INDEX: &str = "CREATE VIRTUAL TABLE search_index USING fts5(payload UNINDEXED, terms, tokenize='unicode61 remove_diacritics 0')";
 fn invalid(message: impl ToString) -> PersistenceError {
     PersistenceError::Other(message.to_string())
@@ -209,7 +209,7 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
         d.identity=Some(id);
         result.push(d);
     }
-    for row in conn.prepare("SELECT v.id,v.entry_id,f.name,COALESCE(v.text_value,CAST(v.number_value AS TEXT),CASE v.bool_value WHEN 1 THEN 'Yes true' WHEN 0 THEN 'No false' END,(SELECT group_concat(label,', ') FROM (SELECT o.label FROM field_choice_value x JOIN choice_option o ON o.id=x.option_id WHERE x.value_id=v.id ORDER BY o.label,o.id)),''),COALESCE(f.unit,'') FROM field_value v JOIN field_definition f ON f.id=v.field_id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
+    for row in conn.prepare("SELECT v.id,v.entry_id,f.name,COALESCE(v.text_value,CAST(v.number_value AS TEXT),CASE v.bool_value WHEN 1 THEN 'Yes true' WHEN 0 THEN 'No false' END,(SELECT group_concat(label,', ') FROM (SELECT o.label FROM field_choice_value x JOIN choice_option o ON o.id=x.option_id WHERE x.value_id=v.id ORDER BY o.label,o.id)),''),COALESCE(f.unit,'') FROM field_value v JOIN field_definition f ON f.id=v.field_id WHERE v.document_id IS NULL")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
         let (id,entry,field,value,unit)=row?;
         let (title,context,state)=entry_context.get(&entry).ok_or_else(||invalid("Field owner is missing"))?;
         let mut d = doc("structured",format!("field:{id}"),title.clone(),format!("{context} · {field}"),state.clone(),SearchTarget::Entry{entry_id:entry.clone()},format!("{field}: {value} {unit}").trim().into());
@@ -286,7 +286,9 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
         let text=serde_json::from_str(&json).map_err(|e|e.to_string()).and_then(|v|crate::domain::story::document_text(version,&v)).map(|(text,_)|text).unwrap_or(preserved);
         let mut document = if owner_kind == "entry" {
             let (title,_,state)=entry_context.get(&owner).ok_or_else(||invalid("Description owner is missing"))?;
-            let mut d=doc("text",format!("document:{id}"),title.clone(),"Description · Text match".into(),state.clone(),SearchTarget::Entry{entry_id:owner.clone()},text);
+            let field = area.strip_prefix("field:").map(|field| conn.query_row("SELECT name FROM field_definition WHERE id=?1",[field],|r|r.get::<_,String>(0))).transpose()?;
+            let mut d=doc(if field.is_some() {"structured"} else {"text"},format!("document:{id}"),title.clone(),field.as_ref().map(|name|format!("{name} · Rich Text")).unwrap_or_else(||"Description · Text match".into()),state.clone(),SearchTarget::Entry{entry_id:owner.clone()},text);
+            if let Some(name) = field { d.structured_kind=Some(StructuredKind::Fields); d.preview_text=Some(d.text.clone()); d.text=format!("{name} {}",d.text); }
             d.entry_ids.push(owner);
             d
         } else {
@@ -294,7 +296,7 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
             doc("text",format!("document:{id}"),title.clone(),format!("{area} · Text match"),state.clone(),SearchTarget::Chapter{chapter_id:owner,area},text)
         };
         // The index stores only derived prose; it cannot create semantic links.
-        document.preview_text = Some(document.text.clone());
+        if document.preview_text.is_none() { document.preview_text = Some(document.text.clone()); }
         result.push(document);
     }
     for o in super::timeline::read_occurrences(conn)? {

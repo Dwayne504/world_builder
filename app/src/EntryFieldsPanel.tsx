@@ -1,3 +1,4 @@
+import { RichFieldPanel } from "./RichFieldPanel";
 import { FieldManagerTables } from "./FieldManagerTables";
 import { DeleteEntryFieldDialog } from "./DeleteEntryFieldDialog";
 import { FieldSuggestions } from "./FieldSuggestions";
@@ -26,6 +27,7 @@ export interface FieldsController {
   waitForPending?: () => Promise<SubmitOutcome>;
 }
 const kinds: Record<FieldKind, string> = {
+  rich_text: "Rich Text",
   short_text: "Short Text",
   number: "Number (optional unit)",
   boolean: "Boolean",
@@ -160,7 +162,7 @@ export function EntryFieldsPanel({
     null,
   );
   const [createOpen, setCreateOpen] = useState(false);
-  const { submit: submitValues, waitForPending, command: commandFields } = fields;
+  const { submit: submitValues, waitForPending: waitForScalar, command: commandFields } = fields;
   const editProjection = useCallback(
     async (command: FieldCommand): Promise<SubmitOutcome> => {
       const result = await commandFields(command);
@@ -212,26 +214,81 @@ export function EntryFieldsPanel({
     renamed ||
     optionLabel
   );
-  const combinedState =
-    fields.state === "saving" || fields.state === "failed"
-      ? fields.state
-      : formDirty
+  const [richControllers, setRichControllers] = useState<Record<string, FieldsController>>({});
+  const registerRich = useCallback((id: string, controller: FieldsController | null) => {
+    setRichControllers((current) => {
+      if (controller) return { ...current, [id]: controller };
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }, []);
+  const richStates = Object.values(richControllers).map((controller) => controller.state);
+  const combinedState: SaveState = [fields.state, ...richStates].includes("failed")
+    ? "failed"
+    : [fields.state, ...richStates].includes("saving")
+      ? "saving"
+      : formDirty || [fields.state, ...richStates].includes("dirty")
         ? "dirty"
-        : fields.state;
-  const submit = useCallback((): Promise<SubmitOutcome> => {
+        : "saved";
+  const submit = useCallback(async (): Promise<SubmitOutcome> => {
     if (formDirty) {
       setFormError("Finish or cancel the field definition form before leaving.");
-      return Promise.resolve({ kind: "failed" });
+      return { kind: "failed" };
     }
-    return submitValues();
-  }, [formDirty, submitValues]);
+    let result = await submitValues();
+    if (result.kind === "failed" || result.kind === "committed-stale") return result;
+    for (const controller of Object.values(richControllers)) {
+      if (!controller.canSubmit) return { kind: "failed" };
+      result = await controller.submit();
+      if (result.kind === "failed" || result.kind === "committed-stale") return result;
+    }
+    return result;
+  }, [formDirty, submitValues, richControllers]);
+  const waitForPending = useCallback(async (): Promise<SubmitOutcome> => {
+    const outcomes = await Promise.all([
+      waitForScalar(),
+      ...Object.values(richControllers).map((controller) => controller.waitForPending?.()),
+    ]);
+    return (
+      outcomes.find(
+        (outcome) => outcome?.kind === "failed" || outcome?.kind === "committed-stale",
+      ) ?? { kind: "no-op" }
+    );
+  }, [waitForScalar, richControllers]);
+  const canSubmit =
+    !formDirty && Object.values(richControllers).every((controller) => controller.canSubmit);
   useEffect(
-    () => onController({ state: combinedState, submit, canSubmit: !formDirty, waitForPending }),
-    [combinedState, submit, formDirty, onController, waitForPending],
+    () => onController({ state: combinedState, submit, canSubmit, waitForPending }),
+    [combinedState, submit, canSubmit, onController, waitForPending],
   );
   const busy = disabled || fields.state === "saving";
+  const hasRichDraft = richStates.some((state) => state !== "saved");
   const hasValueDraft = Object.keys(fields.drafts).length > 0;
-  const configDisabled = busy || hasValueDraft || !fields.snapshot;
+  const configDisabled = busy || hasValueDraft || hasRichDraft || !fields.snapshot;
+  const readRevision = useCallback(
+    () => getRevision?.() ?? fields.snapshot?.globalRevision ?? 0,
+    [getRevision, fields.snapshot?.globalRevision],
+  );
+  const [richRefresh, setRichRefresh] = useState<number | null>(null);
+  const { reload: reloadFields } = fields;
+  useEffect(() => {
+    // Companion acknowledgements may refresh the table only when scalar drafts
+    // and failures are resolved. Never silently rebase an unsaved scalar edit.
+    if (
+      richRefresh === null ||
+      fields.state !== "saved" ||
+      hasValueDraft ||
+      fields.configurationPending
+    )
+      return;
+    setRichRefresh(null);
+    void reloadFields(true);
+  }, [richRefresh, fields.state, hasValueDraft, fields.configurationPending, reloadFields]);
+  const richCommitted = (revision: number) => {
+    onCommitted?.(revision);
+    setRichRefresh(revision);
+  };
   const selected = fields.snapshot?.definitions.find((d) => d.id === manageId);
   const presentedIds = [
     ...new Set(
@@ -313,6 +370,7 @@ export function EntryFieldsPanel({
 
   const manageDisabled =
     busy ||
+    hasRichDraft ||
     !!newName ||
     !!String(newValue) ||
     !!newOptions ||
@@ -421,7 +479,7 @@ export function EntryFieldsPanel({
           .filter((field) => showHidden || !field.hidden)
           .map((field) => (
             <div
-              className={`field-value${field.hidden ? " hidden-field-preview" : ""}`}
+              className={`field-value${field.definition.kind === "rich_text" ? " rich-field-value" : ""}${field.hidden ? " hidden-field-preview" : ""}`}
               key={field.definition.id}
             >
               <div className="field-value-label">
@@ -454,6 +512,17 @@ export function EntryFieldsPanel({
                   onDirty={updateProjectionDirty}
                   onNavigate={onNavigate}
                 />
+              ) : field.definition.kind === "rich_text" ? (
+                <RichFieldPanel
+                  projectId={projectId}
+                  entry={entry}
+                  field={field}
+                  disabled={disabled || formDirty || fields.configurationPending}
+                  onController={registerRich}
+                  onRevision={onRevision}
+                  getRevision={readRevision}
+                  onCommitted={richCommitted}
+                />
               ) : (
                 <ValueInput
                   field={field}
@@ -464,6 +533,7 @@ export function EntryFieldsPanel({
                 />
               )}
               {field.definition.kind !== "relationship" &&
+                field.definition.kind !== "rich_text" &&
                 (field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
                   <button
                     className="quiet-button clear-field"
@@ -558,6 +628,11 @@ export function EntryFieldsPanel({
               value={projection}
               onChange={setProjection}
             />
+          ) : newKind === "rich_text" ? (
+            <p className="muted">
+              Write in this Field after creating it. Empty defaults stay empty until you start
+              writing.
+            </p>
           ) : newKind === "choice" || newKind === "multi_choice" ? (
             <label>
               Options (one per line)
