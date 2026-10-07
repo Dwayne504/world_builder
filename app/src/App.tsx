@@ -12,6 +12,13 @@ import { readChapter } from "./api";
 import type { ChapterSnapshot } from "./storyTypes";
 import type { WritingPosition } from "./RichTextEditor";
 import { WorkspaceFrame } from "./WorkspaceFrame";
+import { useWorkspaceNavigation } from "./useWorkspaceNavigation";
+import { WorkspaceRecordsDialog, WorkspaceRecordsSidebar } from "./WorkspaceRecords";
+import {
+  navigationKey,
+  type NavigationRecord,
+  type NavigationTarget,
+} from "./workspaceNavigationTypes";
 import { RelationshipsBrowser } from "./RelationshipsBrowser";
 import { ManagerSearchSelect } from "./ManagerSearchSelect";
 import type { RelationshipView } from "./workspaceHistory";
@@ -1524,6 +1531,22 @@ function EntryWorkflow({
   onRecoveryBackup: (path: string) => void;
   onCategorySettings: (id: string) => void;
 }) {
+  const shortcuts = useWorkspaceNavigation(projectId);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [openedOccurrenceId, setOpenedOccurrenceId] = useState<string | null>(null);
+  const recordVisit = shortcuts.apply;
+  const refreshShortcuts = shortcuts.refresh;
+  const occurrenceOpened = useCallback(
+    (id: string | null) => {
+      setOpenedOccurrenceId(id);
+      if (id)
+        void recordVisit({
+          kind: "visit",
+          target: { recordKind: "temporal_occurrence", recordId: id },
+        });
+    },
+    [recordVisit],
+  );
   const [categories, setCategories] = useState<Category[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [inactiveEntries, setInactiveEntries] = useState<Entry[]>([]);
@@ -1703,11 +1726,13 @@ function EntryWorkflow({
 
   const refreshAfterQuickCreate = useCallback(() => {
     void refresh().catch((reason) => setError(errorMessage(reason)));
-  }, [refresh]);
+    void refreshShortcuts();
+  }, [refresh, refreshShortcuts]);
 
   useEffect(() => {
     void refresh().catch((reason) => setError(errorMessage(reason)));
-  }, [refresh, templateEpoch]);
+    void refreshShortcuts();
+  }, [refresh, refreshShortcuts, templateEpoch]);
 
   useEffect(() => {
     let current = true;
@@ -1784,6 +1809,13 @@ function EntryWorkflow({
       setSelected(entry);
       setChapter(nextChapter);
       if (entry) rememberEntry(entry.id);
+      if (entry)
+        void recordVisit({ kind: "visit", target: { recordKind: "entry", recordId: entry.id } });
+      if (nextChapter)
+        void recordVisit({
+          kind: "visit",
+          target: { recordKind: "story_unit", recordId: nextChapter.chapter.id },
+        });
       setPendingNavigation(null);
       setError(null);
       if (intent.createInCategoryId) {
@@ -1865,7 +1897,61 @@ function EntryWorkflow({
     const target = historyRef.current.locations[index];
     if (target) void requestNavigation({ location: target, index });
   }
+  function openShortcut(record: NavigationRecord) {
+    if (record.workspaceState === "missing") return;
+    setShortcutsOpen(false);
+    if (record.recordKind === "entry")
+      void requestNavigation({ location: destination(record.recordId) });
+    else if (record.recordKind === "story_unit")
+      void requestNavigation({
+        location: { ...initialLocation, page: "chapters", chapterId: record.recordId },
+      });
+    else openTimelineOccurrence(record.recordId);
+  }
+  const currentRecord: NavigationTarget | null = selected
+    ? { recordKind: "entry", recordId: selected.id }
+    : chapter
+      ? { recordKind: "story_unit", recordId: chapter.chapter.id }
+      : location.page === "timeline" &&
+          openedOccurrenceId &&
+          openedOccurrenceId === location.timelineView.occurrenceId
+        ? { recordKind: "temporal_occurrence", recordId: openedOccurrenceId }
+        : null;
+  const currentPinned =
+    !!currentRecord &&
+    !!shortcuts.snapshot?.pins.some(
+      (record) => navigationKey(record) === navigationKey(currentRecord),
+    );
+  const shortcutDisabled = navigating || creationDirty || locked;
+  const shortcutShared = {
+    snapshot: shortcuts.snapshot,
+    error: shortcuts.error,
+    pending: shortcuts.busy,
+    disabled: shortcutDisabled,
+    onOpen: openShortcut,
+    onRetry: () => void shortcuts.retry(),
+  };
   const navigationProps = {
+    navigationNotice:
+      sidebarCollapsed && shortcuts.error ? (
+        <span role="status" className="muted">
+          Pinned and recent records need attention.{" "}
+          <button className="quiet-button" onClick={() => setShortcutsOpen(true)}>
+            Review shortcuts
+          </button>
+        </span>
+      ) : null,
+    recordNavigation: (
+      <WorkspaceRecordsSidebar {...shortcutShared} onManage={() => setShortcutsOpen(true)} />
+    ),
+    navigationTools: (
+      <WorkspaceRecordsDialog
+        {...shortcutShared}
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        onApply={(command) => void shortcuts.apply(command)}
+      />
+    ),
     categories,
     entries,
     page: location.page,
@@ -1977,6 +2063,21 @@ function EntryWorkflow({
         },
       ],
       view: [
+        {
+          id: "pin-current",
+          label: currentPinned ? "Unpin current record" : "Pin current record",
+          disabled: !currentRecord || !shortcuts.snapshot || shortcuts.busy || navigationDisabled,
+          checked: currentPinned,
+          action: () => {
+            if (currentRecord)
+              void shortcuts.apply({ kind: "pin", target: currentRecord, pinned: !currentPinned });
+          },
+        },
+        {
+          id: "manage-shortcuts",
+          label: "Pinned and recent…",
+          action: () => setShortcutsOpen(true),
+        },
         {
           id: "search",
           label: "Search",
@@ -2225,9 +2326,13 @@ function EntryWorkflow({
           projectId={projectId}
           view={location.timelineView}
           onViewChange={updateTimelineView}
+          onRecordOpened={occurrenceOpened}
           locked={locked || navigating}
           onController={receiveController}
-          onRevision={onGlobalRevision}
+          onRevision={(revision) => {
+            onGlobalRevision(revision);
+            void refreshShortcuts();
+          }}
           onEntry={(id) => void requestNavigation({ location: destination(id) })}
           onChapter={(id) =>
             void requestNavigation({
@@ -2305,6 +2410,7 @@ function EntryWorkflow({
               onChanged={(next) => {
                 onGlobalRevision(next.globalRevision);
                 setChapter(next);
+                void refreshShortcuts();
               }}
               onFindRole={(role) =>
                 openSearchTarget({ kind: "story_role", roleId: role.id, name: role.name })
@@ -2325,7 +2431,10 @@ function EntryWorkflow({
             locked={locked || navigating}
             projectId={projectId}
             onController={receiveController}
-            onRevision={onGlobalRevision}
+            onRevision={(revision) => {
+              onGlobalRevision(revision);
+              void refreshShortcuts();
+            }}
             onOpen={(id, snapshot) =>
               void requestNavigation(
                 { location: { ...initialLocation, page: "chapters", chapterId: id } },
@@ -2362,6 +2471,7 @@ function EntryWorkflow({
                     }),
                   (outcome) => {
                     onGlobalRevision(outcome.globalRevision);
+                    void refreshShortcuts();
                     void commitNavigation({ location: destination(null) });
                   },
                 )
@@ -2412,6 +2522,7 @@ function EntryWorkflow({
           locked={locked || navigating}
           onPutAside={(revision) => {
             onGlobalRevision(revision);
+            void refreshShortcuts();
             void commitNavigation({ location: destination(null) });
           }}
           onSearch={() =>
@@ -2441,6 +2552,7 @@ function EntryWorkflow({
           onNavigate={(id) => void requestNavigation({ location: destination(id) })}
           onChanged={(updated) => {
             onGlobalRevision(updated.globalRevision);
+            void refreshShortcuts();
             setSelected(updated);
             setEntries((items) => items.map((item) => (item.id === updated.id ? updated : item)));
           }}
