@@ -17,6 +17,19 @@ function Invoke-Checked {
     }
 }
 
+function Assert-CleanSource {
+    # Tauri may rewrite Cargo.toml with equivalent line endings on Windows.
+    # Compare Git-normalized content, including the index, instead of mtime status.
+    & git diff --quiet HEAD --
+    if ($LASTEXITCODE -eq 1) {
+        throw 'Build verification requires unchanged source. Preserve local work and use a separate worktree; do not discard it.'
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot compare the source with the checked-out commit.' }
+    $untracked = & git ls-files --others --exclude-standard
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot verify untracked files.' }
+    if ($untracked) { throw 'Review untracked files before verifying this build.' }
+}
+
 Push-Location $repository
 $previousTarget = $env:CARGO_TARGET_DIR
 try {
@@ -27,11 +40,7 @@ try {
     }
     $revision = (& git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the checked-out commit.' }
-    $changes = & git status --porcelain --untracked-files=normal
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot verify repository status.' }
-    if ($changes) {
-        throw 'Build verification requires a clean checkout. Preserve local work and use a separate worktree; do not discard it.'
-    }
+    Assert-CleanSource
     $package = Get-Content -LiteralPath (Join-Path $application 'package.json') -Raw | ConvertFrom-Json
     $tauri = Get-Content -LiteralPath (Join-Path $application 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
     $cargoText = Get-Content -LiteralPath (Join-Path $application 'src-tauri/Cargo.toml') -Raw
@@ -59,7 +68,7 @@ try {
     foreach ($task in @('typecheck', 'lint', 'format:check')) {
         Invoke-Checked 'npm.cmd' @('run', $task)
     }
-    Invoke-Checked 'npm.cmd' @('test', '--', '--run')
+    Invoke-Checked 'npm.cmd' @('test', '--', '--run', '--maxWorkers=4')
     Invoke-Checked 'cargo' @('fmt', '--manifest-path', 'src-tauri/Cargo.toml', '--check')
     Invoke-Checked 'cargo' @('test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml')
     Invoke-Checked 'cargo' @('clippy', '--locked', '--manifest-path', 'src-tauri/Cargo.toml', '--all-targets', '--', '-D', 'warnings')
@@ -72,9 +81,7 @@ try {
     }
     Set-Location $repository
     Invoke-Checked 'git' @('diff', '--check')
-    $postBuildChanges = & git status --porcelain --untracked-files=normal
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot verify repository status after the build.' }
-    if ($postBuildChanges) { throw 'The build changed source files. Review the changes before claiming a reproducible build.' }
+    Assert-CleanSource
     $report = [ordered]@{
         commit = $revision
         version = $cargoVersion
