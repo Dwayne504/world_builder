@@ -5,6 +5,18 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { TimelineCommand, TimelineSnapshot } from "./timelineTypes";
+export function readTimeline(projectId: string): Promise<TimelineSnapshot> {
+  return call("read_timeline", { projectId });
+}
+export function applyTimeline(
+  projectId: string,
+  expectedRevision: number,
+  command: TimelineCommand,
+): Promise<TimelineSnapshot> {
+  return call("apply_timeline", { projectId, expectedRevision, command });
+}
+
 import type { ChapterSnapshot, StoryCommand, StoryIndex, StoryUsage } from "./storyTypes";
 
 export function readStory(projectId: string): Promise<StoryIndex> {
@@ -155,8 +167,11 @@ export function createType(
   return call("create_type", { projectId, categoryId, name, parentTypeId: parentTypeId ?? null });
 }
 
-export function listEntries(projectId: string): Promise<Entry[]> {
-  return call("list_entries", { projectId });
+export function listEntries(
+  projectId: string,
+  workspaceState?: Entry["workspaceState"],
+): Promise<Entry[]> {
+  return call("list_entries", workspaceState ? { projectId, workspaceState } : { projectId });
 }
 
 export function createEntry(
@@ -330,4 +345,28 @@ export function applyAlias(
   command: import("./searchTypes").AliasCommand,
 ): Promise<import("./searchTypes").EntryAliases> {
   return call("apply_alias", { projectId, entryId, expectedRevision, command });
+}
+
+export function previewCategoryDelete(
+  projectId: string,
+  categoryId: string,
+): Promise<import("./types").CategoryDeletePreview> {
+  return call("preview_category_delete", { projectId, categoryId });
+}
+export function applyStructure(
+  projectId: string,
+  expectedRevision: number,
+  command: import("./types").StructureCommand,
+): Promise<import("./types").StructureOutcome> {
+  return call("apply_structure", { projectId, expectedRevision, command });
+}
+
+export interface BuildInfo {
+  version: string;
+  supportedSchemaVersion: number;
+  supportedFormatVersion: number;
+}
+
+export function getBuildInfo(): Promise<BuildInfo> {
+  return call("get_build_info", {});
 }

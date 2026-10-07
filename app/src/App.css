@@ -1,3 +1,171 @@
+/* Fictional chronology uses the same readable desktop palettes. */
+.timeline-filters,
+.timeline-date {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.timeline-filters > label,
+.timeline-date > label {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+.timeline-filters input,
+.timeline-filters select {
+  margin-top: 0.35rem;
+}
+.timeline-list,
+.timeline-link-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.timeline-list > li {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  align-items: start;
+  margin: 0;
+}
+.timeline-date-heading {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.7rem 0.75rem 0.35rem 0;
+}
+.timeline-list .timeline-occurrence {
+  grid-column: 2;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 1rem;
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  border-left: 2px solid var(--line);
+}
+.timeline-occurrence > span:first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.timeline-occurrence small {
+  grid-row: 2;
+  font-weight: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-occurrence > span:last-child {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+}
+.timeline-dialog {
+  width: min(52rem, calc(100vw - 2rem));
+}
+.timeline-dialog .plain-fieldset {
+  display: grid;
+  gap: 1rem;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}
+.timeline-dialog textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 6rem;
+}
+.timeline-dialog label,
+.timeline-dialog .row,
+.timeline-dialog .timeline-date {
+  margin: 0;
+}
+.timeline-dialog input,
+.timeline-dialog select,
+.timeline-dialog textarea {
+  margin-top: 0.25rem;
+}
+.timeline-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: normal;
+}
+.timeline-check input {
+  width: auto;
+}
+.timeline-picker {
+  border-top: 1px solid var(--line);
+  padding: 0.65rem 0;
+}
+.timeline-picker summary {
+  display: flex;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.timeline-picker summary::before {
+  content: "▸";
+  margin-right: 0.5rem;
+}
+.timeline-picker[open] summary::before {
+  content: "▾";
+}
+.timeline-picker summary small {
+  margin-left: auto;
+  color: var(--muted);
+}
+.timeline-link-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.25rem 0;
+  overflow-wrap: anywhere;
+}
+.timeline-link-list button {
+  text-align: left;
+  flex-shrink: 0;
+}
+.timeline-link-list li > span {
+  min-width: 0;
+}
+.timeline-linked-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.timeline-months {
+  padding-left: 1.5rem;
+  max-height: 45vh;
+  overflow: auto;
+}
+.timeline-months li {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(5rem, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 0.5rem;
+}
+.timeline-calendar-form p {
+  max-width: 70ch;
+}
+@media (max-width: 650px) {
+  .timeline-list > li {
+    grid-template-columns: 6rem minmax(0, 1fr);
+  }
+  .timeline-months li {
+    grid-template-columns: minmax(0, 1fr) 5rem;
+  }
+  .timeline-months button {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}
+
 /* Project search shares the existing desktop palettes. */
 .project-search {
   padding: clamp(1rem, 2.5vw, 2.5rem);
@@ -76,6 +244,9 @@
   margin: 0.5rem 0;
   min-width: 0;
   max-width: 100%;
+}
+.search-controls label[hidden] {
+  display: none;
 }
 .search-controls select,
 .search-controls input {
@@ -1673,6 +1844,33 @@ dialog::after {
   z-index: 1;
 }
 
+/* The persistent menu bar carries commands; the Project heading stays compact. */
+.container {
+  min-height: calc(100vh - 38px);
+}
+.project-screen {
+  padding-top: 20px;
+}
+.project-screen .app-header {
+  padding: 12px 20px;
+  margin-bottom: 16px;
+}
+.project-screen .app-header h1 {
+  font-size: 1.65rem;
+}
+.project-screen .app-header .eyebrow {
+  margin: 0 0 2px;
+  font-size: 10px;
+}
+.app-help-reference dt {
+  margin-top: 1rem;
+  font-weight: 600;
+}
+.app-help-reference dd {
+  margin: 0.25rem 0 0;
+  max-width: 65ch;
+}
+
 /* Project-wide connections stay readable as cards in either writing style. */
 .relationship-filters {
   display: flex;
@@ -2078,12 +2276,16 @@ dialog::after {
 }
 .chapter-world-link {
   border-top: 1px solid var(--line);
-  padding: 0.85rem 0;
+  padding: 0.65rem 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: start;
 }
-.chapter-world-link > summary {
+.chapter-world-link > details > summary {
   cursor: pointer;
 }
-.chapter-world-link > summary small {
+.chapter-world-link > details > summary small {
   display: block;
   margin-top: 0.25rem;
   color: var(--muted);
@@ -2116,12 +2318,44 @@ dialog::after {
   gap: 0.5rem;
   align-items: center;
   font-weight: normal;
+  margin: 0;
+  min-height: 2rem;
 }
 .story-role-options input {
   width: auto;
+  margin: 0;
 }
-.story-link-options {
+.chapter-role-button {
+  padding: 0.2rem 0.4rem;
+}
+.chapter-world-link > details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.story-role-catalog {
+  list-style: none;
+  padding: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.story-role-catalog li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.story-role-catalog li > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.story-role-catalog small {
+  display: block;
   font-size: 0.8rem;
+}
+.story-role-catalog button {
+  flex-shrink: 0;
 }
 .story-usage {
   margin-top: 1rem;

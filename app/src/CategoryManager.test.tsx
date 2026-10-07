@@ -1,7 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { CategoryManager } from "./CategoryManager";
 import {
+  applyStructure,
+  previewCategoryDelete,
   applyTemplateFields,
   applySpatial,
   readSpatial,
@@ -18,6 +20,8 @@ import {
 import type { FieldsController } from "./EntryFieldsPanel";
 import type { FieldCatalog, FieldDefinition } from "./types";
 vi.mock("./api", () => ({
+  applyStructure: vi.fn(),
+  previewCategoryDelete: vi.fn(),
   readSpatial: vi.fn().mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] }),
   applySpatial: vi.fn(),
   getPreferences: vi.fn(),
@@ -71,10 +75,101 @@ const props = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(applyStructure).mockReset();
+  vi.mocked(previewCategoryDelete).mockReset();
   vi.mocked(listCategories).mockResolvedValue([weapons]);
-  vi.mocked(listTypes).mockResolvedValue([sword]);
+  vi.mocked(listTypes).mockImplementation((_project, categoryId) =>
+    Promise.resolve(categoryId === weapons.id ? [sword] : []),
+  );
   vi.mocked(readFieldCatalog).mockResolvedValue({ globalRevision: 1, definitions: [{ ...mass }] });
   vi.mocked(applyTemplateFields).mockResolvedValue({ globalRevision: 2, definitions: [] });
+});
+
+it("opens the requested Category and preserves a dismissed rename as a rename", async () => {
+  const places = { ...weapons, id: "places", name: "Places" };
+  vi.mocked(listCategories).mockResolvedValue([weapons, places]);
+  vi.mocked(applyStructure).mockResolvedValue({ globalRevision: 2, backupPath: null });
+  render(<CategoryManager {...props} initialCategoryId="places" />);
+  await screen.findByText("Types in Places");
+  fireEvent.click(screen.getByText("Category actions"));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Category" }));
+  change("New Category name", "");
+  fireEvent.click(screen.getByRole("button", { name: "Close Rename Category" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue manager draft" }));
+  expect(screen.getByLabelText("New Category name")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Save Category name" })).toBeDisabled();
+  change("New Category name", "Locations");
+  fireEvent.click(screen.getByRole("button", { name: "Save Category name" }));
+  await waitFor(() =>
+    expect(applyStructure).toHaveBeenCalledWith("project", 1, {
+      kind: "rename_category",
+      id: "places",
+      name: "Locations",
+    }),
+  );
+  await waitFor(() => expect(controller.state).toBe("saved"));
+  expect(createCategory).not.toHaveBeenCalled();
+});
+
+it("requires reassignment and explicit Type review, retains failures, and waits for acknowledged deletion", async () => {
+  const fallback = { ...weapons, id: "fallback", name: "Uncategorized", isUncategorized: true };
+  vi.mocked(listCategories).mockResolvedValue([weapons, fallback]);
+  vi.mocked(previewCategoryDelete).mockResolvedValue({
+    globalRevision: 1,
+    name: "Weapons",
+    entryCount: 3,
+    typedEntryCount: 2,
+    typeNames: ["Sword"],
+    defaultCount: 1,
+  });
+  vi.mocked(applyStructure).mockRejectedValueOnce(new Error("Recovery copy unavailable"));
+  const deleted = vi.fn();
+  const backup = vi.fn();
+  render(<CategoryManager {...props} onDeleted={deleted} onRecoveryBackup={backup} />);
+  await screen.findByText("Types in Weapons");
+  fireEvent.click(screen.getByText("Category actions"));
+  fireEvent.click(screen.getByRole("button", { name: "Delete Category…" }));
+  const dialog = screen.getByRole("dialog", { name: "Delete Category" });
+  const confirm = await within(dialog).findByRole("button", { name: "Delete Category" });
+  expect(confirm).toBeDisabled();
+  change("Move Entries to", "fallback");
+  expect(confirm).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("checkbox"));
+  fireEvent.click(confirm);
+  await within(dialog).findByText(/Recovery copy unavailable/);
+  expect(deleted).not.toHaveBeenCalled();
+  let finish!: (value: { globalRevision: number; backupPath: string }) => void;
+  vi.mocked(applyStructure).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(confirm);
+  expect(controller.state).toBe("saving");
+  expect(confirm).toBeDisabled();
+  await act(async () => {
+    finish({ globalRevision: 2, backupPath: "/synthetic/recovery.wcbackup" });
+    expect(await controller.submit()).toEqual({ kind: "committed" });
+  });
+  expect(applyStructure).toHaveBeenLastCalledWith("project", 1, {
+    kind: "delete_category",
+    id: "weapons",
+    destinationId: "fallback",
+    removeTypes: true,
+  });
+  expect(deleted).toHaveBeenCalledTimes(1);
+  expect(backup).toHaveBeenCalledWith("/synthetic/recovery.wcbackup");
+});
+
+it("protects Uncategorized from deletion and rename", async () => {
+  vi.mocked(listCategories).mockResolvedValue([
+    { ...weapons, isUncategorized: true, name: "Uncategorized" },
+  ]);
+  render(<CategoryManager {...props} />);
+  await screen.findByText("Types in Uncategorized");
+  expect(screen.queryByRole("button", { name: "Delete Category…" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Rename Category" })).not.toBeInTheDocument();
 });
 async function show() {
   const view = render(<CategoryManager {...props} />);
@@ -311,6 +406,7 @@ it("tracks a merge until it commits and never offers an acknowledged merge as a 
       }),
   );
   await show();
+  fireEvent.click(screen.getByText("Field maintenance"));
   fireEvent.click(screen.getByRole("button", { name: "Combine duplicate fields" }));
   change("Keep Field", "mass");
   change("Duplicate Field", "duplicate");
@@ -360,4 +456,49 @@ it("saves Spatial defaults for the selected Type without applying them to existi
   );
   expect(screen.getByText(/Existing Entries keep their features/)).toBeInTheDocument();
   expect(changed).toHaveBeenCalledWith(2);
+});
+
+it("finds a Type beyond one hundred items and keeps its selected defaults when the list is filtered", async () => {
+  vi.mocked(listTypes).mockResolvedValue(
+    Array.from({ length: 125 }, (_, index) => ({
+      ...sword,
+      id: `type-${index}`,
+      name: `Type ${index}`,
+    })),
+  );
+  await show();
+  expect(screen.getAllByRole("button", { name: /^Defaults for Type/ })).toHaveLength(12);
+  change("Find a Type", "Type 124");
+  fireEvent.click(screen.getByRole("button", { name: "Defaults for Type 124" }));
+  expect(screen.getByRole("button", { name: "Defaults for Type 124" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByLabelText("Default field scope")).toHaveValue("type-124");
+  change("Find a Type", "No matching Type");
+  expect(screen.getByText("No Types match your search.")).toBeVisible();
+  expect(screen.getByLabelText("Default field scope")).toHaveValue("type-124");
+  expect(screen.getByText(/Editing defaults for/)).toHaveTextContent("Type 124");
+  expect(applyTemplateFields).not.toHaveBeenCalled();
+});
+
+it("searches a hundred defaults and removes only the chosen binding", async () => {
+  const definitions = Array.from({ length: 110 }, (_, index) => ({
+    ...mass,
+    id: `field-${index}`,
+    name: `Measure ${index}`,
+    bindings: [{ provider: { kind: "category" as const, id: "weapons" }, label: "Weapons" }],
+  }));
+  vi.mocked(readFieldCatalog).mockResolvedValue({ globalRevision: 1, definitions });
+  await show();
+  expect(screen.getAllByRole("button", { name: /^Remove default:/ })).toHaveLength(12);
+  change("Find a default field", "Measure 109");
+  fireEvent.click(screen.getByRole("button", { name: "Remove default: Measure 109" }));
+  await waitFor(() =>
+    expect(applyTemplateFields).toHaveBeenCalledExactlyOnceWith("project", 1, {
+      kind: "unbind",
+      fieldId: "field-109",
+      provider: { kind: "category", id: "weapons" },
+    }),
+  );
 });

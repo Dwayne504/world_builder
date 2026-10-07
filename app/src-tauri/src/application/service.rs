@@ -21,6 +21,88 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn preview_category_delete(
+        state: &AppState,
+        project: ProjectId,
+        id: CategoryId,
+    ) -> Result<crate::domain::lifecycle::CategoryDeletePreview, AppError> {
+        Self::with_worker(state, project, |w| w.preview_category_delete(id))
+    }
+    pub fn apply_structure(
+        state: &AppState,
+        project: ProjectId,
+        expected: i64,
+        command: crate::domain::lifecycle::StructureCommand,
+        backup_root: Option<&Path>,
+    ) -> Result<crate::domain::lifecycle::StructureOutcome, AppError> {
+        use crate::domain::lifecycle::StructureCommand;
+        let open = state
+            .open_projects
+            .lock()
+            .expect("registry mutex poisoned")
+            .get(&project)
+            .cloned()
+            .ok_or(AppError::ProjectNotOpen(project))?;
+        let guard = open.worker.lock().expect("worker mutex poisoned");
+        let worker = guard.as_ref().ok_or(AppError::ProjectNotOpen(project))?;
+        let current = worker.read_meta()?.last_committed_revision;
+        if current != expected {
+            return Err(PersistenceError::StaleRevision { expected, current }.into());
+        }
+        let backup = if let StructureCommand::DeleteCategory {
+            id,
+            remove_types,
+            destination_id,
+        } = &command
+        {
+            let preview = worker.preview_category_delete(*id)?;
+            if !preview.type_names.is_empty() && !remove_types {
+                return Err(PersistenceError::Other(
+                    "Confirm removal of the reviewed Types first".into(),
+                )
+                .into());
+            }
+            if id == destination_id
+                || !worker
+                    .list_categories()?
+                    .iter()
+                    .any(|c| c.id == *destination_id)
+            {
+                return Err(PersistenceError::Other(
+                    "Choose another Category for these Entries".into(),
+                )
+                .into());
+            }
+            let root = backup_root.ok_or_else(|| {
+                PersistenceError::Other("A recovery backup location is required".into())
+            })?;
+            Some(
+                crate::backup_recovery::create_backup(worker, &open.paths, root)?
+                    .display()
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        let mut result = worker.apply_structure(expected, command)?;
+        result.backup_path = backup;
+        Ok(result)
+    }
+
+    pub fn read_timeline(
+        state: &AppState,
+        project_id: ProjectId,
+    ) -> Result<crate::domain::timeline::TimelineSnapshot, AppError> {
+        Self::with_worker(state, project_id, |w| w.read_timeline())
+    }
+    pub fn apply_timeline(
+        state: &AppState,
+        project_id: ProjectId,
+        expected: i64,
+        command: crate::domain::timeline::TimelineCommand,
+    ) -> Result<crate::domain::timeline::TimelineSnapshot, AppError> {
+        Self::with_worker(state, project_id, |w| w.apply_timeline(expected, command))
+    }
     pub fn search_project(
         state: &AppState,
         project_id: ProjectId,
@@ -938,7 +1020,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
+             DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
@@ -1042,7 +1124,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
+             DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;

@@ -7,8 +7,8 @@ claim that the entire navigation slice or milestone is complete.
 
 ## Author experience
 
-Search is a sidebar destination. It groups results as Entries, Chapters, Fields
-and connections, and manuscript/other text. Within identity groups, exact names
+Search is a sidebar destination. It groups results as Entries, Chapters, Story
+Roles, Fields and connections, and manuscript/other text. Within identity groups, exact names
 or IDs precede exact aliases, name prefixes, alias prefixes, and other word
 matches. Identity groups precede structured context and prose. Queries use
 normalized word prefixes, with all query words required; punctuation is literal,
@@ -21,6 +21,11 @@ and notes are searchable once; relationship-backed Fields do not manufacture
 duplicate semantic connections. Actual Story links and their Roles are structured
 matches. Manuscript, Plan, and Notes remain clearly labelled text matches, never
 inferred links. Hidden and retained Field values remain searchable.
+
+Story Role definitions are searchable even before assignment. Opening one lists
+its explicit Chapter-link uses by stable Role ID; a text mention does not count.
+The empty state explains how to assign it. Chapter options provides the same
+Find uses action. See [Role discovery](MILESTONE_01_STORY_ROLE_DISCOVERY.md).
 
 Each group initially shows at most ten results with its total count. The reader
 can choose a positive whole-number limit per section or use Show more. Filtering

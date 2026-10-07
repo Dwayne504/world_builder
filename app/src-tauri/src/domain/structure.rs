@@ -44,6 +44,7 @@ stable_id!(ChoiceOptionId, "Choice option");
 stable_id!(RelationshipDefinitionId, "Relationship definition");
 stable_id!(RelationshipId, "Relationship");
 stable_id!(ChapterId, "Chapter");
+stable_id!(OccurrenceId, "Occurrence");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Category {
@@ -66,6 +67,7 @@ pub struct TypeDef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Entry {
+    pub workspace_state: String,
     pub id: EntryId,
     pub category_id: CategoryId,
     pub type_id: Option<TypeId>,
@@ -105,6 +107,7 @@ mod tests {
     #[test]
     fn unnamed_entry_uses_only_a_presentation_fallback() {
         let entry = Entry {
+            workspace_state: "active".into(),
             id: EntryId::new(),
             category_id: CategoryId::new(),
             type_id: None,
@@ -120,6 +123,7 @@ mod tests {
     fn names_do_not_determine_identity() {
         let id = EntryId::new();
         let mut entry = Entry {
+            workspace_state: "active".into(),
             id,
             category_id: CategoryId::new(),
             type_id: None,

@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { menuItem, renderWithMenu as render } from "./desktopMenuTestUtils";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { EntryRelationshipsPanel } from "./EntryRelationshipsPanel";
 import { applyRelationships, readRelationships } from "./api";
@@ -306,7 +307,7 @@ it("retains a newer note draft when an older note is acknowledged", async () => 
 });
 it("creates symmetric definitions with matching labels and expectations", async () => {
   await mount();
-  fireEvent.click(screen.getByRole("button", { name: "Manage relationships" }));
+  fireEvent.click(menuItem("Edit", "Relationship", "Manage relationships…"));
   change("Definition name", "Alliance");
   change("Direction", "symmetric");
   change("Relationship label", "allied with");
@@ -326,6 +327,41 @@ it("creates symmetric definitions with matching labels and expectations", async 
         expectedSourcesPerTarget: 2,
       },
     }),
+  );
+});
+
+it("finds a relationship target beyond one hundred Entries and retains it through filtering and dismissal", async () => {
+  const next = snapshot();
+  next.entries = Array.from({ length: 125 }, (_, index) => ({
+    id: `person-${index}`,
+    label: `Person ${index}`,
+    categoryName: "People",
+  }));
+  vi.mocked(readRelationships).mockResolvedValue(next);
+  await mount();
+  fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
+  change("Relationship definition", "ownership");
+  const target = screen.getByRole("combobox", { name: "Other Entry" });
+  expect(within(target).getAllByRole("option")).toHaveLength(21);
+  change("Search Other Entry", "Person 124");
+  change("Other Entry", "person-124");
+  change("Search Other Entry", "Missing person");
+  expect(target).toHaveValue("person-124");
+  fireEvent.click(screen.getByRole("button", { name: "Close Add relationship" }));
+  expect(controller.canSubmit).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Continue relationship draft" }));
+  expect(target).toHaveValue("person-124");
+  fireEvent.click(screen.getByRole("button", { name: "Create relationship" }));
+  await waitFor(() =>
+    expect(applyRelationships).toHaveBeenCalledWith(
+      "project",
+      "thron",
+      3,
+      expect.objectContaining({
+        kind: "connect",
+        other: { kind: "existing", id: "person-124" },
+      }),
+    ),
   );
 });
 it("ends and restores the same relationship identity", async () => {

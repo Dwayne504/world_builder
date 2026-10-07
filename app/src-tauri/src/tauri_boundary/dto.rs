@@ -9,6 +9,14 @@ use crate::domain::{Category, Entry, TypeDef};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct BuildInfoDto {
+    pub version: String,
+    pub supported_schema_version: i64,
+    pub supported_format_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectSummaryDto {
     pub recent_projects_warning: Option<String>,
     pub project_id: String,
@@ -86,6 +94,7 @@ impl From<TypeDef> for TypeDto {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryDto {
+    pub workspace_state: String,
     pub id: String,
     pub category_id: String,
     pub type_id: Option<String>,
@@ -104,6 +113,7 @@ impl From<Entry> for EntryDto {
             type_id: value.type_id.map(|id| id.to_string()),
             authored_name: value.authored_name,
             display_name,
+            workspace_state: value.workspace_state,
             revision: value.revision,
             global_revision: value.global_revision,
         }
@@ -153,9 +163,81 @@ impl From<crate::preferences::AppPreferences> for PreferencesDto {
 
 impl From<AppError> for AppErrorDto {
     fn from(e: AppError) -> Self {
+        // Keep compatibility checks fail-closed, but explain what the author
+        // should do instead of exposing a database implementation diagnostic.
+        let message = match &e {
+            AppError::Persistence(
+                crate::persistence::PersistenceError::UnsupportedSchemaVersion { found, supported },
+            ) => newer_project_message("storage", *found, *supported),
+            AppError::Package(crate::package::PackageError::UnsupportedFormatVersion {
+                found,
+                supported,
+            }) => newer_project_message("package", *found, *supported),
+            _ => e.to_string(),
+        };
         AppErrorDto {
             kind: e.kind().to_string(),
-            message: e.to_string(),
+            message,
         }
+    }
+}
+
+fn newer_project_message(component: &str, found: i64, supported: i64) -> String {
+    format!("This Project needs a newer Worldcrafter build. Open it with the build that last saved it or a newer one. It has not been opened for editing. (Project {component} version: {found}; this build supports: {supported}.)")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newer_project_errors_explain_the_safe_next_step_without_changing_the_kind() {
+        let schema: AppErrorDto = AppError::Persistence(
+            crate::persistence::PersistenceError::UnsupportedSchemaVersion {
+                found: 12,
+                supported: 11,
+            },
+        )
+        .into();
+        assert_eq!(schema.kind, "unsupported_schema_version");
+        assert!(schema.message.contains("newer Worldcrafter build"));
+        assert!(schema.message.contains("has not been opened for editing"));
+        assert!(schema.message.contains("storage version: 12"));
+        assert!(schema.message.contains("supports: 11"));
+        let package: AppErrorDto =
+            AppError::Package(crate::package::PackageError::UnsupportedFormatVersion {
+                found: 2,
+                supported: 1,
+            })
+            .into();
+        assert_eq!(package.kind, "unsupported_format_version");
+        assert!(package.message.contains("package version: 2"));
+        assert!(package.message.contains("supports: 1"));
+    }
+
+    #[test]
+    fn other_errors_keep_their_original_diagnostic() {
+        let error = AppError::Persistence(crate::persistence::PersistenceError::Other(
+            "disk write failed".into(),
+        ));
+        let original = error.to_string();
+        let dto: AppErrorDto = error.into();
+        assert_eq!(dto.kind, "persistence_error");
+        assert_eq!(dto.message, original);
+    }
+
+    #[test]
+    fn about_information_comes_from_the_running_backend() {
+        let info = super::super::commands::get_build_info();
+        let json = serde_json::to_value(info).unwrap();
+        assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            json["supportedSchemaVersion"],
+            crate::persistence::migrations::CURRENT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            json["supportedFormatVersion"],
+            crate::package::FORMAT_VERSION
+        );
     }
 }

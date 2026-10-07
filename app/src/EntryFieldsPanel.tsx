@@ -16,6 +16,8 @@ import type {
 import type { SubmitOutcome } from "./useProjectRename";
 import { parseFieldDraft, useEntryFields, valueDraft, type FieldDraft } from "./useEntryFields";
 import { Dialog } from "./Dialog";
+import { useDesktopCommands } from "./desktopMenuContext";
+import { ManagerSearchSelect } from "./ManagerSearchSelect";
 
 export interface FieldsController {
   state: SaveState;
@@ -309,6 +311,52 @@ export function EntryFieldsPanel({
     }
   }
 
+  const manageDisabled =
+    busy ||
+    !!newName ||
+    !!String(newValue) ||
+    !!newOptions ||
+    !!newUnit ||
+    !!projection.relationshipDefinitionId ||
+    !!projectionDrafts.length;
+  useDesktopCommands(
+    "entry-fields",
+    {
+      edit: [
+        {
+          id: "field",
+          label: "Field",
+          children: [
+            {
+              id: "field-add",
+              label: "Add field…",
+              disabled: configDisabled || !!renamed || !!optionLabel || !!projectionDrafts.length,
+              action: () => setCreateOpen(true),
+            },
+            {
+              id: "field-manage",
+              label: "Manage fields…",
+              disabled: manageDisabled,
+              action: () => setManageOpen(true),
+            },
+            ...(fields.snapshot?.fields.some((field) => field.hidden)
+              ? [
+                  {
+                    id: "field-hidden",
+                    label: showHidden ? "Hide hidden fields" : "Show hidden fields",
+                    checked: showHidden,
+                    disabled: configDisabled || formDirty,
+                    action: () => setShowHidden(!showHidden),
+                  },
+                ]
+              : []),
+          ],
+        },
+      ],
+    },
+    30,
+  );
+
   return (
     <section aria-label="Entry fields" className="fields-panel">
       <div className="section-heading">
@@ -316,37 +364,11 @@ export function EntryFieldsPanel({
           <h3>Fields</h3>
         </div>
         <div className="row panel-actions">
-          {!!fields.snapshot?.fields.some((f) => f.hidden) && (
-            <button
-              className="quiet-button"
-              aria-pressed={showHidden}
-              disabled={configDisabled || formDirty}
-              onClick={() => setShowHidden(!showHidden)}
-            >
-              {showHidden
-                ? "Hide hidden fields"
-                : `Show hidden fields (${fields.snapshot.fields.filter((f) => f.hidden).length})`}
-            </button>
-          )}
           <button
             disabled={configDisabled || !!renamed || !!optionLabel || !!projectionDrafts.length}
             onClick={() => setCreateOpen(true)}
           >
             Add field
-          </button>
-          <button
-            className="quiet-button"
-            disabled={
-              !!newName ||
-              !!String(newValue) ||
-              !!newOptions ||
-              !!newUnit ||
-              !!projection.relationshipDefinitionId ||
-              !!projectionDrafts.length
-            }
-            onClick={() => setManageOpen(true)}
-          >
-            Manage fields
           </button>
         </div>
       </div>
@@ -606,8 +628,8 @@ export function EntryFieldsPanel({
         className="field-manager-dialog"
       >
         <p className="muted">
-          Hide Fields to focus without losing values. Delete affects only this Entry. Click a Field
-          name to edit its shared definition. Removing a relationship Field keeps its connections.
+          Choose a Field name to edit its shared definition. Hide keeps values; Delete affects only
+          this Entry. Removing a relationship Field keeps its connections.
         </p>
         {manageOpen && !definitionOpen && !deleteReview && (fields.error || formError) && (
           <p role="alert">
@@ -682,7 +704,7 @@ export function EntryFieldsPanel({
       >
         <p className="muted">
           Changes here affect every Entry using this definition. To combine duplicates, open
-          Categories → Combine duplicate fields.
+          Categories → Field maintenance.
         </p>
         {manageOpen && definitionOpen && (fields.error || formError) && (
           <p role="alert">
@@ -723,83 +745,85 @@ export function EntryFieldsPanel({
             >
               Cancel definition edits
             </button>
-            <p className="field-note">
-              Removing a Field from new use retires it across this Project. Filled-in values stay
-              visible and editable; you can restore the Field here.
-            </p>
-            <div className="row">
-              <button
-                disabled={!!renamed || !!optionLabel}
-                onClick={() =>
-                  void configure({
-                    kind: "set_retired",
-                    fieldId: selected.id,
-                    retired: !selected.retired,
-                  })
-                }
-              >
-                {selected.retired ? "Restore field definition" : "Remove field from new use"}
-              </button>
-              {(["entry", "category", "type"] as const)
-                .filter((kind) => kind !== "type" || entry.typeId)
-                .map((kind) => (
-                  <button
-                    key={kind}
-                    disabled={
-                      selected.retired ||
-                      !!renamed ||
-                      !!optionLabel ||
-                      selected.bindings.some(
-                        (b) => b.provider.kind === kind && b.provider.id === provider(kind).id,
-                      )
-                    }
-                    onClick={() =>
-                      void configure({
-                        kind: "bind",
-                        fieldId: selected.id,
-                        provider: provider(kind),
-                      })
-                    }
-                  >
-                    Make available to this{" "}
-                    {kind === "entry" ? "Entry" : kind === "type" ? "Type" : "Category"}
-                  </button>
+            <details className="manager-secondary">
+              <summary>Availability and retirement</summary>
+              <p className="field-note">
+                Removing a Field from new use retires it across this Project. Filled-in values stay
+                visible and editable; you can restore the Field here.
+              </p>
+              <div className="row">
+                <button
+                  disabled={!!renamed || !!optionLabel}
+                  onClick={() =>
+                    void configure({
+                      kind: "set_retired",
+                      fieldId: selected.id,
+                      retired: !selected.retired,
+                    })
+                  }
+                >
+                  {selected.retired ? "Restore field definition" : "Remove field from new use"}
+                </button>
+                {(["entry", "category", "type"] as const)
+                  .filter((kind) => kind !== "type" || entry.typeId)
+                  .map((kind) => (
+                    <button
+                      key={kind}
+                      disabled={
+                        selected.retired ||
+                        !!renamed ||
+                        !!optionLabel ||
+                        selected.bindings.some(
+                          (b) => b.provider.kind === kind && b.provider.id === provider(kind).id,
+                        )
+                      }
+                      onClick={() =>
+                        void configure({
+                          kind: "bind",
+                          fieldId: selected.id,
+                          provider: provider(kind),
+                        })
+                      }
+                    >
+                      Make available to this{" "}
+                      {kind === "entry" ? "Entry" : kind === "type" ? "Type" : "Category"}
+                    </button>
+                  ))}
+              </div>
+              <ul>
+                {selected.bindings.map((b) => (
+                  <li key={`${b.provider.kind}:${b.provider.id}`}>
+                    {b.label}{" "}
+                    <button
+                      disabled={!!renamed || !!optionLabel}
+                      onClick={() =>
+                        void configure({
+                          kind: "unbind",
+                          fieldId: selected.id,
+                          provider: b.provider,
+                        })
+                      }
+                    >
+                      Detach from {b.label}
+                    </button>
+                  </li>
                 ))}
-            </div>
-            <ul>
-              {selected.bindings.map((b) => (
-                <li key={`${b.provider.kind}:${b.provider.id}`}>
-                  {b.label}{" "}
-                  <button
-                    disabled={!!renamed || !!optionLabel}
-                    onClick={() =>
-                      void configure({ kind: "unbind", fieldId: selected.id, provider: b.provider })
-                    }
-                  >
-                    Detach from {b.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
+              </ul>
+            </details>
             {(selected.kind === "choice" || selected.kind === "multi_choice") && (
               <>
-                <label>
-                  Choice option
-                  <select
-                    aria-label="choice-option"
-                    disabled={!!optionLabel}
-                    value={optionId}
-                    onChange={(e) => setOptionId(e.target.value)}
-                  >
-                    <option value="">Add a new option</option>
-                    {selected.options.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.label}
-                        {o.retired ? " (retired)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <ManagerSearchSelect
+                  label="Choice option"
+                  ariaLabel="choice-option"
+                  disabled={!!optionLabel}
+                  value={optionId}
+                  onChange={setOptionId}
+                  emptyLabel="Add a new option"
+                  choices={selected.options.map((option) => ({
+                    id: option.id,
+                    label: `${option.label}${option.retired ? " (retired)" : ""}`,
+                  }))}
+                />
                 <label>
                   Option label
                   <input

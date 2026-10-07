@@ -81,6 +81,7 @@ fn request(query: &str) -> SearchRequest {
         entry_id: None,
         structured_kind: None,
         text_area: None,
+        story_role_id: None,
     }
 }
 fn hits(result: &SearchResults, group: &str) -> Vec<SearchHit> {
@@ -579,7 +580,7 @@ fn schema_nine_upgrade_is_atomic_and_keeps_a_recovery_snapshot() {
     let e = f.entry("Earlier Entry");
     ProjectService::close_project(&f.state, f.project).unwrap();
     let db = f.db();
-    db.execute_batch("DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; PRAGMA user_version=9; UPDATE project_meta SET schema_version=9; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
+    db.execute_batch("DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; PRAGMA user_version=9; UPDATE project_meta SET schema_version=9; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
     let root = std::path::Path::new(&f.path);
     let manifest_path = root.join("manifest.json");
     let mut manifest = Manifest::read(&manifest_path).unwrap();
@@ -914,4 +915,183 @@ fn preview_area_filters_before_limits_without_changing_other_groups_or_chapter_t
         json!({"query":"Voyage","limitPerGroup":10,"includeInactive":false,"textArea":"unknown"})
     )
     .is_err());
+}
+
+#[test]
+fn custom_roles_are_findable_before_assignment_and_usage_tracks_canonical_links() {
+    let f = Fixture::new();
+    let person = f.entry("Traveller");
+    let other = f.entry("Companion");
+    let chapter = f.chapter("Opening", "Intro is just a word in this manuscript.");
+    // Prime the cache before creation, then exercise its invalidation on each edit.
+    assert!(hits(&f.search("Intro"), "roles").is_empty());
+    let created = f.story(StoryCommand::CreateRole {
+        chapter_id: chapter.chapter.id,
+        name: "Intro".into(),
+    });
+    let intro = created
+        .roles
+        .iter()
+        .find(|r| r.name == "Intro")
+        .unwrap()
+        .id
+        .clone();
+    let pov = created
+        .roles
+        .iter()
+        .find(|r| r.name == "POV")
+        .unwrap()
+        .id
+        .clone();
+    let found = f.search("intro");
+    assert_eq!(
+        hits(&found, "roles")[0].target,
+        SearchTarget::StoryRole {
+            role_id: intro.clone(),
+            name: "Intro".into()
+        }
+    );
+    assert!(hits(&found, "structured").is_empty());
+    assert_eq!(hits(&found, "text").len(), 1);
+    let mut usage = request("");
+    usage.story_role_id = Some(intro.clone());
+    let query = |request: SearchRequest| {
+        ProjectService::search_project(&f.state, f.project, request).unwrap()
+    };
+    assert!(query(usage.clone()).groups.iter().all(|g| g.total == 0));
+    let linked = f.story(StoryCommand::SetLink {
+        chapter_id: chapter.chapter.id,
+        entry_id: person.id,
+        role_ids: vec![intro.clone(), pov.clone()],
+    });
+    let link_id = linked.links[0].id.clone();
+    f.story(StoryCommand::SetLink {
+        chapter_id: chapter.chapter.id,
+        entry_id: other.id,
+        role_ids: vec![],
+    });
+    let assigned = query(usage.clone());
+    assert_eq!(hits(&assigned, "structured").len(), 1);
+    assert!(hits(&assigned, "text").is_empty());
+    assert!(hits(&assigned, "roles").is_empty());
+    assert!(hits(&assigned, "structured")[0]
+        .context
+        .contains("Traveller"));
+    assert!(hits(&assigned, "structured")[0].context.contains("POV"));
+    assert_eq!(
+        serde_json::to_value(&assigned).unwrap(),
+        serde_json::to_value(query(usage.clone())).unwrap()
+    );
+    let mut scoped = usage.clone();
+    scoped.entry_id = Some(other.id);
+    assert!(hits(&query(scoped), "structured").is_empty());
+    let mut named = usage.clone();
+    named.query = "trav".into();
+    assert_eq!(hits(&query(named), "structured").len(), 1);
+    let cleared = f.story(StoryCommand::SetLink {
+        chapter_id: chapter.chapter.id,
+        entry_id: person.id,
+        role_ids: vec![],
+    });
+    assert_eq!(cleared.links.len(), 2);
+    assert_eq!(
+        cleared
+            .links
+            .iter()
+            .find(|l| l.entry_id == Some(person.id))
+            .unwrap()
+            .id,
+        link_id
+    );
+    assert!(hits(&query(usage.clone()), "structured").is_empty());
+    assert_eq!(hits(&f.search("Intro"), "roles").len(), 1);
+    assert_eq!(
+        cleared.documents[0].plain_text,
+        chapter.documents[0].plain_text
+    );
+    // An older derived payload is rebuilt without changing the authored revision.
+    f.db()
+        .execute("UPDATE derived_index_state SET schema_version=2", [])
+        .unwrap();
+    let before = f.revision();
+    assert_eq!(hits(&f.search("Intro"), "roles").len(), 1);
+    assert_eq!(f.revision(), before);
+    assert_eq!(
+        f.db()
+            .query_row("SELECT schema_version FROM derived_index_state", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap(),
+        4
+    );
+}
+
+#[test]
+fn role_usage_filters_by_identity_and_respects_inactive_chapters() {
+    let f = Fixture::new();
+    let person = f.entry("Traveller");
+    let c = f.chapter("Opening", "POV Intro");
+    let a = f.story(StoryCommand::CreateRole {
+        chapter_id: c.chapter.id,
+        name: "Intro".into(),
+    });
+    let role_a = a
+        .roles
+        .iter()
+        .find(|r| r.name == "Intro")
+        .unwrap()
+        .id
+        .clone();
+    let b = f.story(StoryCommand::CreateRole {
+        chapter_id: c.chapter.id,
+        name: "Introduction".into(),
+    });
+    let role_b = b
+        .roles
+        .iter()
+        .find(|r| r.name == "Introduction")
+        .unwrap()
+        .id
+        .clone();
+    f.story(StoryCommand::SetLink {
+        chapter_id: c.chapter.id,
+        entry_id: person.id,
+        role_ids: vec![role_b.clone()],
+    });
+    let mut req = request("");
+    req.story_role_id = Some(role_a);
+    assert!(hits(
+        &ProjectService::search_project(&f.state, f.project, req.clone()).unwrap(),
+        "structured"
+    )
+    .is_empty());
+    req.story_role_id = Some(role_b);
+    assert_eq!(
+        hits(
+            &ProjectService::search_project(&f.state, f.project, req.clone()).unwrap(),
+            "structured"
+        )
+        .len(),
+        1
+    );
+    f.story(StoryCommand::SetState {
+        chapter_id: c.chapter.id,
+        state: WorkspaceState::Archived,
+    });
+    assert!(hits(
+        &ProjectService::search_project(&f.state, f.project, req.clone()).unwrap(),
+        "structured"
+    )
+    .is_empty());
+    req.include_inactive = true;
+    assert_eq!(
+        hits(
+            &ProjectService::search_project(&f.state, f.project, req.clone()).unwrap(),
+            "structured"
+        )[0]
+        .workspace_state,
+        "archived"
+    );
+    req.story_role_id = Some(uuid::Uuid::now_v7().to_string());
+    assert!(ProjectService::search_project(&f.state, f.project, req).is_err());
 }

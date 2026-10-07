@@ -292,6 +292,13 @@ Uncategorized Category; unnamed Entries remain valid and display an unstored
 Categories, Types, and Entries, inline Category/Type creation during Entry
 creation, and revision-checked continuous saving of Entry names.
 
+Each Category page has **Edit → Category → Category settings** for its Types, defaults, rename
+and reviewed deletion. Deleting a Category moves its Entries to a chosen Category
+and saves a recovery copy first. **Entry settings → Delete Entry** moves only that
+Entry to recoverable Trash; the Entries **View** selector opens Archive or Trash
+for restoration. See the [Category settings and deletion note](docs/milestones/CATEGORY_SETTINGS_VERIFICATION.md)
+for preservation rules, verification, and the Windows checklist.
+
 Task 02B adds schema 3 and optional Short Text, Number, Boolean, Choice, and
 Multi-choice Fields. Stable definitions and option identities are separate from
 Entry-owned typed values and Category, Type/ancestor, or Entry-local availability.
@@ -356,7 +363,7 @@ Category's total; collapse the Category section or use a row's **+** to create a
 Entry in that Category. **Relationships** opens a card view with five connections
 initially and **Show more** for the rest. Filter by participating Entries, the
 relationship definition, and current/ended state. Maintenance actions and
-**Close Project** are under **Project menu**.
+**Close Project** are under **File**.
 Entry relationships now group by meaning and direction, with an ellipsized
 preview, expandable participants/notes and search within each group. The Project
 Relationships picker shows bounded search results and eight recent session
@@ -420,6 +427,43 @@ maps, location-specific Explore filters, Books/Scenes, passage links, publishing
 export, rich Entry descriptions, advanced Explore filters, Tags/Statuses, Entry
 Archive/Trash, shared-definition permanent deletion, final Recent/Pinned navigation,
 and any final visual design system.
+
+### Desktop menus and Project compatibility
+
+The desktop workspace has a themed **File / Edit / View / Help** menu bar.
+**File** contains Project operations; **Edit** contains the current Entry,
+Category, Type, Field, Relationship, Chapter and Timeline management commands;
+**View** contains workspace navigation, sidebar visibility and Appearance.
+Commands that need an open record are disabled until that record is available.
+Inline creation and manuscript formatting remain beside the content.
+Menu navigation uses the same unfinished-draft and save guards as the workspace.
+See the [desktop menu note](docs/milestones/DESKTOP_MENU_VERIFICATION.md).
+
+**Help → About Worldcrafter** reports the running backend's version and supported
+Project storage versions. A Project's schema version identifies its internal
+storage layout, not the author's content or writing quality. A build supporting
+schema 10 cannot safely edit a Project already using schema 11. Open such a
+Project with the build that last saved it or a newer compatible build. The
+compatibility refusal remains fail-closed; never lower the version in a manifest
+or database to bypass it. This navigation change does not add a migration.
+
+### Browsing larger workspaces
+
+Entries and Chapters now offer search and manageable pages. Chapter display
+sorting leaves the reading order intact; **Move** changes its actual position.
+Returning from a Chapter keeps the current library search and display settings.
+Managers provide searchable Field, Type and Entry choices and keep less frequent
+actions in expandable sections. Entry settings separate structure, aliases and
+recoverable deletion.
+
+Timeline offers a horizontal rail as well as a list. Nearby dots reveal an event
+card; same-day moments share a date and undated ideas stay separate. The rail is
+labelled **not to scale**. Sidebar labels gently magnify within fixed rows, so
+neither the sidebar nor the editor changes size. Pointer illumination works over
+surfaces, respects reduced motion/high contrast, and never intercepts clicks.
+
+See [workspace usability and verification](docs/milestones/WORKSPACE_USABILITY_VERIFICATION.md)
+for scope, large-library tests, and the Windows manual checklist.
 
 ### Manual native-close verification
 

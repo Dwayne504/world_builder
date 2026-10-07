@@ -5,8 +5,10 @@ import type { SearchHit, SearchResults, SearchTarget, SearchView } from "./searc
 const areaNames = { manuscript: "Manuscript", plan: "Plan", notes: "Notes" };
 
 const titles = {
+  timeline: "Timeline",
   entries: "Entries",
   chapters: "Chapters",
+  roles: "Story Roles",
   structured: "Fields, connections & linked Chapters",
   text: "Manuscript & other text",
 };
@@ -146,7 +148,8 @@ export function ProjectSearch({
   const [result, setResult] = useState<SearchResults | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const { query, includeInactive, limitPerGroup, entryId, structuredKind, textArea } = view;
+  const { query, includeInactive, limitPerGroup, entryId, structuredKind, textArea, storyRoleId } =
+    view;
   const [count, setCount] = useState(String(limitPerGroup));
   const [countError, setCountError] = useState(false);
   useEffect(() => {
@@ -162,7 +165,7 @@ export function ProjectSearch({
     let current = true;
     setResult(null);
     setError(null);
-    if (!query.trim() && !entryId) return;
+    if (!query.trim() && !entryId && !storyRoleId) return;
     const timer = window.setTimeout(() => {
       void searchProject(projectId, {
         query,
@@ -171,6 +174,7 @@ export function ProjectSearch({
         ...(entryId ? { entryId } : {}),
         ...(structuredKind ? { structuredKind } : {}),
         ...(textArea ? { textArea } : {}),
+        ...(storyRoleId ? { storyRoleId } : {}),
       })
         .then((next) => {
           if (current) setResult(next);
@@ -192,6 +196,7 @@ export function ProjectSearch({
     entryId,
     structuredKind,
     textArea,
+    storyRoleId,
     attempt,
   ]);
   const total = result?.groups.reduce((sum, group) => sum + group.total, 0) ?? 0;
@@ -199,8 +204,31 @@ export function ProjectSearch({
     <section className="project-search" aria-labelledby="search-heading">
       <p className="eyebrow">FIND YOUR WAY</p>
       <h2 id="search-heading">
-        {entryId ? `Search within ${view.entryName ?? "this Entry"}` : "Search your Project"}
+        {storyRoleId
+          ? `Chapters using ${view.storyRoleName ?? "this Role"}`
+          : entryId
+            ? `Search within ${view.entryName ?? "this Entry"}`
+            : "Search your Project"}
       </h2>
+      {storyRoleId && (
+        <p className="search-scope muted">
+          Entries assigned this Role on Chapter links.{" "}
+          <button
+            className="quiet-button"
+            onClick={() =>
+              onViewChange({
+                ...view,
+                storyRoleId: undefined,
+                storyRoleName: undefined,
+                expandedHits: [],
+                extendedHits: [],
+              })
+            }
+          >
+            Clear Role filter
+          </button>
+        </p>
+      )}
       {entryId && (
         <p className="search-scope muted">
           Fields, connections, and explicitly linked Chapters.{" "}
@@ -221,7 +249,11 @@ export function ProjectSearch({
         </p>
       )}
       <label className="search-query">
-        {entryId ? "Find within this Entry" : "Names, aliases, Fields, connections, or writing"}
+        {storyRoleId
+          ? "Find a linked Entry or Chapter"
+          : entryId
+            ? "Find within this Entry"
+            : "Names, aliases, Roles, Fields, connections, or writing"}
         <input
           type="search"
           maxLength={256}
@@ -238,9 +270,10 @@ export function ProjectSearch({
         />
       </label>
       <div className="search-controls">
-        <label>
+        <label hidden={!!storyRoleId}>
           Fields & connections filter
           <select
+            disabled={!!storyRoleId}
             aria-label="Fields & connections filter"
             value={structuredKind ?? "all"}
             onChange={(event) =>
@@ -259,9 +292,10 @@ export function ProjectSearch({
             <option value="chapters">Linked Chapters</option>
           </select>
         </label>
-        <label>
+        <label hidden={!!storyRoleId}>
           Text previews
           <select
+            disabled={!!storyRoleId}
             aria-label="Text previews"
             value={textArea ?? "all"}
             onChange={(event) =>
@@ -313,7 +347,7 @@ export function ProjectSearch({
         </label>
       </div>
       {countError && <p role="alert">Choose a whole number of results, starting at 1.</p>}
-      {!query.trim() && !entryId ? (
+      {!query.trim() && !entryId && !storyRoleId ? (
         <p className="muted">
           Start with a name or a few words. Names and aliases come before text matches.
         </p>
@@ -329,15 +363,30 @@ export function ProjectSearch({
           <p role="status" className="muted">
             {total
               ? `${total} matching ${total === 1 ? "result" : "results"}`
-              : "No matches. Try another name, filter, or fewer words."}
+              : storyRoleId
+                ? "No matching Chapter links. To use this Role, link an Entry in a Chapter and choose Roles beside its name. Check your search and archived-record filter too."
+                : "No matches. Try another name, filter, or fewer words."}
           </p>
           {result.groups
             .filter((group) => group.total > 0)
             .map((group) => (
-              <section className="search-group" key={group.kind} aria-label={titles[group.kind]}>
+              <section
+                className="search-group"
+                key={group.kind}
+                aria-label={
+                  storyRoleId && group.kind === "structured" ? "Chapter uses" : titles[group.kind]
+                }
+              >
                 <h3>
-                  {titles[group.kind]} <small className="muted">{group.total}</small>
+                  {storyRoleId && group.kind === "structured" ? "Chapter uses" : titles[group.kind]}{" "}
+                  <small className="muted">{group.total}</small>
                 </h3>
+                {group.kind === "roles" && (
+                  <p className="field-note">
+                    Choose a Role to find its Chapter uses. Creating a Role makes it available;
+                    assign it to a linked Entry to use it.
+                  </p>
+                )}
                 {group.kind === "text" && (
                   <p className="field-note">
                     Previews come from the writing area matching your search. Change it with Text

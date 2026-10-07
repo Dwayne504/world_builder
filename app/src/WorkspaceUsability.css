@@ -1,0 +1,270 @@
+/* Shared reading density, independent of the selected visual theme. */
+.browse-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.7rem;
+  margin: 1rem 0;
+}
+.browse-tools > label {
+  flex: 1 1 9rem;
+  min-width: 0;
+  margin: 0;
+}
+.browse-tools > .browse-query {
+  flex-grow: 3;
+}
+.browse-tools input,
+.browse-tools select {
+  margin-top: 0.3rem;
+}
+.browse-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+.browse-pagination > span {
+  margin-right: auto;
+  color: var(--muted);
+}
+.browse-pagination button {
+  padding: 0.35rem 0.65rem;
+  min-height: 34px;
+}
+.entry-list button {
+  padding: 0.6rem 0.4rem;
+}
+.entry-group > summary {
+  padding: 0.65rem 0;
+}
+.entry-group > summary h3 {
+  font-size: 1.05rem;
+}
+.entries-panel > .section-heading {
+  margin-bottom: 0.5rem;
+}
+.entries-panel .browse-filter {
+  max-width: none;
+}
+.entries-panel .browse-summary {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Keep menus and the dismiss action reachable even in tall editor dialogs. */
+dialog {
+  overflow: hidden;
+  width: min(44rem, calc(100vw - 2rem));
+}
+dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.dialog-header {
+  flex: 0 0 auto;
+  padding: 0.8rem 1.2rem;
+}
+.dialog-header h2 {
+  font-size: 1.15rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.dialog-header > button {
+  flex-shrink: 0;
+}
+.dialog-body {
+  padding: 1rem 1.2rem;
+  overflow: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.dialog-body > p {
+  max-width: 72ch;
+}
+.dialog-body label {
+  font-size: 0.875rem;
+}
+.dialog-body input:not([type="checkbox"]):not([type="radio"]),
+.dialog-body select,
+.dialog-body textarea {
+  padding: 0.55rem 0.65rem;
+}
+.dialog-body button {
+  min-height: 34px;
+  padding: 0.4rem 0.7rem;
+}
+.dialog-body fieldset {
+  padding: 0.8rem;
+  margin-top: 0.8rem;
+}
+.dialog-body fieldset legend {
+  padding-inline: 0.25rem;
+}
+.dialog-body h3 {
+  font-size: 1rem;
+  margin-block: 1rem 0.5rem;
+}
+.settings-sections {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.6rem;
+}
+.settings-sections button {
+  border-color: transparent;
+  background: transparent;
+}
+.settings-sections button[aria-pressed="true"] {
+  background: var(--tint);
+  border-color: var(--line);
+}
+.settings-panel {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.settings-panel[hidden] {
+  display: none;
+}
+.settings-panel > label {
+  display: block;
+  margin-bottom: 0.8rem;
+}
+.settings-panel > label > select {
+  margin-top: 0.3rem;
+}
+.settings-panel .entry-aliases {
+  margin-top: 0;
+}
+
+/* Magnification is painted inside unchanged, clipped hit areas. */
+.project-sidebar {
+  top: 52px;
+  max-height: calc(100dvh - 68px);
+  scrollbar-gutter: stable;
+}
+.project-sidebar .sidebar-destination {
+  overflow: hidden;
+  padding-inline: 0.7rem 1.1rem;
+  min-height: 40px;
+}
+.project-sidebar .sidebar-destination > span:first-child {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform-origin: left center;
+  transform: scale(calc(1 + var(--sidebar-nearness, 0) * 0.065));
+  transition: transform 90ms ease-out;
+}
+.project-sidebar .sidebar-destination:focus-visible > span:first-child {
+  transform: scale(1.065);
+}
+.project-sidebar .sidebar-count {
+  flex-shrink: 0;
+}
+.sidebar-search {
+  display: block;
+  margin: 0.3rem 0 0.6rem;
+}
+.sidebar-search input {
+  padding: 0.5rem;
+  font-size: 0.85rem;
+}
+.sidebar-empty {
+  padding: 0.5rem;
+  font-size: 0.85rem;
+}
+
+/* The light passes over surfaces too; it never receives pointer or focus events. */
+:root {
+  --surface-light: 178 130 57;
+}
+:root[data-appearance="starship"] {
+  --surface-light: 154 223 251;
+}
+:is(.panel, .entries-panel, .app-header, .desktop-menu-panel)[data-illuminated] {
+  position: relative;
+}
+.desktop-menu-panel[data-illuminated] {
+  position: fixed;
+}
+:is(
+    .panel,
+    .entries-panel,
+    .app-header,
+    .project-sidebar,
+    .desktop-menu-panel
+  )[data-illuminated]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    circle 240px at var(--surface-pointer-x) var(--surface-pointer-y),
+    rgb(var(--surface-light) / 0.085),
+    transparent 100%
+  );
+}
+.pointer-light,
+dialog::after {
+  background: radial-gradient(
+    circle 230px at var(--pointer-x, -500px) var(--pointer-y, -500px),
+    #ffda9a17,
+    transparent 100%
+  );
+}
+:root[data-appearance="starship"] :is(.pointer-light, dialog::after) {
+  background: radial-gradient(
+    circle 230px at var(--pointer-x, -500px) var(--pointer-y, -500px),
+    #b9edff24,
+    transparent 100%
+  );
+}
+:root[data-appearance="starship"][data-pointer-light="on"] .ambient-pattern {
+  background: radial-gradient(circle at 50% 50%, transparent 16px, #9fc7db64 17px, transparent 18px)
+    0 0 / 46px 46px;
+}
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .project-sidebar .sidebar-destination > span:first-child {
+    transform: none !important;
+    transition: none;
+  }
+  [data-illuminated]::after {
+    display: none !important;
+  }
+}
+@media (max-width: 680px) {
+  .dialog-body,
+  .dialog-header {
+    padding: 0.8rem;
+  }
+  .browse-tools {
+    gap: 0.5rem;
+  }
+  .browse-tools > .browse-query {
+    flex-basis: 100%;
+  }
+}
+@media (max-width: 800px) {
+  .project-sidebar {
+    max-height: 180px;
+  }
+}
+.dialog-header h2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

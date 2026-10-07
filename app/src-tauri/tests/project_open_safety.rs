@@ -46,6 +46,43 @@ fn make_closed_project(
     (created, package_path)
 }
 
+#[test]
+fn newer_project_refusal_preserves_files_and_explains_which_build_to_use() {
+    for future_manifest in [false, true] {
+        let state = AppState::default();
+        let dir = tempdir().unwrap();
+        let (created, root) = make_closed_project(&state, dir.path());
+        let paths = project_paths(&created.package_path);
+        let future = migrations::CURRENT_SCHEMA_VERSION + 1;
+        if future_manifest {
+            let mut manifest = Manifest::read(&paths.manifest_path()).unwrap();
+            manifest.schema_version = future;
+            manifest.write(&paths.manifest_path()).unwrap();
+        } else {
+            let db = Connection::open(paths.db_path()).unwrap();
+            db.pragma_update(None, "user_version", future).unwrap();
+        }
+        let before_db = fs::read(paths.db_path()).unwrap();
+        let before_manifest = fs::read(paths.manifest_path()).unwrap();
+        // The advisory-lock guard file is retained after a normal close;
+        // refusing a newer Project must not change or acquire it.
+        let guard_path = paths.lock_path().with_extension("guard");
+        let before_guard = fs::read(&guard_path).ok();
+        let error = ProjectService::open_project(&state, &root, false).unwrap_err();
+        let dto: worldcrafter_lib::tauri_boundary::dto::AppErrorDto = error.into();
+        assert_eq!(dto.kind, "unsupported_schema_version");
+        assert!(dto.message.contains("newer Worldcrafter build"));
+        assert!(dto.message.contains("not been opened for editing"));
+        assert_eq!(fs::read(paths.db_path()).unwrap(), before_db);
+        assert_eq!(fs::read(paths.manifest_path()).unwrap(), before_manifest);
+        assert!(!paths.lock_path().exists());
+        assert_eq!(fs::read(&guard_path).ok(), before_guard);
+        assert!(ProjectService::list_open_projects(&state)
+            .unwrap()
+            .is_empty());
+    }
+}
+
 /// Simulates a crashed instance: orphaned heartbeat metadata with the
 /// given heartbeat age, and no OS-held advisory guard.
 fn plant_orphaned_lock_metadata(paths: &PackagePaths, heartbeat_age: chrono::Duration) {

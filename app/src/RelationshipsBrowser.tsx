@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { readProjectRelationships } from "./api";
 import type { RelationshipParticipant, RelationshipSnapshot } from "./types";
 import { initialRelationshipView, type RelationshipView } from "./workspaceHistory";
+import { ManagerSearchSelect } from "./ManagerSearchSelect";
 
 /** A read-only view of canonical relationships; editing stays with the Entry editor. */
 export function RelationshipsBrowser({
@@ -83,8 +84,16 @@ export function RelationshipsBrowser({
         const entry = participants.get(id);
         return entry ? [[id, entry] as const] : [];
       });
+  const relationshipQuery = (view.query ?? "").trim().toLocaleLowerCase();
+  const definitionById = new Map(
+    snapshot?.definitions.map((definition) => [definition.id, definition]),
+  );
   const matching = (snapshot?.relationships ?? []).filter(
     (relation) =>
+      (!relationshipQuery ||
+        `${relation.source.label} ${relation.target.label} ${definitionById.get(relation.definitionId)?.name ?? ""} ${definitionById.get(relation.definitionId)?.forwardLabel ?? ""} ${definitionById.get(relation.definitionId)?.inverseLabel ?? ""} ${relation.note}`
+          .toLocaleLowerCase()
+          .includes(relationshipQuery)) &&
       (!view.relationshipId || relation.id === view.relationshipId) &&
       (!view.definitionId || relation.definitionId === view.definitionId) &&
       (!view.entryIds.length ||
@@ -95,6 +104,7 @@ export function RelationshipsBrowser({
           : !relation.ended && relation.workspaceState === "active")),
   );
   const filtered = !!(
+    relationshipQuery ||
     view.relationshipId ||
     view.entryIds.length ||
     view.definitionId ||
@@ -125,110 +135,134 @@ export function RelationshipsBrowser({
               relationships.
             </p>
           )}
-          <div className="relationship-filters">
-            <div className="relationship-entry-filter">
-              <label>
-                Find an Entry
-                <input
-                  type="search"
-                  value={entrySearch}
-                  onChange={(event) => {
-                    setEntrySearch(event.currentTarget.value);
-                    setChoiceLimit(10);
-                  }}
-                />
-              </label>
-              <p className="field-note">
-                Include either side of a connection. Selected Entries appear first.
-              </p>
-              {view.entryIds.length > 0 && (
-                <div className="relationship-selected" aria-label="Selected Entries">
-                  {view.entryIds.map((id) => (
-                    <button
-                      key={id}
-                      className="quiet-button"
-                      aria-label={`Remove ${participants.get(id)?.label ?? "Entry"} filter`}
-                      onClick={() =>
-                        filter({ entryIds: view.entryIds.filter((chosen) => chosen !== id) })
-                      }
-                    >
-                      {participants.get(id)?.label ?? "Unavailable Entry"}{" "}
-                      <span aria-hidden="true">×</span>
-                    </button>
+          <div className="relationship-search-toolbar">
+            <label>
+              Search relationships
+              <input
+                type="search"
+                placeholder="Entry, relationship meaning, or note"
+                value={view.query ?? ""}
+                onChange={(event) => filter({ query: event.currentTarget.value })}
+              />
+            </label>
+          </div>
+          <details className="manager-secondary relationship-browser-filters">
+            <summary>
+              Filter by Entry, relationship, or state
+              {view.entryIds.length > 0 ? ` · ${view.entryIds.length} Entries selected` : ""}
+              {view.definitionId
+                ? ` · ${definitionById.get(view.definitionId)?.name ?? "Selected definition"}`
+                : ""}
+              {view.state !== "all" ? ` · ${view.state === "current" ? "Current" : "Ended"}` : ""}
+            </summary>
+            <div className="relationship-filters">
+              <div className="relationship-entry-filter">
+                <label>
+                  Find an Entry
+                  <input
+                    type="search"
+                    value={entrySearch}
+                    onChange={(event) => {
+                      setEntrySearch(event.currentTarget.value);
+                      setChoiceLimit(10);
+                    }}
+                  />
+                </label>
+                <p className="field-note">
+                  Include either side of a connection. Selected Entries appear first.
+                </p>
+                {view.entryIds.length > 0 && (
+                  <div className="relationship-selected" aria-label="Selected Entries">
+                    {view.entryIds.map((id) => (
+                      <button
+                        key={id}
+                        className="quiet-button"
+                        aria-label={`Remove ${participants.get(id)?.label ?? "Entry"} filter`}
+                        onClick={() =>
+                          filter({ entryIds: view.entryIds.filter((chosen) => chosen !== id) })
+                        }
+                      >
+                        {participants.get(id)?.label ?? "Unavailable Entry"}{" "}
+                        <span aria-hidden="true">×</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <p className="field-note">{query ? "Search results" : "Recent Entries"}</p>
+                <div className="relationship-entry-choices">
+                  {visibleChoices.map(([id, entry]) => (
+                    <label className="relationship-entry-choice" key={id}>
+                      <input
+                        type="checkbox"
+                        checked={view.entryIds.includes(id)}
+                        onChange={(event) => {
+                          if (event.currentTarget.checked) onRememberEntry?.(id);
+                          filter({
+                            entryIds: event.currentTarget.checked
+                              ? [...view.entryIds, id]
+                              : view.entryIds.filter((chosen) => chosen !== id),
+                          });
+                        }}
+                      />
+                      <span>
+                        {entry.label} <small className="muted">· {entry.detail}</small>
+                      </span>
+                    </label>
                   ))}
                 </div>
-              )}
-              <p className="field-note">{query ? "Search results" : "Recent Entries"}</p>
-              <div className="relationship-entry-choices">
-                {visibleChoices.map(([id, entry]) => (
-                  <label className="relationship-entry-choice" key={id}>
-                    <input
-                      type="checkbox"
-                      checked={view.entryIds.includes(id)}
-                      onChange={(event) => {
-                        if (event.currentTarget.checked) onRememberEntry?.(id);
-                        filter({
-                          entryIds: event.currentTarget.checked
-                            ? [...view.entryIds, id]
-                            : view.entryIds.filter((chosen) => chosen !== id),
-                        });
-                      }}
-                    />
-                    <span>
-                      {entry.label} <small className="muted">· {entry.detail}</small>
-                    </span>
-                  </label>
-                ))}
+                {!visibleChoices.length && (
+                  <p className="field-note">
+                    {query
+                      ? "No Entries match this search."
+                      : "Search for an Entry to get started."}
+                  </p>
+                )}
+                {query && searchResults.length > choiceLimit && (
+                  <button
+                    className="quiet-button"
+                    onClick={() => setChoiceLimit((count) => count + 10)}
+                  >
+                    Show more Entry results
+                  </button>
+                )}
+                {view.entryIds.length > 0 && (
+                  <button className="quiet-button" onClick={() => filter({ entryIds: [] })}>
+                    All Entries
+                  </button>
+                )}
               </div>
-              {!visibleChoices.length && (
-                <p className="field-note">
-                  {query ? "No Entries match this search." : "Search for an Entry to get started."}
-                </p>
-              )}
-              {query && searchResults.length > choiceLimit && (
-                <button
-                  className="quiet-button"
-                  onClick={() => setChoiceLimit((count) => count + 10)}
-                >
-                  Show more Entry results
-                </button>
-              )}
-              {view.entryIds.length > 0 && (
-                <button className="quiet-button" onClick={() => filter({ entryIds: [] })}>
-                  All Entries
-                </button>
-              )}
-            </div>
-            <label>
-              Relationship
-              <select
-                aria-label="Relationship"
+              <ManagerSearchSelect
+                label="Relationship"
                 value={view.definitionId}
-                onChange={(event) => filter({ definitionId: event.currentTarget.value })}
-              >
-                <option value="">All relationships</option>
-                {snapshot.definitions.map((definition) => (
-                  <option key={definition.id} value={definition.id}>
-                    {definition.name} · {definition.forwardLabel}
-                    {definition.retired ? " (retired)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              State
-              <select
-                aria-label="State"
-                value={view.state}
-                onChange={(event) =>
-                  filter({ state: event.currentTarget.value as RelationshipView["state"] })
-                }
-              >
-                <option value="all">Current and past</option>
-                <option value="current">Current</option>
-                <option value="ended">Ended</option>
-              </select>
-            </label>
+                onChange={(id) => filter({ definitionId: id })}
+                emptyLabel="All relationships"
+                choices={snapshot.definitions.map((definition) => ({
+                  id: definition.id,
+                  label: `${definition.name} · ${definition.forwardLabel}${definition.retired ? " (retired)" : ""}`,
+                  searchText: definition.inverseLabel,
+                }))}
+              />
+              <label>
+                State
+                <select
+                  aria-label="State"
+                  value={view.state}
+                  onChange={(event) =>
+                    filter({ state: event.currentTarget.value as RelationshipView["state"] })
+                  }
+                >
+                  <option value="all">Current and past</option>
+                  <option value="current">Current</option>
+                  <option value="ended">Ended</option>
+                </select>
+              </label>
+            </div>
+          </details>
+          <div className="section-heading">
+            <p className="muted relationship-result-count" role="status">
+              Showing {Math.min(view.visibleCount, matching.length)} of {matching.length}{" "}
+              {filtered ? "matching " : ""}relationships
+            </p>
             {filtered && (
               <button
                 className="quiet-button"
@@ -241,10 +275,6 @@ export function RelationshipsBrowser({
               </button>
             )}
           </div>
-          <p className="muted relationship-result-count" role="status">
-            Showing {Math.min(view.visibleCount, matching.length)} of {matching.length}{" "}
-            {filtered ? "matching " : ""}relationships
-          </p>
           {matching.length === 0 && (
             <p className="empty-state">
               {snapshot.relationships.length

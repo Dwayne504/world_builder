@@ -1,11 +1,17 @@
 /** Session navigation stores identity and presentation, never copies of authored data. */
+import { initialTimelineView } from "./timelineTypes";
 export interface WorkspaceLocation {
-  page: "entries" | "relationships" | "chapters" | "search";
+  timelineView: import("./timelineTypes").TimelineView;
+  page: "entries" | "relationships" | "chapters" | "search" | "timeline";
   searchView: import("./searchTypes").SearchView;
   chapterArea: import("./storyTypes").DocumentArea;
   chapterId: string | null;
   relationshipView: RelationshipView;
   entryId: string | null;
+  entryState: "active" | "archived" | "trashed";
+  entryQuery?: string;
+  entryPage?: number;
+  entryPageSize?: number;
   categoryId: string;
   typeId: string;
   scrollY: number;
@@ -13,6 +19,7 @@ export interface WorkspaceLocation {
   focusKey: string | null;
 }
 export interface RelationshipView {
+  query?: string;
   relationshipId?: string;
   entryIds: string[];
   definitionId: string;
@@ -31,11 +38,13 @@ export interface WorkspaceHistory {
 }
 export const initialLocation: WorkspaceLocation = {
   page: "entries",
+  timelineView: initialTimelineView,
   searchView: { query: "", includeInactive: false, limitPerGroup: 10 },
   chapterArea: "manuscript",
   chapterId: null,
   relationshipView: initialRelationshipView,
   entryId: null,
+  entryState: "active",
   categoryId: "",
   typeId: "",
   scrollY: 0,

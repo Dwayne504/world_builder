@@ -7,13 +7,17 @@ export interface SearchRequest {
   entryId?: string;
   structuredKind?: "fields" | "relationships" | "chapters";
   textArea?: DocumentArea;
+  storyRoleId?: string;
 }
 export interface SearchView extends SearchRequest {
   entryName?: string;
+  storyRoleName?: string;
   expandedHits?: string[];
   extendedHits?: string[];
 }
 export type SearchTarget =
+  | { kind: "occurrence"; occurrenceId: string }
+  | { kind: "story_role"; roleId: string; name: string }
   | { kind: "entry"; entryId: string }
   | { kind: "chapter"; chapterId: string; area: DocumentArea }
   | { kind: "relationship"; relationshipId: string; perspectiveEntryId?: string };
@@ -30,7 +34,7 @@ export interface SearchHit {
 export interface SearchResults {
   globalRevision: number;
   groups: {
-    kind: "entries" | "chapters" | "structured" | "text";
+    kind: "entries" | "chapters" | "roles" | "structured" | "text" | "timeline";
     total: number;
     hits: SearchHit[];
   }[];

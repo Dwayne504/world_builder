@@ -1,0 +1,129 @@
+.desktop-menu {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.desktop-menu [role="menubar"] {
+  display: flex;
+  gap: 0.1rem;
+}
+
+.desktop-menu .desktop-menu-trigger {
+  min-height: 30px;
+  padding: 0.2rem 0.75rem;
+  border-color: transparent;
+  background: transparent;
+  font-weight: 400;
+}
+
+.desktop-menu-trigger[aria-expanded="true"],
+.desktop-menu .desktop-menu-trigger:hover {
+  background: var(--tint);
+  border-color: var(--line);
+}
+
+.desktop-menu-panel {
+  --text: var(--panel-text);
+  --muted: var(--panel-muted);
+  --accent: var(--panel-accent);
+  --line: var(--panel-line);
+  --tint: var(--panel-tint);
+  position: fixed;
+  z-index: 100;
+  min-width: min(16.5rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 22px #00000030;
+}
+
+.desktop-menu-panel > li {
+  margin: 0;
+  padding: 0;
+}
+
+.desktop-menu .desktop-menu-command {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 0.55rem;
+  min-height: 32px;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.desktop-menu .desktop-menu-command:focus,
+.desktop-menu .desktop-menu-command:not(:disabled):hover,
+.desktop-menu-command[aria-expanded="true"] {
+  background: var(--tint);
+  border-color: var(--line);
+  outline: none;
+}
+
+.desktop-menu .desktop-menu-command:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.desktop-menu button:active {
+  transform: none;
+}
+
+.desktop-menu-check,
+.desktop-menu-arrow {
+  flex: 0 0 0.8rem;
+  text-align: center;
+}
+
+.desktop-menu-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desktop-menu-shortcut {
+  margin-left: 1rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.desktop-menu-panel > .desktop-menu-separator {
+  margin: 0.3rem 0.4rem;
+  border-top: 1px solid var(--line);
+}
+
+.desktop-menu-panel > .desktop-menu-empty {
+  padding: 0.4rem 0.65rem;
+  color: var(--muted);
+}
+
+@media (forced-colors: active) {
+  .desktop-menu-panel {
+    border-color: ButtonBorder;
+    box-shadow: none;
+  }
+
+  .desktop-menu .desktop-menu-command:focus,
+  .desktop-menu-trigger[aria-expanded="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}

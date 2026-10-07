@@ -7,6 +7,7 @@
 
 pub mod error;
 mod fields;
+pub mod lifecycle;
 pub mod lock;
 pub mod migrations;
 pub mod pragmas;
@@ -15,6 +16,7 @@ mod search;
 pub mod snapshot;
 mod spatial;
 mod story;
+mod timeline;
 pub mod worker;
 
 pub use error::PersistenceError;

@@ -40,10 +40,13 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            tauri_boundary::get_build_info,
             tauri_boundary::search_project,
             tauri_boundary::read_aliases,
             tauri_boundary::apply_alias,
             tauri_boundary::read_story,
+            tauri_boundary::read_timeline,
+            tauri_boundary::apply_timeline,
             tauri_boundary::read_chapter,
             tauri_boundary::story_usage,
             tauri_boundary::apply_story,
@@ -57,6 +60,8 @@ pub fn run() {
             tauri_boundary::read_field_catalog,
             tauri_boundary::apply_template_fields,
             tauri_boundary::delete_entry_field,
+            tauri_boundary::preview_category_delete,
+            tauri_boundary::apply_structure,
             tauri_boundary::automatic_backup_directory,
             tauri_boundary::read_fields,
             tauri_boundary::apply_fields,

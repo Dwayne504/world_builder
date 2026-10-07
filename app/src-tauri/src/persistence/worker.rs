@@ -57,6 +57,23 @@ use crate::domain::structure::FieldId;
 
 use crate::domain::search::{AliasCommand, EntryAliases, SearchRequest, SearchResults};
 enum Job {
+    PreviewCategory {
+        id: CategoryId,
+        reply: Reply<crate::domain::lifecycle::CategoryDeletePreview>,
+    },
+    ApplyStructure {
+        expected: i64,
+        command: crate::domain::lifecycle::StructureCommand,
+        reply: Reply<crate::domain::lifecycle::StructureOutcome>,
+    },
+    ReadTimeline {
+        reply: Reply<crate::domain::timeline::TimelineSnapshot>,
+    },
+    ApplyTimeline {
+        expected: i64,
+        command: crate::domain::timeline::TimelineCommand,
+        reply: Reply<crate::domain::timeline::TimelineSnapshot>,
+    },
     Search {
         request: SearchRequest,
         reply: Reply<SearchResults>,
@@ -357,6 +374,16 @@ impl ProjectDbWorker {
         let _ = conn.execute("UPDATE derived_index_state SET dirty=1 WHERE id=1", []);
         for job in jobs {
             match job {
+                Job::PreviewCategory { id, reply } => {
+                    let _ = reply.send(super::lifecycle::preview(&conn, id));
+                }
+                Job::ApplyStructure {
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::lifecycle::apply(&mut conn, expected, command));
+                }
                 Job::Search { request, reply } => {
                     let _ = reply.send(super::search::query(&conn, request));
                 }
@@ -372,6 +399,16 @@ impl ProjectDbWorker {
                     let _ = reply.send(super::search::apply_alias(
                         &mut conn, entry_id, expected, command,
                     ));
+                }
+                Job::ReadTimeline { reply } => {
+                    let _ = reply.send(super::timeline::read(&conn));
+                }
+                Job::ApplyTimeline {
+                    expected,
+                    command,
+                    reply,
+                } => {
+                    let _ = reply.send(super::timeline::apply(&mut conn, expected, command));
                 }
                 Job::ReadStory { reply } => {
                     let _ = reply.send(super::story::index(&conn));
@@ -593,6 +630,22 @@ impl ProjectDbWorker {
             reply,
         })
     }
+    pub fn read_timeline(
+        &self,
+    ) -> Result<crate::domain::timeline::TimelineSnapshot, PersistenceError> {
+        self.call(|reply| Job::ReadTimeline { reply })
+    }
+    pub fn apply_timeline(
+        &self,
+        expected: i64,
+        command: crate::domain::timeline::TimelineCommand,
+    ) -> Result<crate::domain::timeline::TimelineSnapshot, PersistenceError> {
+        self.call(|reply| Job::ApplyTimeline {
+            expected,
+            command,
+            reply,
+        })
+    }
     pub fn read_story(&self) -> Result<crate::domain::story::StoryIndex, PersistenceError> {
         self.call(|reply| Job::ReadStory { reply })
     }
@@ -775,6 +828,23 @@ impl ProjectDbWorker {
         })
     }
 
+    pub(crate) fn preview_category_delete(
+        &self,
+        id: CategoryId,
+    ) -> Result<crate::domain::lifecycle::CategoryDeletePreview, PersistenceError> {
+        self.call(|reply| Job::PreviewCategory { id, reply })
+    }
+    pub(crate) fn apply_structure(
+        &self,
+        expected: i64,
+        command: crate::domain::lifecycle::StructureCommand,
+    ) -> Result<crate::domain::lifecycle::StructureOutcome, PersistenceError> {
+        self.call(|reply| Job::ApplyStructure {
+            expected,
+            command,
+            reply,
+        })
+    }
     pub fn list_entries(&self) -> Result<Vec<Entry>, PersistenceError> {
         self.call(|reply| Job::ListEntries { reply })
     }
@@ -1144,7 +1214,7 @@ fn list_entries(conn: &Connection) -> Result<Vec<Entry>, PersistenceError> {
         |row| row.get(0),
     )?;
     let mut statement = conn.prepare(
-        "SELECT id, category_id, type_id, authored_name, revision
+        "SELECT id, category_id, type_id, authored_name, revision, (SELECT workspace_state FROM record_identity WHERE record_id=entry.id)
              FROM entry ORDER BY COALESCE(authored_name, '') COLLATE NOCASE, id",
     )?;
     let rows = statement.query_map([], |row| {
@@ -1154,6 +1224,7 @@ fn list_entries(conn: &Connection) -> Result<Vec<Entry>, PersistenceError> {
             row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,
             row.get::<_, i64>(4)?,
+            row.get::<_, String>(5)?,
         ))
     })?;
     rows.map(|row| entry_from_row(row?, global_revision))
@@ -1168,7 +1239,7 @@ fn get_entry(conn: &Connection, id: EntryId) -> Result<Entry, PersistenceError> 
     )?;
     let row = conn
         .query_row(
-            "SELECT id, category_id, type_id, authored_name, revision
+            "SELECT id, category_id, type_id, authored_name, revision, (SELECT workspace_state FROM record_identity WHERE record_id=entry.id)
                  FROM entry WHERE id = ?1",
             [id.to_string()],
             |row| {
@@ -1178,6 +1249,7 @@ fn get_entry(conn: &Connection, id: EntryId) -> Result<Entry, PersistenceError> 
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, i64>(4)?,
+            row.get::<_, String>(5)?,
                 ))
             },
         )
@@ -1187,7 +1259,7 @@ fn get_entry(conn: &Connection, id: EntryId) -> Result<Entry, PersistenceError> 
 }
 
 fn entry_from_row(
-    row: (String, String, Option<String>, Option<String>, i64),
+    row: (String, String, Option<String>, Option<String>, i64, String),
     global_revision: i64,
 ) -> Result<Entry, PersistenceError> {
     Ok(Entry {
@@ -1201,6 +1273,7 @@ fn entry_from_row(
             .map_err(|e| PersistenceError::Other(e.to_string()))?,
         authored_name: row.3,
         revision: row.4,
+        workspace_state: row.5,
         global_revision,
     })
 }
@@ -1251,6 +1324,7 @@ fn create_entry(
         category_id,
         type_id,
         authored_name: name,
+        workspace_state: "active".into(),
         revision: 1,
         global_revision,
     })
@@ -1502,7 +1576,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
+             DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;

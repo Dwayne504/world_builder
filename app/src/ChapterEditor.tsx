@@ -10,10 +10,17 @@ import {
   type DocumentArea,
   type StoryCommand,
   type StoryLink,
+  type StoryRole,
 } from "./storyTypes";
 import type { Category, Entry, EntryFields, EntryRelationships, SpatialSnapshot } from "./types";
 import { spatialPath } from "./spatialPresentation";
 import { useChapter } from "./useChapter";
+import { useDesktopCommands } from "./desktopMenuContext";
+import { ChapterPagination } from "./ChapterPagination";
+import "./ChapterWorkspace.css";
+
+const CONTEXT_PAGE_SIZE = 10;
+const ROLE_PAGE_SIZE = 12;
 
 function EntryPreview({
   projectId,
@@ -122,6 +129,7 @@ export function ChapterEditor({
   onBack,
   onEntry,
   positions,
+  onFindRole,
 }: {
   locked?: boolean;
   initialArea?: DocumentArea;
@@ -133,6 +141,7 @@ export function ChapterEditor({
   onChanged: (chapter: ChapterSnapshot) => void;
   onBack: () => void;
   onEntry: (id: string) => void;
+  onFindRole?: (role: StoryRole) => void;
   positions: Record<string, WritingPosition>;
 }) {
   const chapter = useChapter(projectId, initial, onChanged);
@@ -140,9 +149,16 @@ export function ChapterEditor({
   const [contextOpen, setContextOpen] = useState(true);
   const [linkOpen, setLinkOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [roleLinkId, setRoleLinkId] = useState<string | null>(null);
+  const [roleQuery, setRoleQuery] = useState("");
+  const [rolePage, setRolePage] = useState(0);
+  const [contextQuery, setContextQuery] = useState("");
+  const [contextPage, setContextPage] = useState(0);
+  const [createdRole, setCreatedRole] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [entryError, setEntryError] = useState<string | null>(null);
+  const [entriesLoading, setEntriesLoading] = useState(false);
   const [expandedLinks, setExpandedLinks] = useState<string[]>([]);
   const [roleDraft, setRoleDraft] = useState("");
   const roleRef = useRef(roleDraft);
@@ -164,21 +180,57 @@ export function ChapterEditor({
   useEffect(() => {
     if (!linkOpen) return;
     let current = true;
+    setEntriesLoading(true);
+    setEntryError(null);
     void listEntries(projectId)
       .then((items) => {
         if (current) {
           setEntries(items);
           setEntryError(null);
+          setEntriesLoading(false);
         }
       })
       .catch(() => {
-        if (current) setEntryError("Entries could not be loaded.");
+        if (current) {
+          setEntryError("Entries could not be loaded.");
+          setEntriesLoading(false);
+        }
       });
     return () => {
       current = false;
     };
   }, [projectId, linkOpen]);
   const readOnly = chapter.snapshot.chapter.workspaceState !== "active";
+  const roleLink = chapter.snapshot.links.find((link) => link.id === roleLinkId);
+  const visibleRoles = chapter.snapshot.roles.filter((role) =>
+    role.name.toLocaleLowerCase().includes(roleQuery.trim().toLocaleLowerCase()),
+  );
+  const currentRolePage = Math.min(
+    rolePage,
+    Math.max(0, Math.ceil(visibleRoles.length / ROLE_PAGE_SIZE) - 1),
+  );
+  const roleResults = visibleRoles.slice(
+    currentRolePage * ROLE_PAGE_SIZE,
+    (currentRolePage + 1) * ROLE_PAGE_SIZE,
+  );
+  const contextSearch = contextQuery.trim().toLocaleLowerCase();
+  const matchingLinks = chapter.snapshot.links.filter((link) =>
+    `${link.label} ${link.roles.map((role) => role.name).join(" ")}`
+      .toLocaleLowerCase()
+      .includes(contextSearch),
+  );
+  const currentContextPage = Math.min(
+    contextPage,
+    Math.max(0, Math.ceil(matchingLinks.length / CONTEXT_PAGE_SIZE) - 1),
+  );
+  const contextLinks = matchingLinks.slice(
+    currentContextPage * CONTEXT_PAGE_SIZE,
+    (currentContextPage + 1) * CONTEXT_PAGE_SIZE,
+  );
+  function searchRoles(value: string) {
+    setRoleQuery(value);
+    setRolePage(0);
+  }
   const blocked = locked || readOnly || chapter.state !== "saved" || !!recovery;
   const available = entries.filter(
     (e) =>
@@ -207,6 +259,34 @@ export function ChapterEditor({
     Object.keys(recovery.draft.documents).every((area) =>
       chapter.snapshot.documents.some((d) => d.area === area && !d.readOnlyReason),
     );
+  useDesktopCommands(
+    "chapter-editor",
+    {
+      edit: [
+        {
+          id: "chapter",
+          label: "Chapter",
+          children: [
+            {
+              id: "chapter-options",
+              label: "Chapter options…",
+              disabled: locked,
+              action: () => setOptionsOpen(true),
+            },
+          ],
+        },
+      ],
+      view: [
+        {
+          id: "chapter-context",
+          label: contextOpen ? "Hide Chapter context" : "Show Chapter context",
+          checked: contextOpen,
+          action: () => setContextOpen((value) => !value),
+        },
+      ],
+    },
+    20,
+  );
   return (
     <section
       className={`panel chapter-editor ${contextOpen ? "" : "context-collapsed"}`}
@@ -232,14 +312,11 @@ export function ChapterEditor({
         <div className="row">
           <button
             className="quiet-button"
+            aria-controls="chapter-context"
             aria-expanded={contextOpen}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setContextOpen((v) => !v)}
+            onClick={() => setContextOpen((value) => !value)}
           >
             {contextOpen ? "Hide context" : "Show context"}
-          </button>
-          <button className="quiet-button" onClick={() => setOptionsOpen(true)}>
-            Chapter options
           </button>
           <button className="quiet-button" onClick={onBack}>
             All Chapters
@@ -376,9 +453,17 @@ export function ChapterEditor({
             </span>
           </footer>
         </div>
-        <aside className="chapter-context" aria-label="Chapter context" hidden={!contextOpen}>
+        <aside
+          id="chapter-context"
+          className="chapter-context"
+          aria-label="Chapter context"
+          hidden={!contextOpen}
+        >
           <div className="section-heading">
-            <h3>In this Chapter</h3>
+            <h3>
+              In this Chapter{" "}
+              <span className="chapter-view-count">{chapter.snapshot.links.length}</span>
+            </h3>
             <button disabled={blocked} onClick={() => setLinkOpen(true)}>
               Link Entry
             </button>
@@ -388,102 +473,268 @@ export function ChapterEditor({
               Keep the people, places, and objects you need beside your writing.
             </p>
           )}
-          {chapter.snapshot.links.map((link) => (
-            <details
-              key={link.id}
-              className="chapter-world-link"
-              onToggle={(e) => {
-                if (e.target !== e.currentTarget) return;
-                const open = e.currentTarget.open;
-                setExpandedLinks((ids) =>
-                  open ? [...new Set([...ids, link.id])] : ids.filter((id) => id !== link.id),
-                );
-              }}
-            >
-              <summary>
-                <strong>{link.label}</strong>
-                <small>
-                  {link.roles.map((r) => r.name).join(" · ")}
-                  {link.workspaceState !== "active" ? ` · ${link.workspaceState}` : ""}
-                </small>
-              </summary>
-              {contextOpen && expandedLinks.includes(link.id) && link.entryId && (
-                <EntryPreview projectId={projectId} link={link} onOpen={onEntry} />
-              )}
-              <details className="story-link-options">
-                <summary>Roles & link</summary>
-                <div className="story-role-options">
-                  {chapter.snapshot.roles.map((role) => (
-                    <label key={role.id}>
-                      <input
-                        type="checkbox"
-                        disabled={blocked || link.workspaceState !== "active"}
-                        checked={link.roles.some((r) => r.id === role.id)}
-                        onChange={(e) =>
-                          command({
-                            kind: "set_link",
-                            chapterId: id,
-                            entryId: link.entryId!,
-                            roleIds: e.target.checked
-                              ? [...link.roles.map((r) => r.id), role.id]
-                              : link.roles.filter((r) => r.id !== role.id).map((r) => r.id),
-                          })
-                        }
-                      />
-                      {role.name}
-                    </label>
-                  ))}
-                </div>
-                <p className="muted">Roles are optional. An Entry can have several.</p>
-                <button
-                  className="quiet-button"
-                  disabled={blocked}
-                  onClick={() => command({ kind: "unlink", chapterId: id, linkId: link.id })}
+          {(chapter.snapshot.links.length > CONTEXT_PAGE_SIZE || contextQuery) && (
+            <label className="chapter-context-search">
+              Find linked material
+              <input
+                type="search"
+                placeholder="Entry or Role…"
+                value={contextQuery}
+                onChange={(event) => {
+                  setContextQuery(event.target.value);
+                  setContextPage(0);
+                }}
+              />
+            </label>
+          )}
+          <div className="chapter-context-results">
+            {contextLinks.map((link) => (
+              <div key={link.id} className="chapter-world-link">
+                <details
+                  open={expandedLinks.includes(link.id)}
+                  onToggle={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    const open = e.currentTarget.open;
+                    setExpandedLinks((ids) =>
+                      open ? [...new Set([...ids, link.id])] : ids.filter((id) => id !== link.id),
+                    );
+                  }}
                 >
-                  Remove link
+                  <summary>
+                    <strong>{link.label}</strong>
+                    <small title={link.roles.map((role) => role.name).join(" · ")}>
+                      {link.roles
+                        .slice(0, 3)
+                        .map((r) => r.name)
+                        .join(" · ") || "No Roles assigned"}
+                      {link.roles.length > 3 ? ` · +${link.roles.length - 3} more` : ""}
+                      {link.workspaceState !== "active" ? ` · ${link.workspaceState}` : ""}
+                    </small>
+                  </summary>
+                  {contextOpen && expandedLinks.includes(link.id) && link.entryId && (
+                    <EntryPreview projectId={projectId} link={link} onOpen={onEntry} />
+                  )}
+                </details>
+                <button
+                  className="quiet-button chapter-role-button"
+                  aria-label={`Roles for ${link.label}`}
+                  onClick={() => {
+                    setRoleLinkId(link.id);
+                    searchRoles("");
+                  }}
+                >
+                  Roles
                 </button>
-              </details>
-            </details>
-          ))}
+              </div>
+            ))}
+          </div>
+          {!!chapter.snapshot.links.length && !matchingLinks.length && (
+            <p className="muted">
+              No linked Entries match.{" "}
+              <button
+                className="quiet-button"
+                onClick={() => {
+                  setContextQuery("");
+                  setContextPage(0);
+                }}
+              >
+                Clear search
+              </button>
+            </p>
+          )}
+          {chapter.snapshot.links.length > CONTEXT_PAGE_SIZE && (
+            <ChapterPagination
+              label="Linked material"
+              page={currentContextPage}
+              pageSize={CONTEXT_PAGE_SIZE}
+              total={matchingLinks.length}
+              onPage={setContextPage}
+            />
+          )}
         </aside>
       </div>
+      <Dialog
+        open={!!roleLink && !optionsOpen}
+        title={`Roles for ${roleLink?.label ?? "Entry"}`}
+        onClose={() => setRoleLinkId(null)}
+      >
+        {roleLink && (
+          <>
+            <p className="muted">
+              Choose none, one, or several Roles for this Entry. Changes save automatically.
+            </p>
+            {chapter.error && (
+              <p role="alert">
+                {chapter.error} The Role change was not saved. Close this window to review the saved
+                version.
+              </p>
+            )}
+            <label>
+              Find a Role
+              <input
+                type="search"
+                value={roleQuery}
+                onChange={(e) => searchRoles(e.target.value)}
+              />
+            </label>
+            <div className="story-role-options">
+              {roleResults.map((role) => (
+                <label key={role.id}>
+                  <input
+                    type="checkbox"
+                    disabled={blocked || !roleLink.entryId || roleLink.workspaceState !== "active"}
+                    checked={roleLink.roles.some((r) => r.id === role.id)}
+                    onChange={(e) =>
+                      command({
+                        kind: "set_link",
+                        chapterId: id,
+                        entryId: roleLink.entryId!,
+                        roleIds: e.target.checked
+                          ? [...roleLink.roles.map((r) => r.id), role.id]
+                          : roleLink.roles.filter((r) => r.id !== role.id).map((r) => r.id),
+                      })
+                    }
+                  />
+                  {role.name}
+                </label>
+              ))}
+            </div>
+            {visibleRoles.length > ROLE_PAGE_SIZE && (
+              <ChapterPagination
+                label="Role assignments"
+                page={currentRolePage}
+                pageSize={ROLE_PAGE_SIZE}
+                total={visibleRoles.length}
+                onPage={setRolePage}
+              />
+            )}
+            {!visibleRoles.length && <p>No matching Roles.</p>}
+            <button
+              className="quiet-button"
+              onClick={() => {
+                searchRoles("");
+                setOptionsOpen(true);
+              }}
+            >
+              Manage available Roles
+            </button>
+            <p className="field-note">Removing every Role keeps the Entry linked.</p>
+            <button
+              className="quiet-button"
+              disabled={blocked}
+              onClick={() => command({ kind: "unlink", chapterId: id, linkId: roleLink.id })}
+            >
+              Remove link
+            </button>
+          </>
+        )}
+      </Dialog>
       <Dialog open={linkOpen} title="Link world material" onClose={() => setLinkOpen(false)}>
         <label>
           Find an Entry
-          <input value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} />
         </label>
         {entryError && <p role="alert">{entryError}</p>}
+        {entriesLoading && <p role="status">Loading Entries…</p>}
         <ul className="chapter-entry-results">
-          {available.slice(0, 10).map((entry) => (
-            <li key={entry.id}>
-              <button
-                aria-label={entry.displayName}
-                disabled={blocked}
-                onClick={() => {
-                  void chapter
-                    .run({ kind: "set_link", chapterId: id, entryId: entry.id, roleIds: [] })
-                    .then((result) => {
-                      if (result.kind === "committed") {
-                        setLinkOpen(false);
-                        setQuery("");
-                      }
-                    });
-                }}
-              >
-                {entry.displayName}
-                <small className="muted">
-                  {categories.find((category) => category.id === entry.categoryId)?.name}
-                </small>
-              </button>
-            </li>
-          ))}
+          {!entriesLoading &&
+            !entryError &&
+            available.slice(0, 10).map((entry) => (
+              <li key={entry.id}>
+                <button
+                  aria-label={entry.displayName}
+                  disabled={blocked}
+                  onClick={() => {
+                    void chapter
+                      .run({ kind: "set_link", chapterId: id, entryId: entry.id, roleIds: [] })
+                      .then((result) => {
+                        if (result.kind === "committed") {
+                          setLinkOpen(false);
+                          setQuery("");
+                        }
+                      });
+                  }}
+                >
+                  {entry.displayName}
+                  <small className="muted">
+                    {categories.find((category) => category.id === entry.categoryId)?.name}
+                  </small>
+                </button>
+              </li>
+            ))}
         </ul>
-        {available.length > 10 && <p className="muted">Keep typing to narrow the results.</p>}
-        {!available.length && <p>No matching unlinked Entries.</p>}
+        {!entriesLoading && !entryError && available.length > 10 && (
+          <p className="muted">
+            Showing 10 of {available.length} Entries. Keep typing to narrow the results.
+          </p>
+        )}
+        {!entriesLoading && !entryError && !available.length && (
+          <p>No matching unlinked Entries.</p>
+        )}
       </Dialog>
       <Dialog open={optionsOpen} title="Chapter options" onClose={() => setOptionsOpen(false)}>
         <h3>Story Roles</h3>
-        <p className="muted">Add a Role you can use on this Project’s Chapter links.</p>
+        <p className="muted">
+          Roles describe an Entry’s part: POV, Appears, or Setting. Assign them beside a linked
+          Entry in the context panel.
+        </p>
+        {chapter.error && (
+          <p role="alert">{chapter.error} Close this window to review the saved version.</p>
+        )}
+        <label>
+          Find an available Role
+          <input type="search" value={roleQuery} onChange={(e) => searchRoles(e.target.value)} />
+        </label>
+        <ul className="story-role-catalog">
+          {roleResults.map((role) => {
+            const linked = chapter.snapshot.links.filter((link) =>
+              link.roles.some((r) => r.id === role.id),
+            );
+            return (
+              <li key={role.id}>
+                <div>
+                  <strong>{role.name}</strong>
+                  <small className="muted">
+                    {linked.length
+                      ? `In this Chapter: ${linked
+                          .slice(0, 3)
+                          .map((link) => link.label)
+                          .join(", ")}${linked.length > 3 ? ` and ${linked.length - 3} more` : ""}`
+                      : "Not assigned in this Chapter"}
+                  </small>
+                </div>
+                {onFindRole && (
+                  <button
+                    className="quiet-button"
+                    aria-label={`Find Chapters using ${role.name}`}
+                    onClick={() => {
+                      setOptionsOpen(false);
+                      setRoleLinkId(null);
+                      onFindRole(role);
+                    }}
+                  >
+                    Find uses
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {visibleRoles.length > ROLE_PAGE_SIZE && (
+          <ChapterPagination
+            label="Available Roles"
+            page={currentRolePage}
+            pageSize={ROLE_PAGE_SIZE}
+            total={visibleRoles.length}
+            onPage={setRolePage}
+          />
+        )}
+        {!visibleRoles.length && <p>No matching Roles.</p>}
+        {createdRole && (
+          <p role="status">
+            {createdRole} is available. Choose Roles beside a linked Entry to assign it.
+          </p>
+        )}
         <label>
           New Story Role
           <input
@@ -499,53 +750,63 @@ export function ChapterEditor({
               void chapter
                 .run({ kind: "create_role", chapterId: id, name: roleDraft })
                 .then((result) => {
-                  if (result.kind === "committed") setRoleDraft("");
+                  if (result.kind === "committed") {
+                    setCreatedRole(roleDraft.trim());
+                    setRoleDraft("");
+                    searchRoles(roleDraft.trim());
+                  }
                 });
             }}
           >
             Create Role
           </button>
-          <button onClick={() => setRoleDraft("")}>Cancel Role draft</button>
-        </div>
-        <h3>{readOnly ? "Restore Chapter" : "Put this Chapter aside"}</h3>
-        <p>
-          Archive and Trash keep the writing and Entry links. Restore the Chapter from the Chapters
-          page whenever you need it.
-        </p>
-        <div className="row">
-          {readOnly ? (
-            <button
-              disabled={chapter.state !== "saved"}
-              onClick={() => {
-                command({ kind: "set_state", chapterId: id, state: "active" });
-                setOptionsOpen(false);
-              }}
-            >
-              Restore Chapter
+          {!!roleDraft && (
+            <button className="quiet-button" onClick={() => setRoleDraft("")}>
+              Cancel Role draft
             </button>
-          ) : (
-            <>
-              <button
-                disabled={blocked || !!roleDraft}
-                onClick={() => {
-                  command({ kind: "set_state", chapterId: id, state: "archived" });
-                  setOptionsOpen(false);
-                }}
-              >
-                Archive Chapter
-              </button>
-              <button
-                disabled={blocked || !!roleDraft}
-                onClick={() => {
-                  command({ kind: "set_state", chapterId: id, state: "trashed" });
-                  setOptionsOpen(false);
-                }}
-              >
-                Move Chapter to Trash
-              </button>
-            </>
           )}
         </div>
+        <details className="chapter-lifecycle-options" open={readOnly}>
+          <summary>{readOnly ? "Restore Chapter" : "Archive or Trash"}</summary>
+          <p>
+            Archive and Trash keep the writing and Entry links. Restore the Chapter from the
+            Chapters page whenever you need it.
+          </p>
+          <div className="row">
+            {readOnly ? (
+              <button
+                disabled={locked || chapter.state !== "saved" || !!recovery || !!roleDraft}
+                onClick={() => {
+                  command({ kind: "set_state", chapterId: id, state: "active" });
+                  setOptionsOpen(false);
+                }}
+              >
+                Restore Chapter
+              </button>
+            ) : (
+              <>
+                <button
+                  disabled={blocked || !!roleDraft}
+                  onClick={() => {
+                    command({ kind: "set_state", chapterId: id, state: "archived" });
+                    setOptionsOpen(false);
+                  }}
+                >
+                  Archive Chapter
+                </button>
+                <button
+                  disabled={blocked || !!roleDraft}
+                  onClick={() => {
+                    command({ kind: "set_state", chapterId: id, state: "trashed" });
+                    setOptionsOpen(false);
+                  }}
+                >
+                  Move Chapter to Trash
+                </button>
+              </>
+            )}
+          </div>
+        </details>
       </Dialog>
       <Dialog
         open={recoveryOpen}

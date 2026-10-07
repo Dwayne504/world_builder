@@ -492,7 +492,7 @@ fn schema_eight_upgrade_is_atomic_and_keeps_a_recovery_snapshot() {
     ProjectService::close_project(&state, project.project_id).unwrap();
     let root = std::path::Path::new(&project.package_path);
     let db = Connection::open(root.join("data/project.sqlite")).unwrap();
-    db.execute_batch("DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit; PRAGMA user_version=8; UPDATE project_meta SET schema_version=8; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
+    db.execute_batch("DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit; PRAGMA user_version=8; UPDATE project_meta SET schema_version=8; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
     let mut manifest = Manifest::read(&root.join("manifest.json")).unwrap();
     manifest.schema_version = 8;
     manifest.write(&root.join("manifest.json")).unwrap();
@@ -506,7 +506,10 @@ fn schema_eight_upgrade_is_atomic_and_keeps_a_recovery_snapshot() {
     db.execute_batch("DROP TRIGGER fail_upgrade").unwrap();
     drop(db);
     let open = ProjectService::open_project(&state, root, false).unwrap();
-    assert_eq!(open.schema_version, 10);
+    assert_eq!(
+        open.schema_version,
+        worldcrafter_lib::persistence::migrations::CURRENT_SCHEMA_VERSION
+    );
     assert_eq!(
         ProjectService::get_entry(&state, open.project_id, entry.id)
             .unwrap()

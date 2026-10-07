@@ -10,6 +10,7 @@ vi.mock("./api", () => ({
 import { useEntryName } from "./useEntryName";
 
 const entry: Entry = {
+  workspaceState: "active",
   id: "entry-id",
   categoryId: "category-id",
   typeId: null,

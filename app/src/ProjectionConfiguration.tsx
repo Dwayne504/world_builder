@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { readProjectRelationships } from "./api";
 import type { FieldProjection, RelationshipDefinition } from "./types";
+import { ManagerSearchSelect } from "./ManagerSearchSelect";
 
 /** Configuration is only a view of the existing Relationship definition. */
 export function ProjectionConfiguration({
@@ -51,24 +52,17 @@ export function ProjectionConfiguration({
       {definitions?.length === 0 && (
         <p>No relationship definitions yet. Add one in Manage relationships, then return here.</p>
       )}
-      <label>
-        Relationship
-        <select
-          aria-label="Field relationship"
-          value={value.relationshipDefinitionId}
-          onChange={(event) =>
-            onChange({ relationshipDefinitionId: event.target.value, perspective: "source" })
-          }
-        >
-          <option value="">Choose a relationship</option>
-          {definitions?.map((definition) => (
-            <option key={definition.id} value={definition.id}>
-              {definition.name} · {definition.forwardLabel}
-              {definition.directed ? ` / ${definition.inverseLabel}` : ""}
-            </option>
-          ))}
-        </select>
-      </label>
+      <ManagerSearchSelect
+        label="Relationship"
+        ariaLabel="Field relationship"
+        value={value.relationshipDefinitionId}
+        onChange={(id) => onChange({ relationshipDefinitionId: id, perspective: "source" })}
+        emptyLabel="Choose a relationship"
+        choices={(definitions ?? []).map((definition) => ({
+          id: definition.id,
+          label: `${definition.name} · ${definition.forwardLabel}${definition.directed ? ` / ${definition.inverseLabel}` : ""}`,
+        }))}
+      />
       {selected?.directed && (
         <label>
           This Entry…

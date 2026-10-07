@@ -7,8 +7,10 @@ export function RelationshipGroup({
   entryId,
   connection,
   initialOpen,
+  restoreRelationshipId,
 }: {
   initialOpen?: boolean;
+  restoreRelationshipId?: string;
   label: string;
   relationships: Relationship[];
   entryId: string;
@@ -16,18 +18,25 @@ export function RelationshipGroup({
 }) {
   const [open, setOpen] = useState(initialOpen ?? false);
   const [search, setSearch] = useState("");
+  const [limit, setLimit] = useState(12);
   const id = useId();
   const other = (r: Relationship) => (r.source.id === entryId ? r.target : r.source);
   const matches = relationships.filter((r) =>
     other(r).label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
   );
   const warnings = [...new Set(relationships.flatMap((r) => r.warnings))];
+  const restored =
+    !search.trim() && matches.find((relationship) => relationship.id === restoreRelationshipId);
+  const visible =
+    restored && !matches.slice(0, limit).some((relationship) => relationship.id === restored.id)
+      ? [restored, ...matches.slice(0, limit - 1)]
+      : matches.slice(0, limit);
   return (
     <li className="relationship-group">
       <div className="relationship-group-heading">
         <span className="relationship-group-preview">
           <span>{label}</span>{" "}
-          {relationships.map((r, index) => {
+          {relationships.slice(0, 3).map((r, index) => {
             const person = other(r);
             return (
               <span key={r.id}>
@@ -37,6 +46,7 @@ export function RelationshipGroup({
               </span>
             );
           })}
+          {relationships.length > 3 && <small> and {relationships.length - 3} more</small>}
         </span>
         <button
           className="quiet-button relationship-group-toggle"
@@ -59,11 +69,24 @@ export function RelationshipGroup({
           <input
             type="search"
             value={search}
-            onChange={(event) => setSearch(event.currentTarget.value)}
+            onChange={(event) => {
+              setSearch(event.currentTarget.value);
+              setLimit(12);
+            }}
           />
         </label>
         {matches.length === 0 && <p className="muted">No Entries match this search.</p>}
-        <ul className="relationship-list">{matches.map(connection)}</ul>
+        <ul className="relationship-list">{visible.map(connection)}</ul>
+        {matches.length > limit && (
+          <div className="manager-list-footer">
+            <small>
+              Showing {visible.length} of {matches.length} connections
+            </small>
+            <button className="quiet-button" onClick={() => setLimit(limit + 12)}>
+              Show more {label} connections
+            </button>
+          </div>
+        )}
       </div>
     </li>
   );
