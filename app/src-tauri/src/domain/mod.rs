@@ -8,6 +8,7 @@ pub mod error;
 pub mod fields;
 pub mod ids;
 pub mod lifecycle;
+pub mod manuscript_export;
 pub mod relationships;
 pub mod search;
 pub mod spatial;

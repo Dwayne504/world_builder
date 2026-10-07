@@ -9,6 +9,7 @@ pub mod error;
 mod fields;
 pub mod lifecycle;
 pub mod lock;
+mod manuscript_export;
 pub mod migrations;
 pub mod pragmas;
 mod relationships;

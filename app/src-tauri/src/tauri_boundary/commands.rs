@@ -8,6 +8,9 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
+use crate::application::manuscript_export::{
+    ExportDestination, ExportPreview, ExportReceipt, ExportStore,
+};
 use crate::application::{AppState, ProjectService, ProjectSummary};
 use crate::application_home::{RecentError, RecentProject, RecentProjectsStore};
 use crate::domain::{CategoryId, EntryId, ProjectId, TypeId};
@@ -484,9 +487,103 @@ pub fn rename_project(
 }
 
 #[tauri::command]
-pub fn close_project(state: State<'_, AppState>, project_id: String) -> Result<(), AppErrorDto> {
+pub fn close_project(
+    state: State<'_, AppState>,
+    exports: State<'_, ExportStore>,
+    project_id: String,
+) -> Result<(), AppErrorDto> {
     let id = parse_project_id(&project_id)?;
-    ProjectService::close_project(&state, id).map_err(Into::into)
+    ProjectService::close_project(&state, id)?;
+    exports.close_project(id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn preview_manuscript_export(
+    app: AppHandle,
+    project_id: String,
+    chapter_ids: Vec<String>,
+) -> Result<ExportPreview, AppErrorDto> {
+    let project = parse_project_id(&project_id)?;
+    let chapters = chapter_ids
+        .iter()
+        .map(|id| {
+            crate::domain::structure::ChapterId::parse(id).map_err(|e| invalid_input(e.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<ExportStore>()
+            .preview(&app.state::<AppState>(), project, chapters)
+            .map_err(Into::into)
+    })
+    .await
+    .map_err(|e| invalid_input(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn choose_manuscript_export_destination(
+    app: AppHandle,
+    project_id: String,
+    preview_id: String,
+) -> Result<Option<ExportDestination>, AppErrorDto> {
+    let project = parse_project_id(&project_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let exports = app.state::<ExportStore>();
+        let state = app.state::<AppState>();
+        let name = exports.suggested_name(&state, project, &preview_id)?;
+        let chosen = app
+            .dialog()
+            .file()
+            .set_title("Export manuscripts")
+            .set_file_name(name)
+            .add_filter("Markdown", &["md"])
+            .blocking_save_file();
+        let path = chosen
+            .map(|file| {
+                file.into_path()
+                    .map_err(|_| invalid_input("Choose a local file path."))
+            })
+            .transpose()?;
+        exports
+            .destination(&state, project, &preview_id, path.as_deref())
+            .map_err(AppErrorDto::from)
+    })
+    .await
+    .map_err(|e| invalid_input(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn publish_manuscript_export(
+    app: AppHandle,
+    project_id: String,
+    preview_id: String,
+    destination_id: String,
+    replace_existing: bool,
+) -> Result<ExportReceipt, AppErrorDto> {
+    let project = parse_project_id(&project_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<ExportStore>()
+            .publish(
+                &app.state::<AppState>(),
+                project,
+                &preview_id,
+                &destination_id,
+                replace_existing,
+            )
+            .map_err(Into::into)
+    })
+    .await
+    .map_err(|e| invalid_input(e.to_string()))?
+}
+
+#[tauri::command]
+pub fn discard_manuscript_export(
+    exports: State<'_, ExportStore>,
+    project_id: String,
+    preview_id: String,
+) -> Result<(), AppErrorDto> {
+    exports.discard(parse_project_id(&project_id)?, &preview_id);
+    Ok(())
 }
 
 #[tauri::command]

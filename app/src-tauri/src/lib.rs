@@ -29,6 +29,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .manage(application::manuscript_export::ExportStore::default())
         .setup(|app| {
             let handle = app.handle().clone();
             let path = tauri_boundary::commands::preferences_path(&handle)
@@ -40,6 +41,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            tauri_boundary::preview_manuscript_export,
+            tauri_boundary::choose_manuscript_export_destination,
+            tauri_boundary::publish_manuscript_export,
+            tauri_boundary::discard_manuscript_export,
             tauri_boundary::get_build_info,
             tauri_boundary::search_project,
             tauri_boundary::read_aliases,

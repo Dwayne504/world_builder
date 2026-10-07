@@ -73,6 +73,10 @@ vi.mock("./api", () => ({
   readStory: vi.fn().mockResolvedValue({ globalRevision: 1, chapters: [] }),
   readChapter: vi.fn(),
   applyStory: vi.fn(),
+  previewManuscriptExport: vi.fn(),
+  chooseManuscriptExportDestination: vi.fn(),
+  publishManuscriptExport: vi.fn(),
+  discardManuscriptExport: vi.fn(),
   readSpatial: vi.fn().mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] }),
   applySpatial: vi.fn(),
   listOpenProjects: vi.fn().mockResolvedValue([]),
@@ -130,7 +134,12 @@ vi.mock("./api", () => ({
 
 import App from "./App";
 import { chapterFixture, textDocument } from "./chapterTestFixtures";
+import { exportDestination, exportPreview } from "./manuscriptExportTestFixtures";
 import {
+  previewManuscriptExport,
+  chooseManuscriptExportDestination,
+  publishManuscriptExport,
+  discardManuscriptExport,
   applyStructure,
   readTimeline,
   applyTimeline,
@@ -406,6 +415,15 @@ describe("Project screen Saved contract", () => {
     vi.mocked(readStory).mockReset().mockResolvedValue({ globalRevision: 1, chapters: [] });
     vi.mocked(readChapter).mockReset();
     vi.mocked(applyStory).mockReset();
+    vi.mocked(previewManuscriptExport).mockReset().mockResolvedValue(exportPreview());
+    vi.mocked(chooseManuscriptExportDestination).mockReset().mockResolvedValue(exportDestination());
+    vi.mocked(publishManuscriptExport).mockReset().mockResolvedValue({
+      path: "/exports/World.md",
+      chapterCount: 1,
+      wordCount: 4,
+      bytesWritten: 50,
+    });
+    vi.mocked(discardManuscriptExport).mockReset().mockResolvedValue(undefined);
     vi.mocked(storyUsage).mockReset().mockResolvedValue([]);
     vi.mocked(readSpatial)
       .mockReset()
@@ -831,6 +849,129 @@ describe("Project screen Saved contract", () => {
     await act(async () => pending.resolve({ ...initial, globalRevision: 4 }));
     await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
     expect(nativeWindowCloseMock).toHaveBeenCalled();
+  });
+
+  it("keeps manuscript export desktop-only without a browser save fallback", async () => {
+    await openTheProjectScreen();
+    expect(menuItem("File", "Export manuscript…")).toBeDisabled();
+    expect(previewManuscriptExport).not.toHaveBeenCalled();
+  });
+
+  it("drains pending Chapter writing before producing a manuscript export preview", async () => {
+    enableTauriWindow();
+    const initial = chapterFixture();
+    vi.mocked(readStory).mockResolvedValue({ globalRevision: 3, chapters: [initial.chapter] });
+    vi.mocked(readChapter).mockResolvedValue(initial);
+    const pending = deferred<typeof initial>();
+    vi.mocked(applyStory).mockReturnValue(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Chapters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "The First Step" }));
+    const prose = await screen.findByRole("textbox", { name: "Manuscript" });
+    await act(async () => {
+      prose.querySelector("p")!.textContent = "Writing before export.";
+      fireEvent.input(prose, { inputType: "insertText", data: "Writing before export." });
+    });
+    fireEvent.click(menuItem("File", "Export manuscript…"));
+    fireEvent.click(await screen.findByRole("button", { name: "Select all active Chapters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview export" }));
+    await waitFor(() =>
+      expect(applyStory).toHaveBeenCalledWith(
+        project.projectId,
+        3,
+        expect.objectContaining({
+          kind: "save",
+          documents: [
+            {
+              area: "manuscript",
+              schemaVersion: 1,
+              content: textDocument("Writing before export."),
+            },
+          ],
+        }),
+      ),
+    );
+    expect(previewManuscriptExport).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ ...initial, globalRevision: 4 }));
+    await screen.findByLabelText("Exact Markdown preview");
+    expect(previewManuscriptExport).toHaveBeenCalledWith(project.projectId, ["chapter"]);
+    expect(chooseManuscriptExportDestination).not.toHaveBeenCalled();
+  });
+
+  it("blocks manuscript export after failed writing without retrying or discarding the draft", async () => {
+    enableTauriWindow();
+    const initial = chapterFixture();
+    vi.mocked(readStory).mockResolvedValue({ globalRevision: 3, chapters: [initial.chapter] });
+    vi.mocked(readChapter).mockResolvedValue(initial);
+    vi.mocked(applyStory).mockRejectedValue(new Error("Writing disk full"));
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Chapters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "The First Step" }));
+    fireEvent.change(await screen.findByLabelText("Chapter title"), {
+      target: { value: "Keep this title" },
+    });
+    await screen.findByText("Writing disk full Your writing is kept here.");
+    const calls = vi.mocked(applyStory).mock.calls.length;
+    fireEvent.click(menuItem("File", "Export manuscript…"));
+    fireEvent.click(await screen.findByRole("button", { name: "Select all active Chapters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview export" }));
+    await screen.findByText(/Save or discard unfinished edits/);
+    expect(previewManuscriptExport).not.toHaveBeenCalled();
+    expect(applyStory).toHaveBeenCalledTimes(calls);
+    fireEvent.click(screen.getByRole("button", { name: "Close Export manuscript" }));
+    expect(screen.getByLabelText("Chapter title")).toHaveValue("Keep this title");
+    expect(screen.getByTestId("save-state")).not.toHaveTextContent(/^Saved$/);
+  });
+
+  it("protects an unapplied Role draft when previewing manuscript export", async () => {
+    enableTauriWindow();
+    const initial = chapterFixture();
+    vi.mocked(readStory).mockResolvedValue({ globalRevision: 3, chapters: [initial.chapter] });
+    vi.mocked(readChapter).mockResolvedValue(initial);
+    await openTheProjectScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Chapters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "The First Step" }));
+    fireEvent.click(await waitFor(() => menuItem("Edit", "Chapter", "Chapter options…")));
+    fireEvent.change(screen.getByLabelText("New Story Role"), { target: { value: "Unapplied" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Chapter options" }));
+    fireEvent.click(menuItem("File", "Export manuscript…"));
+    fireEvent.click(await screen.findByRole("button", { name: "Select all active Chapters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview export" }));
+    await screen.findByText(/Save or discard unfinished edits/);
+    expect(previewManuscriptExport).not.toHaveBeenCalled();
+    expect(applyStory).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Close Export manuscript" }));
+    fireEvent.click(menuItem("Edit", "Chapter", "Chapter options…"));
+    expect(screen.getByLabelText("New Story Role")).toHaveValue("Unapplied");
+  });
+
+  it("waits for manuscript export publication before closing the native window", async () => {
+    enableTauriWindow();
+    const initial = chapterFixture();
+    vi.mocked(readStory).mockResolvedValue({ globalRevision: 3, chapters: [initial.chapter] });
+    const pending = deferred<Awaited<ReturnType<typeof publishManuscriptExport>>>();
+    vi.mocked(publishManuscriptExport).mockReturnValue(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(menuItem("File", "Export manuscript…"));
+    fireEvent.click(await screen.findByRole("button", { name: "Select all active Chapters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview export" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Choose export file…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Export manuscript" }));
+    await waitFor(() => expect(publishManuscriptExport).toHaveBeenCalled());
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(nativeWindowCloseMock).not.toHaveBeenCalled();
+    await act(async () =>
+      pending.resolve({
+        path: "/exports/World.md",
+        chapterCount: 1,
+        wordCount: 4,
+        bytesWritten: 50,
+      }),
+    );
+    await waitFor(() => expect(closeProjectMock).toHaveBeenCalledWith(project.projectId));
+    expect(nativeWindowCloseMock).toHaveBeenCalledOnce();
+    expect(discardManuscriptExport).toHaveBeenCalledWith(project.projectId, "preview");
   });
 
   it("blocks Chapter navigation after a save failure and retains the writing draft", async () => {

@@ -5,6 +5,39 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  ManuscriptExportPreview,
+  ManuscriptExportDestination,
+  ManuscriptExportReceipt,
+} from "./manuscriptExportTypes";
+export function previewManuscriptExport(
+  projectId: string,
+  chapterIds: string[],
+): Promise<ManuscriptExportPreview> {
+  return call("preview_manuscript_export", { projectId, chapterIds });
+}
+export function chooseManuscriptExportDestination(
+  projectId: string,
+  previewId: string,
+): Promise<ManuscriptExportDestination | null> {
+  return call("choose_manuscript_export_destination", { projectId, previewId });
+}
+export function publishManuscriptExport(
+  projectId: string,
+  previewId: string,
+  destinationId: string,
+  replaceExisting: boolean,
+): Promise<ManuscriptExportReceipt> {
+  return call("publish_manuscript_export", {
+    projectId,
+    previewId,
+    destinationId,
+    replaceExisting,
+  });
+}
+export function discardManuscriptExport(projectId: string, previewId: string): Promise<void> {
+  return call("discard_manuscript_export", { projectId, previewId });
+}
 import type { TimelineCommand, TimelineSnapshot } from "./timelineTypes";
 export function readTimeline(projectId: string): Promise<TimelineSnapshot> {
   return call("read_timeline", { projectId });
