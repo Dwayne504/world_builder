@@ -7,6 +7,7 @@
 //! Backups live outside the live `.wcproj` package and never include
 //! operational lock/WAL artifacts.
 
+pub mod automatic;
 pub mod error;
 
 pub use error::BackupError;
@@ -115,22 +116,7 @@ pub fn create_backup(
     let backup_paths = layout::create_skeleton(&staging_path)?;
 
     let result = (|| -> Result<(), BackupError> {
-        // Consistent snapshot via the Online Backup API, run against the
-        // live connection on its own worker thread.
-        let snapshot = worker.backup_to(backup_paths.db_path())?;
-
-        // Copy the manifest describing the *source* Project; restore
-        // rewrites identity on the destination copy, never here.
-        let mut manifest = Manifest::read(&live_paths.manifest_path())?;
-        manifest.project_id = snapshot.project_id;
-        manifest.working_name_cache = snapshot.working_name;
-        manifest.format_version = snapshot.format_version;
-        manifest.schema_version = snapshot.schema_version;
-        manifest.write(&backup_paths.manifest_path())?;
-
-        copy_dir_contents(&live_paths.assets_dir(), &backup_paths.assets_dir())?;
-        // `staging/` is intentionally left empty: staged imports are
-        // recoverable-but-incomplete and are not portable authored content.
+        populate_snapshot(worker, live_paths, &backup_paths)?;
 
         validate_backup(&staging_path)?;
         Ok(())
@@ -148,13 +134,34 @@ pub fn create_backup(
     }
 }
 
+/// Common snapshot construction; the caller publishes the completed directory.
+fn populate_snapshot(
+    worker: &ProjectDbWorker,
+    live_paths: &PackagePaths,
+    backup_paths: &PackagePaths,
+) -> Result<crate::persistence::ProjectMetaSnapshot, BackupError> {
+    let snapshot = worker.backup_to(backup_paths.db_path())?;
+    let mut manifest = Manifest::read(&live_paths.manifest_path())?;
+    manifest.project_id = snapshot.project_id;
+    manifest.working_name_cache = snapshot.working_name.clone();
+    manifest.format_version = snapshot.format_version;
+    manifest.schema_version = snapshot.schema_version;
+    manifest.write(&backup_paths.manifest_path())?;
+    copy_dir_contents(&live_paths.assets_dir(), &backup_paths.assets_dir())?;
+    Ok(snapshot)
+}
+
 /// Validates a backup directory: structure, manifest readability, and that
 /// the snapshotted database passes `PRAGMA integrity_check` and agrees with
 /// the manifest on Project ID. Never mutates anything.
 pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
-    let paths = layout::validate_structure(backup_root)
+    // Validation must never repair a source manifest or create SQLite sidecars.
+    let paths = PackagePaths::new(backup_root);
+    let manifest: Manifest = serde_json::from_slice(&fs::read(paths.manifest_path())?)
         .map_err(|_| BackupError::NotABackup(backup_root.display().to_string()))?;
-    let manifest = Manifest::read(&paths.manifest_path())?;
+    if !paths.assets_dir().is_dir() || !paths.staging_dir().is_dir() {
+        return Err(BackupError::NotABackup(backup_root.display().to_string()));
+    }
     if manifest.format_version > crate::package::FORMAT_VERSION
         || manifest.schema_version > crate::persistence::migrations::CURRENT_SCHEMA_VERSION
     {
@@ -166,7 +173,18 @@ pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
             backup_root.display().to_string(),
         ));
     }
-    let conn = Connection::open(paths.db_path())?;
+    // immutable=1 is safe only for a standalone database. Never silently
+    // ignore committed WAL content or an interrupted rollback journal.
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut artifact = paths.db_path().into_os_string();
+        artifact.push(suffix);
+        match fs::symlink_metadata(Path::new(&artifact)) {
+            Ok(_) => return Err(BackupError::UnexpectedJournal),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let conn = open_snapshot_read_only(&paths.db_path())?;
     let integrity: String = conn
         .query_row("PRAGMA integrity_check", [], |r| r.get(0))
         .map_err(|_| BackupError::CorruptSnapshot(backup_root.display().to_string()))?;
@@ -201,6 +219,41 @@ pub fn validate_backup(backup_root: &Path) -> Result<Manifest, BackupError> {
     }
 
     Ok(manifest)
+}
+
+/// Immutable snapshots must not acquire WAL/SHM sidecars while being inspected.
+fn open_snapshot_read_only(path: &Path) -> Result<Connection, BackupError> {
+    let path = path.canonicalize()?;
+    let raw = path
+        .to_str()
+        .ok_or_else(|| BackupError::UnsafePath(path.display().to_string()))?;
+    let raw = if let Some(unc) = raw.strip_prefix(r"\\?\UNC\") {
+        format!("//{unc}")
+    } else {
+        raw.strip_prefix(r"\\?\").unwrap_or(raw).to_string()
+    }
+    .replace('\\', "/");
+    let raw = if raw.starts_with("//") {
+        format!("//{raw}")
+    } else if !raw.starts_with('/') {
+        format!("/{raw}")
+    } else {
+        raw
+    };
+    let escaped = raw
+        .bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"/-_.~:".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect::<String>();
+    Ok(Connection::open_with_flags(
+        format!("file:{escaped}?immutable=1"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )?)
 }
 
 /// Restores a validated backup as an independently editable Project copy

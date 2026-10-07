@@ -369,7 +369,14 @@ impl ProjectService {
 
             let summary = summary_from_worker(&worker, &paths)?;
 
-            register_open_project(state, project_id, worker, paths.clone(), lock_guard);
+            register_open_project(
+                state,
+                project_id,
+                worker,
+                paths.clone(),
+                lock_guard,
+                summary.revision,
+            );
 
             Ok(summary)
         })();
@@ -490,7 +497,14 @@ impl ProjectService {
 
         match result {
             Ok((worker, summary)) => {
-                register_open_project(state, manifest.project_id, worker, paths, lock_guard);
+                register_open_project(
+                    state,
+                    manifest.project_id,
+                    worker,
+                    paths,
+                    lock_guard,
+                    summary.revision,
+                );
                 Ok(summary)
             }
             Err(e) => {
@@ -823,6 +837,7 @@ fn register_open_project(
     worker: ProjectDbWorker,
     paths: PackagePaths,
     lock: LockGuard,
+    opened_revision: i64,
 ) {
     let mut registry = state.open_projects.lock().expect("registry mutex poisoned");
     registry.insert(
@@ -831,6 +846,8 @@ fn register_open_project(
             worker: std::sync::Mutex::new(Some(worker)),
             paths,
             lock: std::sync::Mutex::new(Some(lock)),
+            opened_revision,
+            opened_at: std::time::Instant::now(),
         }),
     );
 }

@@ -5,6 +5,7 @@
 //! Nothing above this layer (the Tauri boundary, the React UI) is allowed
 //! to talk to SQLite or the package filesystem directly.
 
+pub mod automatic_backups;
 pub mod error;
 pub mod service;
 pub mod state;

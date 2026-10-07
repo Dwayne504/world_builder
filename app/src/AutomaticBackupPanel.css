@@ -1,0 +1,38 @@
+.automatic-backup-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0.5rem 0;
+}
+
+.automatic-backup-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.automatic-backup-panel {
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.automatic-backup-times {
+  font-size: 0.9rem;
+}
+
+.automatic-backup-times > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  margin: 0.4rem 0;
+}
+
+.automatic-backup-times dd {
+  margin: 0;
+}
+
+.backup-warning {
+  border-left: 3px solid var(--muted);
+  padding-left: 0.85rem;
+}

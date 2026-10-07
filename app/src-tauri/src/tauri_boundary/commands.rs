@@ -725,6 +725,26 @@ pub fn set_appearance(
 }
 
 #[tauri::command]
+pub fn get_automatic_backup_status(
+    state: State<'_, AppState>,
+    store: State<'_, PreferencesStore>,
+    automatic: State<'_, crate::application::automatic_backups::AutomaticBackups>,
+    project_id: String,
+) -> Result<crate::application::automatic_backups::AutomaticBackupStatus, AppErrorDto> {
+    automatic
+        .status(&state, &store, parse_project_id(&project_id)?)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub fn set_automatic_backups_enabled(
+    store: State<'_, PreferencesStore>,
+    enabled: bool,
+) -> Result<PreferencesDto, AppErrorDto> {
+    Ok(store
+        .update(|prefs| prefs.automatic_backups_enabled = enabled)?
+        .into())
+}
+#[tauri::command]
 pub fn get_preferences(store: State<'_, PreferencesStore>) -> Result<PreferencesDto, AppErrorDto> {
     Ok(store.load()?.into())
 }

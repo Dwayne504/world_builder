@@ -136,6 +136,7 @@ pub struct AppErrorDto {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreferencesDto {
+    pub automatic_backups_enabled: bool,
     pub default_projects_dir: Option<String>,
     pub default_projects_dir_exists: bool,
     pub default_backups_dir: Option<String>,
@@ -153,6 +154,7 @@ impl From<crate::preferences::AppPreferences> for PreferencesDto {
             .as_deref()
             .is_some_and(crate::preferences::directory_is_usable);
         PreferencesDto {
+            automatic_backups_enabled: prefs.automatic_backups_enabled,
             default_projects_dir: prefs.default_projects_dir.map(|p| p.display().to_string()),
             default_projects_dir_exists: projects_exists,
             default_backups_dir: prefs.default_backups_dir.map(|p| p.display().to_string()),
