@@ -1022,7 +1022,7 @@ fn custom_roles_are_findable_before_assignment_and_usage_tracks_canonical_links(
                 r.get::<_, i64>(0)
             })
             .unwrap(),
-        5
+        6
     );
 }
 

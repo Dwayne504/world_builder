@@ -68,7 +68,7 @@ export interface Preferences {
 }
 
 export type FieldKind =
-  "short_text" | "number" | "boolean" | "choice" | "multi_choice" | "relationship";
+  "short_text" | "rich_text" | "number" | "boolean" | "choice" | "multi_choice" | "relationship";
 export interface FieldProjection {
   relationshipDefinitionId: string;
   perspective: "source" | "target";
@@ -96,7 +96,16 @@ export interface FieldDefinition {
   options: ChoiceOption[];
   bindings: { provider: FieldProvider; label: string }[];
 }
+export interface RichFieldValue {
+  schemaVersion: number;
+  content: import("@tiptap/react").JSONContent | null;
+  revision: number;
+  plainText: string;
+  readOnlyReason: string | null;
+  originalJson: string | null;
+}
 export type FieldValue =
+  | { kind: "rich_text"; value: RichFieldValue }
   | { kind: "text"; value: string }
   | { kind: "number"; value: number }
   | { kind: "boolean"; value: boolean }

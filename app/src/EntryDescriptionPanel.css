@@ -22,3 +22,27 @@
 .description-preserved-text {
   white-space: pre-wrap;
 }
+
+.rich-field-value {
+  grid-column: 1 / -1;
+  align-items: start;
+}
+.rich-field-value .entry-description {
+  margin: 0;
+  min-width: 0;
+  grid-column: 2 / -1;
+}
+.rich-field-value .rich-writing {
+  max-width: none;
+}
+.rich-field-value .rich-writing .tiptap {
+  min-height: 5rem;
+  max-height: 45vh;
+}
+
+@media (max-width: 600px) {
+  .rich-field-value .field-value-label,
+  .rich-field-value .entry-description {
+    grid-column: 1 / -1;
+  }
+}

@@ -77,7 +77,7 @@ Each packet defines a user outcome, bounded slices, code starting points and acc
 
 **Deferred:** computed Fields, formulas, automatic unit conversion, new relationship semantics and migration of arbitrary short text into references.
 
-**Session selection:** one Field kind per PR. Branch suggestions: `feature/rich-text-fields`, then `feature/entry-reference-fields`.
+**Session selection:** W05a is implemented on `feature/rich-text-fields`; see [Rich Text Fields verification](../milestones/RICH_TEXT_FIELDS_VERIFICATION.md) for evidence and remaining manual checks. W05b remains a separate slice, subject to the documented reference-cardinality review. Branch suggestion: `feature/entry-reference-fields`.
 
 ## W06 Tags and creative Status Systems
 
