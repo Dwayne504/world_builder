@@ -16,16 +16,18 @@ pub struct OpenProject {
     pub worker: Mutex<Option<ProjectDbWorker>>,
     pub paths: PackagePaths,
     pub lock: Mutex<Option<LockGuard>>,
+    pub(crate) opened_revision: i64,
+    pub(crate) opened_at: std::time::Instant,
 }
 
 /// Process-wide registry of open Projects. Held behind a `Mutex` inside
 /// Tauri's managed state; the mutex only ever guards short registry
 /// operations (insert/remove/lookup), never a blocking SQLite call.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AppState {
     /// Serializes open/create/close without holding the registry during database work.
-    pub(crate) lifecycle: Mutex<()>,
-    pub open_projects: Mutex<HashMap<ProjectId, Arc<OpenProject>>>,
+    pub(crate) lifecycle: Arc<Mutex<()>>,
+    pub open_projects: Arc<Mutex<HashMap<ProjectId, Arc<OpenProject>>>>,
 }
 
 /// A read-only, serializable snapshot of a Project's state, suitable for

@@ -61,6 +61,7 @@ export interface Entry {
 }
 
 export interface Preferences {
+  automaticBackupsEnabled: boolean;
   defaultProjectsDir: string | null;
   defaultProjectsDirExists: boolean;
   defaultBackupsDir: string | null;

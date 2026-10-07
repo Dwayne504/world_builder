@@ -5,6 +5,15 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { AutomaticBackupStatus } from "./automaticBackupTypes";
+
+export function getAutomaticBackupStatus(projectId: string): Promise<AutomaticBackupStatus> {
+  return call("get_automatic_backup_status", { projectId });
+}
+
+export function setAutomaticBackupsEnabled(enabled: boolean): Promise<Preferences> {
+  return call("set_automatic_backups_enabled", { enabled });
+}
 import type { TimelineCommand, TimelineSnapshot } from "./timelineTypes";
 export function readTimeline(projectId: string): Promise<TimelineSnapshot> {
   return call("read_timeline", { projectId });

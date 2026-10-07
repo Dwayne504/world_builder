@@ -19,7 +19,7 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 
 | Workload | Outcome | First slice | Dependencies |
 | --- | --- | --- | --- |
-| W01 | Rolling automatic backups with safe retention | Decision needed | Existing backup service |
+| W01 | Rolling automatic backups with safe retention | W01a–c implemented; native acceptance remains | Existing backup service |
 | W02 | Reproducible Windows build and release process | Ready for build verification | Baseline consolidation; W01 before release readiness |
 | W03 | Rich Entry descriptions | Ready | Existing Chapter document editor |
 | W04 | Complete Type management | Rename ready; lifecycle decision needed | Existing Category and Type manager |
@@ -60,4 +60,4 @@ Some original milestone checklists and README wording predate implemented featur
 
 ## Completion tracking
 
-All workloads below are **planned**, not completed. Record completed slice IDs, PR links, verification results and remaining decisions here as sessions finish. Do not guess future merge SHAs or preallocate future database schema versions.
+W01a–c are implemented on `feature/automatic-backups` under the approved D01 policy. See [automatic backup verification](../milestones/AUTOMATIC_BACKUPS_VERIFICATION.md) for retention safeguards, tests and remaining native Windows acceptance. Other workloads remain planned unless recorded separately; completion of one slice does not complete a whole workload.

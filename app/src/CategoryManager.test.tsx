@@ -390,6 +390,7 @@ it("tracks a merge until it commits and never offers an acknowledged merge as a 
     defaultProjectsDirExists: false,
     defaultBackupsDir: "/Backups",
     defaultBackupsDirExists: true,
+    automaticBackupsEnabled: true,
   });
   vi.mocked(previewFieldMerge).mockResolvedValue({
     globalRevision: 1,

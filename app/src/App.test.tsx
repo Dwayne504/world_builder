@@ -51,6 +51,7 @@ getPreferencesMock.mockResolvedValue({
   defaultProjectsDirExists: false,
   defaultBackupsDir: null,
   defaultBackupsDirExists: false,
+  automaticBackupsEnabled: true,
 });
 previewPackagePathMock.mockImplementation((baseDir: string, workingName: string) =>
   Promise.resolve(`${baseDir}/${workingName}.wcproj`),
@@ -65,6 +66,19 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  getAutomaticBackupStatus: vi.fn().mockResolvedValue({
+    enabled: true,
+    intervalMinutes: 15,
+    retentionCount: 20,
+    running: false,
+    lastSuccessAt: null,
+    lastSuccessRevision: null,
+    nextDueAt: null,
+    error: null,
+    backupDirectory: "/automatic-backups",
+    lastSuccessPath: null,
+  }),
+  setAutomaticBackupsEnabled: vi.fn(),
   applyStructure: vi.fn(),
   previewCategoryDelete: vi.fn(),
   readTimeline: vi.fn().mockResolvedValue({ globalRevision: 1, calendar: null, occurrences: [] }),
@@ -129,8 +143,11 @@ vi.mock("./api", () => ({
 }));
 
 import App from "./App";
+import { automaticBackupFixture, backupPreferences } from "./automaticBackupTestFixtures";
 import { chapterFixture, textDocument } from "./chapterTestFixtures";
 import {
+  getAutomaticBackupStatus,
+  setAutomaticBackupsEnabled,
   applyStructure,
   readTimeline,
   applyTimeline,
@@ -395,6 +412,8 @@ describe("Project screen Saved contract", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    vi.mocked(getAutomaticBackupStatus).mockReset().mockResolvedValue(automaticBackupFixture());
+    vi.mocked(setAutomaticBackupsEnabled).mockReset();
     vi.mocked(applyStructure).mockReset();
     vi.mocked(readAliases).mockReset().mockResolvedValue({ globalRevision: 1, aliases: [] });
     vi.mocked(applyAlias).mockReset();
@@ -459,6 +478,66 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("shows automatic-backup failures without taking focus or changing the save acknowledgement", async () => {
+    mockEditableEntry();
+    const status = deferred<ReturnType<typeof automaticBackupFixture>>();
+    vi.mocked(getAutomaticBackupStatus).mockReturnValueOnce(status.promise);
+    vi.mocked(createBackup).mockClear();
+    const saving = deferred<ReturnType<typeof mockEditableEntry>>();
+    updateEntryNameMock.mockReturnValue(saving.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    const name = await screen.findByLabelText("entry-name");
+    act(() => name.focus());
+    fireEvent.change(name, { target: { value: "Thron the captain" } });
+    await waitFor(() => expect(updateEntryNameMock).toHaveBeenCalledTimes(1));
+    await act(async () =>
+      status.resolve(automaticBackupFixture({ error: "Automatic backup disk full" })),
+    );
+    expect(
+      screen.getByText("Automatic backups need attention. You can keep writing."),
+    ).toBeVisible();
+    expect(name).toHaveFocus();
+    expect(name).toHaveValue("Thron the captain");
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saving");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(createBackup).not.toHaveBeenCalled();
+  });
+
+  it("allows automatic backups to be disabled while leaving manual backups available", async () => {
+    await openTheProjectScreen();
+    projectAction("Backups");
+    const automatic = await screen.findByRole("checkbox", {
+      name: "Automatic backups for open Projects",
+    });
+    await waitFor(() => expect(automatic).toBeChecked());
+    vi.mocked(setAutomaticBackupsEnabled).mockResolvedValueOnce(backupPreferences(false));
+    vi.mocked(getAutomaticBackupStatus).mockResolvedValue(
+      automaticBackupFixture({ enabled: false, nextDueAt: null }),
+    );
+    fireEvent.click(automatic);
+    await screen.findByText("Automatic backups are off.");
+    expect(setAutomaticBackupsEnabled).toHaveBeenCalledWith(false);
+    expect(automatic).not.toBeChecked();
+    fireEvent.change(screen.getByLabelText("backup-destination"), {
+      target: { value: "/manual-backups" },
+    });
+    expect(screen.getByRole("button", { name: "Create Manual Backup" })).toBeEnabled();
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+  });
+
+  it("reports unreadable automatic-backup status without marking the Project's saved content as failed", async () => {
+    vi.mocked(getAutomaticBackupStatus).mockRejectedValue(new Error("Backup status unavailable"));
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Review automatic backups" }));
+    expect(await screen.findByText("Backup status unavailable")).toBeVisible();
+    expect(
+      screen.getByRole("checkbox", { name: "Automatic backups for open Projects" }),
+    ).toBeDisabled();
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+    expect(screen.getByRole("button", { name: "Refresh backup status" })).toBeEnabled();
   });
 
   it("offers Category settings on the chosen Category page", async () => {
@@ -2753,8 +2832,10 @@ describe("Home screen preferences and native pickers", () => {
     defaultProjectsDirExists: false,
     defaultBackupsDir: null,
     defaultBackupsDirExists: false,
+    automaticBackupsEnabled: true,
   };
   beforeEach(() => {
+    vi.mocked(setAutomaticBackupsEnabled).mockReset();
     getPreferencesMock.mockReset();
     pickDirectoryMock.mockReset();
     setDefaultProjectsDirMock.mockReset();
@@ -2766,7 +2847,41 @@ describe("Home screen preferences and native pickers", () => {
       defaultProjectsDirExists: false,
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
+      automaticBackupsEnabled: true,
     });
+  });
+
+  it("changes the automatic-backup preference only after the backend confirms it", async () => {
+    const pending = deferred<Preferences>();
+    vi.mocked(setAutomaticBackupsEnabled).mockReturnValueOnce(pending.promise);
+    await renderApp();
+    fireEvent.click(menuItem("File", "Preferences…"));
+    const toggle = await screen.findByRole("checkbox", {
+      name: "Automatic backups for open Projects",
+    });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(toggle).toBeDisabled();
+    expect(toggle).toBeChecked();
+    await act(async () => pending.resolve({ ...defaults, automaticBackupsEnabled: false }));
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeEnabled();
+    expect(setAutomaticBackupsEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps the automatic-backup preference intact when publication fails", async () => {
+    vi.mocked(setAutomaticBackupsEnabled).mockRejectedValue(
+      new Error("Preferences could not be saved"),
+    );
+    await renderApp();
+    fireEvent.click(menuItem("File", "Preferences…"));
+    const toggle = await screen.findByRole("checkbox", {
+      name: "Automatic backups for open Projects",
+    });
+    fireEvent.click(toggle);
+    expect(await screen.findByText("Preferences could not be saved")).toBeVisible();
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
   });
 
   it("preserves manual input when the initial preferences request resolves late", async () => {
@@ -2843,6 +2958,7 @@ describe("Home screen preferences and native pickers", () => {
         ...defaults,
         defaultBackupsDir: "/default",
         defaultBackupsDirExists: true,
+        automaticBackupsEnabled: true,
       }),
     );
     expect(visibleInput("backup-destination")).toHaveValue("/manual");
@@ -2861,6 +2977,7 @@ describe("Home screen preferences and native pickers", () => {
       defaultProjectsDirExists: true,
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
+      automaticBackupsEnabled: true,
     });
     await renderApp();
     await waitFor(() =>
@@ -2919,6 +3036,7 @@ describe("Home screen preferences and native pickers", () => {
       defaultProjectsDirExists: true,
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
+      automaticBackupsEnabled: true,
     });
     await renderApp();
     await waitFor(() => expect(getPreferencesMock).toHaveBeenCalled());
@@ -2938,6 +3056,7 @@ describe("Home screen preferences and native pickers", () => {
       defaultProjectsDirExists: false,
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
+      automaticBackupsEnabled: true,
     });
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     await waitFor(() => expect(setDefaultProjectsDirMock).toHaveBeenCalledWith(null));
@@ -2961,6 +3080,7 @@ describe("Home screen preferences and native pickers", () => {
       defaultProjectsDirExists: false,
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
+      automaticBackupsEnabled: true,
     });
     fireEvent.click(screen.getByRole("button", { name: "Review settings" }));
     fireEvent.click(screen.getByRole("button", { name: "Reset application preferences" }));
@@ -3092,6 +3212,7 @@ describe("Focused workspace", () => {
       defaultProjectsDirExists: false,
       defaultBackupsDir: null,
       defaultBackupsDirExists: false,
+      automaticBackupsEnabled: true,
     });
     listCategoriesMock.mockResolvedValue([]);
     listTypesMock.mockResolvedValue([]);
@@ -3205,7 +3326,7 @@ describe("Focused workspace", () => {
     expect(screen.queryByText(/Field deleted · recovery backup/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close Manage fields" }));
     projectAction("Backups");
-    fireEvent.click(await screen.findByText("Automatic recovery copies"));
+    fireEvent.click(await screen.findByText("Safety copies"));
     expect(await screen.findByText("Folder: /Recovery")).toBeVisible();
     expect(
       screen.getByText("Latest copy this session: /Recovery/entry-copy.wcbackup"),

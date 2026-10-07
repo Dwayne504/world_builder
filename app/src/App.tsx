@@ -44,6 +44,7 @@ import {
   createType,
   changeEntryStructure,
   getPreferences,
+  setAutomaticBackupsEnabled,
   listCategories,
   listOpenProjects,
   getProjectSummary,
@@ -59,6 +60,8 @@ import {
   setDefaultProjectsDir,
 } from "./api";
 import type { Category, Entry, Preferences, ProjectSummary, SaveState, TypeDef } from "./types";
+import { AutomaticBackupPanel, AutomaticBackupToggle } from "./AutomaticBackupPanel";
+import { useAutomaticBackups } from "./useAutomaticBackups";
 import { useProjectRename } from "./useProjectRename";
 import type { SubmitOutcome } from "./useProjectRename";
 import { useEntryName } from "./useEntryName";
@@ -444,6 +447,19 @@ function HomeScreen({
     }
   }
 
+  async function handleAutomaticBackups(enabled: boolean) {
+    ++preferencesRevision.current;
+    setPreferencesBusy(true);
+    setPreferencesActionError(null);
+    try {
+      setPreferences(await setAutomaticBackupsEnabled(enabled));
+    } catch (err) {
+      setPreferencesActionError(errorMessage(err));
+    } finally {
+      setPreferencesBusy(false);
+    }
+  }
+
   async function handleResetPreferences() {
     setResetBusy(true);
     setPreferencesActionError(null);
@@ -614,6 +630,15 @@ function HomeScreen({
             )}
           </div>
         </div>
+        <AutomaticBackupToggle
+          enabled={preferences?.automaticBackupsEnabled ?? null}
+          disabled={preferencesBusy || resetBusy}
+          onChange={(enabled) => void handleAutomaticBackups(enabled)}
+        />
+        <p className="field-note">
+          Back up changed Projects every 15 minutes while open. Keep the newest 20 automatic copies
+          per Project; manual and safety copies are kept separately.
+        </p>
       </Dialog>
 
       <div className="home-grid">
@@ -2763,11 +2788,13 @@ function ProjectScreen({
   project: ProjectSummary;
   onClosed: (notice?: string) => void;
 }) {
+  const automaticBackups = useAutomaticBackups(project.projectId);
   const [projectDialog, setProjectDialog] = useState<"settings" | "backup" | "categories" | null>(
     null,
   );
   function openProjectDialog(dialog: "settings" | "backup" | "categories") {
     setProjectDialog(dialog);
+    if (dialog === "backup") void automaticBackups.refresh();
   }
   const rename = useProjectRename(project);
   const mutations = useMutationCoordinator();
@@ -3175,6 +3202,17 @@ function ProjectScreen({
           Project. {rename.recentProjectsWarning}
         </p>
       )}
+      {(automaticBackups.readError ||
+        automaticBackups.actionError ||
+        automaticBackups.status?.error) &&
+        projectDialog !== "backup" && (
+          <div role="status" aria-live="polite" className="backup-notice">
+            <p>Automatic backups need attention. You can keep writing.</p>
+            <button className="quiet-button" onClick={() => openProjectDialog("backup")}>
+              Review automatic backups
+            </button>
+          </div>
+        )}
       {backupStatus && projectDialog !== "backup" && (
         <div role="status" className="backup-notice">
           <p>{backupStatus.startsWith("Backup created at ") ? "Backup created." : backupStatus}</p>
@@ -3272,6 +3310,15 @@ function ProjectScreen({
         title="Backups"
         onClose={() => setProjectDialog(null)}
       >
+        <AutomaticBackupPanel
+          status={automaticBackups.status}
+          readError={automaticBackups.readError}
+          actionError={automaticBackups.actionError}
+          changing={automaticBackups.changing}
+          onChange={(enabled) => void automaticBackups.setEnabled(enabled)}
+          onRefresh={() => void automaticBackups.refresh()}
+        />
+        <h3>Manual backup</h3>
         <p className="muted">
           Save a separate snapshot of the committed Project. Restore it from Home whenever you need
           a copy.
@@ -3295,10 +3342,10 @@ function ProjectScreen({
         </div>
         {(recoveryDirectory || lastRecoveryBackup) && (
           <details className="technical-details">
-            <summary>Automatic recovery copies</summary>
+            <summary>Safety copies</summary>
             <p>
-              Field deletion saves a recovery copy automatically. Restore a copy from Home to
-              recover an earlier value.
+              Some changes, such as deleting a Field, save a safety copy first. These copies are
+              separate from scheduled backups. Restore a copy from Home to recover earlier work.
             </p>
             {recoveryDirectory && <p className="package-preview">Folder: {recoveryDirectory}</p>}
             {lastRecoveryBackup && (

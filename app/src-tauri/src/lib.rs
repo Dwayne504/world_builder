@@ -36,7 +36,13 @@ pub fn run() {
             app.manage(application_home::RecentProjectsStore::new(
                 path.with_file_name("recent-projects.sqlite"),
             ));
+            let automatic = application::automatic_backups::AutomaticBackups::start(
+                app.state::<AppState>().inner().clone(),
+                path.clone(),
+                app.path().app_data_dir()?,
+            )?;
             app.manage(PreferencesStore::new(path));
+            app.manage(automatic);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -88,6 +94,8 @@ pub fn run() {
             tauri_boundary::get_appearance,
             tauri_boundary::set_appearance,
             tauri_boundary::get_preferences,
+            tauri_boundary::get_automatic_backup_status,
+            tauri_boundary::set_automatic_backups_enabled,
             tauri_boundary::set_default_projects_dir,
             tauri_boundary::set_default_backups_dir,
             tauri_boundary::reset_preferences,
