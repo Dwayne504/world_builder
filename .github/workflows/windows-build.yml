@@ -1,0 +1,29 @@
+name: Windows build verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Verify clean Windows build
+        shell: pwsh
+        run: ./scripts/Verify-WindowsBuild.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worldcrafter-windows-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            app/src-tauri/target/release/worldcrafter.exe
+            app/src-tauri/target/release/windows-verification.json
