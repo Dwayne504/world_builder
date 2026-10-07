@@ -727,7 +727,7 @@ fn schema_ten_upgrade_preserves_references_and_recovers_after_injected_failure()
     let db = Connection::open(root.join("data/project.sqlite")).unwrap();
     // Construct a genuine schema-10 registry, preserving the populated reference graph.
     db.execute_batch("PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;
-      DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar;
+      DROP TRIGGER rich_document_owner_insert; DROP TRIGGER rich_document_owner_update; DROP TRIGGER rich_document_keep_entry; DROP TRIGGER rich_document_keep_chapter; DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar;
       ALTER TABLE record_identity RENAME TO new_identity;
       CREATE TABLE record_identity(record_id TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN ('entry','story_unit','relationship_instance')),workspace_state TEXT NOT NULL CHECK(workspace_state IN ('active','archived','trashed')),lifecycle_changed_at TEXT NOT NULL,created_at TEXT NOT NULL);
       INSERT INTO record_identity SELECT * FROM new_identity; DROP TABLE new_identity;

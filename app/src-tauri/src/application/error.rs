@@ -47,7 +47,9 @@ impl AppError {
                 "unsupported_format_version"
             }
             AppError::Package(_) => "invalid_package",
-            AppError::Persistence(PersistenceError::StaleRevision { .. }) => "revision_conflict",
+            AppError::Persistence(
+                PersistenceError::StaleRevision { .. } | PersistenceError::StaleDocumentRevision,
+            ) => "revision_conflict",
             AppError::Persistence(PersistenceError::ProjectIdMismatch { .. }) => {
                 "identity_mismatch"
             }

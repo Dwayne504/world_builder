@@ -57,6 +57,18 @@ use crate::domain::structure::FieldId;
 
 use crate::domain::search::{AliasCommand, EntryAliases, SearchRequest, SearchResults};
 enum Job {
+    ReadEntryDescription {
+        entry_id: EntryId,
+        reply: Reply<crate::domain::entry_description::EntryDescriptionSnapshot>,
+    },
+    SaveEntryDescription {
+        entry_id: EntryId,
+        expected: i64,
+        expected_document_revision: Option<i64>,
+        schema_version: i64,
+        content: serde_json::Value,
+        reply: Reply<crate::domain::entry_description::EntryDescriptionSnapshot>,
+    },
     PreviewCategory {
         id: CategoryId,
         reply: Reply<crate::domain::lifecycle::CategoryDeletePreview>,
@@ -374,6 +386,26 @@ impl ProjectDbWorker {
         let _ = conn.execute("UPDATE derived_index_state SET dirty=1 WHERE id=1", []);
         for job in jobs {
             match job {
+                Job::ReadEntryDescription { entry_id, reply } => {
+                    let _ = reply.send(super::entry_description::read(&conn, entry_id));
+                }
+                Job::SaveEntryDescription {
+                    entry_id,
+                    expected,
+                    expected_document_revision,
+                    schema_version,
+                    content,
+                    reply,
+                } => {
+                    let _ = reply.send(super::entry_description::save(
+                        &mut conn,
+                        entry_id,
+                        expected,
+                        expected_document_revision,
+                        schema_version,
+                        content,
+                    ));
+                }
                 Job::PreviewCategory { id, reply } => {
                     let _ = reply.send(super::lifecycle::preview(&conn, id));
                 }
@@ -643,6 +675,29 @@ impl ProjectDbWorker {
         self.call(|reply| Job::ApplyTimeline {
             expected,
             command,
+            reply,
+        })
+    }
+    pub fn read_entry_description(
+        &self,
+        entry_id: EntryId,
+    ) -> Result<crate::domain::entry_description::EntryDescriptionSnapshot, PersistenceError> {
+        self.call(|reply| Job::ReadEntryDescription { entry_id, reply })
+    }
+    pub fn save_entry_description(
+        &self,
+        entry_id: EntryId,
+        expected: i64,
+        expected_document_revision: Option<i64>,
+        schema_version: i64,
+        content: serde_json::Value,
+    ) -> Result<crate::domain::entry_description::EntryDescriptionSnapshot, PersistenceError> {
+        self.call(|reply| Job::SaveEntryDescription {
+            entry_id,
+            expected,
+            expected_document_revision,
+            schema_version,
+            content,
             reply,
         })
     }
