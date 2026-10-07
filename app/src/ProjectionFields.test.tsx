@@ -166,7 +166,7 @@ it("changes the explicitly selected conflicting instance and keeps failed drafts
   fireEvent.click(await screen.findByRole("button", { name: "Dana Characters" }));
   await screen.findByText("Disk full");
   expect(screen.getByLabelText("Find Entry for Current owner")).toHaveValue("Dana");
-  expect(controller).toMatchObject({ state: "failed", canSubmit: false });
+  await waitFor(() => expect(controller).toMatchObject({ state: "failed", canSubmit: false }));
   expect(applyFields).toHaveBeenCalledWith("project", "blade", 5, {
     kind: "edit_projection",
     fieldId: "owner-field",

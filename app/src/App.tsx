@@ -2191,6 +2191,7 @@ function EntryWorkflow({
         {error && <p role="alert">{error}</p>}
         <ProjectSearch
           projectId={projectId}
+          refreshKey={templateEpoch}
           view={location.searchView}
           onViewChange={updateSearchView}
           onOpen={openSearchTarget}

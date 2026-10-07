@@ -176,6 +176,100 @@ async function show() {
   await screen.findByText("Types in Weapons");
   return view;
 }
+it("renames the selected Type, refreshes its defaults and retains its identity", async () => {
+  await show();
+  expect(screen.queryByRole("button", { name: "Rename Type" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Defaults for Sword" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Type" }));
+  expect(screen.getByLabelText("New Type name")).toHaveValue("Sword");
+  change("New Type name", "Blade");
+  vi.mocked(applyStructure).mockResolvedValue({ globalRevision: 2, backupPath: null });
+  vi.mocked(listTypes).mockResolvedValue([{ ...sword, name: "Blade", revision: 2 }]);
+  fireEvent.click(screen.getByRole("button", { name: "Save Type name" }));
+  await screen.findByRole("button", { name: "Defaults for Blade" });
+  expect(applyStructure).toHaveBeenCalledExactlyOnceWith("project", 1, {
+    kind: "rename_type",
+    id: "sword",
+    name: "Blade",
+  });
+  expect(screen.getByLabelText("Default field scope")).toHaveValue("sword");
+  expect(screen.getByRole("option", { name: "Blade Entries" })).toBeInTheDocument();
+  expect(changed).toHaveBeenLastCalledWith(2);
+  expect(createType).not.toHaveBeenCalled();
+});
+
+it("keeps an empty dismissed Type rename and prevents changing its selected target", async () => {
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Defaults for Sword" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Type" }));
+  change("New Type name", "");
+  expect(screen.getByRole("button", { name: "Save Type name" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Close Rename Type" }));
+  expect(screen.getByLabelText("Default field scope")).toBeDisabled();
+  expect(screen.getByLabelText("Managed Category")).toBeDisabled();
+  expect(controller.canSubmit).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Continue manager draft" }));
+  expect(screen.getByLabelText("New Type name")).toHaveValue("");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel manager draft" }));
+  expect(controller.state).toBe("saved");
+  expect(applyStructure).not.toHaveBeenCalled();
+});
+
+it("retains a failed rename for an explicit reload and retry with the new revision", async () => {
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Defaults for Sword" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Type" }));
+  change("New Type name", "Blade");
+  vi.mocked(applyStructure).mockRejectedValueOnce(
+    new Error("Project changed. Reload before retrying."),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save Type name" }));
+  await screen.findByText(/Project changed/);
+  expect(screen.getByLabelText("New Type name")).toHaveValue("Blade");
+  expect(changed).not.toHaveBeenCalled();
+  vi.mocked(readFieldCatalog).mockResolvedValue({ globalRevision: 7, definitions: [] });
+  fireEvent.click(screen.getByRole("button", { name: "Reload Categories (keep draft)" }));
+  await waitFor(() => expect(screen.queryByText(/Project changed/)).not.toBeInTheDocument());
+  vi.mocked(applyStructure).mockResolvedValue({ globalRevision: 8, backupPath: null });
+  fireEvent.click(screen.getByRole("button", { name: "Save Type name" }));
+  await waitFor(() => expect(changed).toHaveBeenLastCalledWith(8));
+  expect(applyStructure).toHaveBeenLastCalledWith("project", 7, {
+    kind: "rename_type",
+    id: "sword",
+    name: "Blade",
+  });
+});
+
+it("distinguishes duplicate Type names and waits for the selected rename acknowledgement", async () => {
+  vi.mocked(listTypes).mockResolvedValue([sword, { ...sword, id: "other-sword" }]);
+  let finish!: (value: { globalRevision: number; backupPath: null }) => void;
+  vi.mocked(applyStructure).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Defaults for Sword · other-sword" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Type" }));
+  change("New Type name", "Cutlass");
+  fireEvent.click(screen.getByRole("button", { name: "Save Type name" }));
+  expect(controller.state).toBe("saving");
+  expect(screen.getByRole("button", { name: "Save Type name" })).toBeDisabled();
+  vi.mocked(readFieldCatalog).mockRejectedValueOnce(new Error("Refresh unavailable"));
+  await act(async () => {
+    finish({ globalRevision: 2, backupPath: null });
+    expect(await controller.submit()).toEqual({ kind: "committed" });
+  });
+  await screen.findByText(/Refresh unavailable/);
+  expect(applyStructure).toHaveBeenCalledExactlyOnceWith("project", 1, {
+    kind: "rename_type",
+    id: "other-sword",
+    name: "Cutlass",
+  });
+  expect(screen.queryByRole("button", { name: "Save Type name" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Default field scope")).toHaveValue("other-sword");
+});
 it("configures a relationship Field as a Type default without storing a separate value", async () => {
   vi.mocked(readProjectRelationships).mockResolvedValue({
     globalRevision: 1,

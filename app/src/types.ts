@@ -253,6 +253,7 @@ export interface CategoryDeletePreview {
   defaultCount: number;
 }
 export type StructureCommand =
+  | { kind: "rename_type"; id: string; name: string }
   | { kind: "rename_category"; id: string; name: string }
   | { kind: "delete_category"; id: string; destinationId: string; removeTypes: boolean }
   | { kind: "set_entry_state"; id: string; state: "active" | "archived" | "trashed" };
