@@ -21,13 +21,13 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 | --- | --- | --- | --- |
 | W01 | Rolling automatic backups with safe retention | Decision needed | Existing backup service |
 | W02 | Reproducible Windows build and release process | Ready for build verification | Baseline consolidation; W01 before release readiness |
-| W03 | Rich Entry descriptions | Ready | Existing Chapter document editor |
+| W03 | Rich Entry descriptions | Implemented; review and native acceptance pending | [Verification](../milestones/ENTRY_DESCRIPTIONS_VERIFICATION.md) |
 | W04 | Complete Type management | Rename implemented; lifecycle decision needed | Existing Category and Type manager; [W04a verification](../milestones/TYPE_RENAMING_VERIFICATION.md) |
 | W05 | Rich Text and ordinary Entry Reference Fields | Ready within existing Field semantics | W03 shared document work recommended |
 | W06 | Tags and named creative Status Systems | Scope decision needed | Stable record identities |
 | W07 | Structured Explore and saved views | Core filters ready | W06 only for Tag and Status filters |
 | W08 | Portable images and attachments | UX and limits decision needed | W01; existing package and document services |
-| W09 | Pins, record tabs and restart restoration | Pins ready; tab behavior decision needed | Existing navigation and close guards |
+| W09 | Pins, record tabs and restart restoration | W09a implemented; tabs/restart still need D06 | Existing navigation and close guards |
 | W10 | Manuscript export and writing recovery improvements | Export decision needed | Existing Chapter documents; W01 |
 | W11 | Books, Parts and Scenes | Design session first | Existing Chapters; W10 independent |
 | W12 | More expressive Timeline dates and calendars | Design session first | Approved Timeline foundation |
@@ -60,4 +60,6 @@ Some original milestone checklists and README wording predate implemented featur
 
 ## Completion tracking
 
-All workloads below are **planned**, not completed. Record completed slice IDs, PR links, verification results and remaining decisions here as sessions finish. Do not guess future merge SHAs or preallocate future database schema versions.
+W03 is implemented on `feature/entry-descriptions`: optional rich descriptions, revision-safe autosave/recovery, migration and Search, with 353 frontend and 244 Rust tests passing. See its verification note for native acceptance still outstanding. Other workloads remain planned unless their own delivered slice records a later status. Do not guess future merge SHAs or preallocate future database schema versions.
+
+W09a is implemented on `feature/workspace-pins`, stacked on W03. See [pins and recents verification](../milestones/WORKSPACE_PINS_VERIFICATION.md). This completes the shortcut slice, not tabs or automatic restart restoration.

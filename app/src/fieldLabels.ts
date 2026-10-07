@@ -1,6 +1,7 @@
 import type { FieldDefinition } from "./types";
 
 export const fieldKinds = {
+  rich_text: "Rich Text",
   short_text: "Short text",
   number: "Number",
   boolean: "Yes / no",

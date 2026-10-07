@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-const INDEX_VERSION: i64 = 4;
+const INDEX_VERSION: i64 = 6;
 const CREATE_INDEX: &str = "CREATE VIRTUAL TABLE search_index USING fts5(payload UNINDEXED, terms, tokenize='unicode61 remove_diacritics 0')";
 fn invalid(message: impl ToString) -> PersistenceError {
     PersistenceError::Other(message.to_string())
@@ -209,7 +209,7 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
         d.identity=Some(id);
         result.push(d);
     }
-    for row in conn.prepare("SELECT v.id,v.entry_id,f.name,COALESCE(v.text_value,CAST(v.number_value AS TEXT),CASE v.bool_value WHEN 1 THEN 'Yes true' WHEN 0 THEN 'No false' END,(SELECT group_concat(label,', ') FROM (SELECT o.label FROM field_choice_value x JOIN choice_option o ON o.id=x.option_id WHERE x.value_id=v.id ORDER BY o.label,o.id)),''),COALESCE(f.unit,'') FROM field_value v JOIN field_definition f ON f.id=v.field_id")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
+    for row in conn.prepare("SELECT v.id,v.entry_id,f.name,COALESCE(v.text_value,CAST(v.number_value AS TEXT),CASE v.bool_value WHEN 1 THEN 'Yes true' WHEN 0 THEN 'No false' END,(SELECT group_concat(label,', ') FROM (SELECT o.label FROM field_choice_value x JOIN choice_option o ON o.id=x.option_id WHERE x.value_id=v.id ORDER BY o.label,o.id)),''),COALESCE(f.unit,'') FROM field_value v JOIN field_definition f ON f.id=v.field_id WHERE v.document_id IS NULL")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
         let (id,entry,field,value,unit)=row?;
         let (title,context,state)=entry_context.get(&entry).ok_or_else(||invalid("Field owner is missing"))?;
         let mut d = doc("structured",format!("field:{id}"),title.clone(),format!("{context} · {field}"),state.clone(),SearchTarget::Entry{entry_id:entry.clone()},format!("{field}: {value} {unit}").trim().into());
@@ -281,11 +281,23 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
         d.story_role_ids = link_roles.remove(&id).unwrap_or_default();
         result.push(d);
     }
-    for row in conn.prepare("SELECT id,owner_id,area,document_schema_version,canonical_json,plain_text FROM rich_document")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?)))? {
-        let (id,chapter,area,version,json,preserved)=row?;
-        let (title,state)=chapter_context.get(&chapter).ok_or_else(||invalid("Document owner is missing"))?;
+    for row in conn.prepare("SELECT id,owner_id,area,document_schema_version,canonical_json,plain_text,owner_kind FROM rich_document")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?)))? {
+        let (id,owner,area,version,json,preserved,owner_kind)=row?;
         let text=serde_json::from_str(&json).map_err(|e|e.to_string()).and_then(|v|crate::domain::story::document_text(version,&v)).map(|(text,_)|text).unwrap_or(preserved);
-        result.push(doc("text",format!("document:{id}"),title.clone(),format!("{area} · Text match"),state.clone(),SearchTarget::Chapter{chapter_id:chapter,area},text));
+        let mut document = if owner_kind == "entry" {
+            let (title,_,state)=entry_context.get(&owner).ok_or_else(||invalid("Description owner is missing"))?;
+            let field = area.strip_prefix("field:").map(|field| conn.query_row("SELECT name FROM field_definition WHERE id=?1",[field],|r|r.get::<_,String>(0))).transpose()?;
+            let mut d=doc(if field.is_some() {"structured"} else {"text"},format!("document:{id}"),title.clone(),field.as_ref().map(|name|format!("{name} · Rich Text")).unwrap_or_else(||"Description · Text match".into()),state.clone(),SearchTarget::Entry{entry_id:owner.clone()},text);
+            if let Some(name) = field { d.structured_kind=Some(StructuredKind::Fields); d.preview_text=Some(d.text.clone()); d.text=format!("{name} {}",d.text); }
+            d.entry_ids.push(owner);
+            d
+        } else {
+            let (title,state)=chapter_context.get(&owner).ok_or_else(||invalid("Document owner is missing"))?;
+            doc("text",format!("document:{id}"),title.clone(),format!("{area} · Text match"),state.clone(),SearchTarget::Chapter{chapter_id:owner,area},text)
+        };
+        // The index stores only derived prose; it cannot create semantic links.
+        if document.preview_text.is_none() { document.preview_text = Some(document.text.clone()); }
+        result.push(document);
     }
     for o in super::timeline::read_occurrences(conn)? {
         let title = if !o.title.trim().is_empty() {
@@ -515,10 +527,8 @@ pub(super) fn query(
                 return false;
             }
             if d.group == "text" {
-                if let (Some(wanted), SearchTarget::Chapter { area, .. }) =
-                    (request.text_area, &d.hit.target)
-                {
-                    if area != wanted.as_str() {
+                if let Some(wanted) = request.text_area {
+                    if !matches!(&d.hit.target, SearchTarget::Chapter { area, .. } if area == wanted.as_str()) {
                         return false;
                     }
                 }

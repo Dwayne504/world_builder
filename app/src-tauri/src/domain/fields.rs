@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum FieldKind {
     ShortText,
+    RichText,
     Number,
     Boolean,
     Choice,
@@ -19,6 +20,7 @@ impl FieldKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ShortText => "short_text",
+            Self::RichText => "rich_text",
             Self::Number => "number",
             Self::Boolean => "boolean",
             Self::Choice => "choice",
@@ -56,15 +58,32 @@ pub struct FieldProvider {
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
     Text(String),
+    RichText(RichFieldValue),
     Number(f64),
     Boolean(bool),
     Choices(Vec<ChoiceOptionId>),
+}
+
+/// Versioned document content; display metadata is derived, never trusted on save.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RichFieldValue {
+    pub schema_version: i64,
+    pub content: Option<serde_json::Value>,
+    pub revision: i64,
+    #[serde(default)]
+    pub plain_text: String,
+    #[serde(default)]
+    pub read_only_reason: Option<String>,
+    #[serde(default)]
+    pub original_json: Option<String>,
 }
 
 impl FieldValue {
     pub fn matches_kind(&self, kind: FieldKind) -> bool {
         match (self, kind) {
             (Self::Text(_), FieldKind::ShortText) | (Self::Boolean(_), FieldKind::Boolean) => true,
+            (Self::RichText(_), FieldKind::RichText) => true,
             (Self::Number(n), FieldKind::Number) => n.is_finite(),
             (Self::Choices(ids), FieldKind::Choice) => ids.len() == 1,
             (Self::Choices(ids), FieldKind::MultiChoice) => !ids.is_empty(),

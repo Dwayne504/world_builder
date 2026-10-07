@@ -16,6 +16,23 @@ use crate::preferences::{self, PreferencesError, PreferencesStore};
 
 use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
+#[tauri::command]
+pub fn read_workspace_navigation(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<crate::domain::navigation::NavigationSnapshot, AppErrorDto> {
+    ProjectService::navigation(&state, parse_project_id(&project_id)?, None).map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_workspace_navigation(
+    state: State<'_, AppState>,
+    project_id: String,
+    command: crate::domain::navigation::NavigationCommand,
+) -> Result<crate::domain::navigation::NavigationSnapshot, AppErrorDto> {
+    ProjectService::navigation(&state, parse_project_id(&project_id)?, Some(command))
+        .map_err(Into::into)
+}
+
 /// Read-only information about this backend, independent of any open Project.
 #[tauri::command]
 pub fn get_build_info() -> super::dto::BuildInfoDto {
@@ -80,6 +97,36 @@ pub fn apply_alias(
         entry_id,
         expected_revision,
         command,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub fn read_entry_description(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: EntryId,
+) -> Result<crate::domain::entry_description::EntryDescriptionSnapshot, AppErrorDto> {
+    ProjectService::read_entry_description(&state, parse_project_id(&project_id)?, entry_id)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub fn save_entry_description(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: EntryId,
+    expected_revision: i64,
+    expected_document_revision: Option<i64>,
+    schema_version: i64,
+    content: serde_json::Value,
+) -> Result<crate::domain::entry_description::EntryDescriptionSnapshot, AppErrorDto> {
+    ProjectService::save_entry_description(
+        &state,
+        parse_project_id(&project_id)?,
+        entry_id,
+        expected_revision,
+        expected_document_revision,
+        schema_version,
+        content,
     )
     .map_err(Into::into)
 }

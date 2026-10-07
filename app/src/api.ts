@@ -5,6 +5,44 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { NavigationCommand, NavigationSnapshot } from "./workspaceNavigationTypes";
+
+export function readWorkspaceNavigation(projectId: string): Promise<NavigationSnapshot> {
+  return call("read_workspace_navigation", { projectId });
+}
+export function applyWorkspaceNavigation(
+  projectId: string,
+  command: NavigationCommand,
+): Promise<NavigationSnapshot> {
+  return call("apply_workspace_navigation", { projectId, command });
+}
+import type { JSONContent } from "@tiptap/react";
+import type { EntryDescriptionSnapshot } from "./entryDescriptionTypes";
+
+export function readEntryDescription(
+  projectId: string,
+  entryId: string,
+): Promise<EntryDescriptionSnapshot> {
+  return call("read_entry_description", { projectId, entryId });
+}
+export function saveEntryDescription(
+  projectId: string,
+  entryId: string,
+  expectedRevision: number,
+  expectedDocumentRevision: number | null,
+  schemaVersion: number,
+  content: JSONContent,
+): Promise<EntryDescriptionSnapshot> {
+  return call("save_entry_description", {
+    projectId,
+    entryId,
+    expectedRevision,
+    expectedDocumentRevision,
+    schemaVersion,
+    content,
+  });
+}
+
 import type { TimelineCommand, TimelineSnapshot } from "./timelineTypes";
 export function readTimeline(projectId: string): Promise<TimelineSnapshot> {
   return call("read_timeline", { projectId });

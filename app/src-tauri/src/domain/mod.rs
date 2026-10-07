@@ -4,10 +4,12 @@
 //! data is persisted or presented. It has no dependency on Tauri, React,
 //! SQLite, or the filesystem.
 
+pub mod entry_description;
 pub mod error;
 pub mod fields;
 pub mod ids;
 pub mod lifecycle;
+pub mod navigation;
 pub mod relationships;
 pub mod search;
 pub mod spatial;

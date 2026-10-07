@@ -224,6 +224,7 @@ fn read_value(
         return Ok(None);
     };
     Ok(Some(match definition.kind {
+        FieldKind::RichText => FieldValue::RichText(read_rich_value(conn, &id)?),
         FieldKind::ShortText => {
             FieldValue::Text(text.ok_or_else(|| invalid("missing text value"))?)
         }
@@ -583,6 +584,16 @@ fn set_value(
     if !field.available && field.value.is_none() {
         return Err(invalid("Field is not available for new values"));
     }
+    if d.kind == FieldKind::RichText {
+        return set_rich_value(
+            tx,
+            entry,
+            edit.field_id,
+            edit.value,
+            field.value.as_ref(),
+            now,
+        );
+    }
     let value = match edit.value {
         Some(FieldValue::Text(ref s)) if s.is_empty() => None,
         Some(FieldValue::Choices(ref ids)) if ids.is_empty() => None,
@@ -674,6 +685,9 @@ pub(super) fn preview_merge(
     let mut blockers = Vec::new();
     if source.projection.is_some() || target.projection.is_some() {
         blockers.push("Relationship Fields cannot be merged as scalar values. Their connections remain independently authored.".into());
+    }
+    if source.kind == FieldKind::RichText || target.kind == FieldKind::RichText {
+        blockers.push("Rich Text Fields cannot be combined yet. Both documents are preserved; choose which Field to use without merging.".into());
     }
     if source.name.trim().to_lowercase() != target.name.trim().to_lowercase() {
         blockers.push("Only same-name duplicates can be merged. Rename deliberately before reviewing a merge.".into());
@@ -812,6 +826,16 @@ pub(super) fn delete_local(
     if definition(&snapshot, field)?.projection.is_some() {
         return Err(invalid("Remove the Field display or explicitly end its connections; scalar deletion cannot delete a relationship"));
     }
+    if let Some(FieldValue::RichText(value)) = snapshot
+        .fields
+        .iter()
+        .find(|f| f.definition.id == field)
+        .and_then(|f| f.value.as_ref())
+    {
+        if let Some(reason) = &value.read_only_reason {
+            return Err(invalid(reason));
+        }
+    }
     let now = Utc::now().to_rfc3339();
     tx.execute("DELETE FROM field_choice_value WHERE value_id IN (SELECT id FROM field_value WHERE entry_id=?1 AND field_id=?2)", params![entry.to_string(),field.to_string()])?;
     tx.execute(
@@ -824,4 +848,109 @@ pub(super) fn delete_local(
     let updated = read(&tx, entry)?;
     tx.commit()?;
     Ok(updated)
+}
+
+fn read_rich_value(conn: &Connection, value_id: &str) -> Result<RichFieldValue, PersistenceError> {
+    let (schema_version, json, preserved, revision, migration_state): (i64, String, String, i64, String) = conn.query_row(
+        "SELECT d.document_schema_version,d.canonical_json,d.plain_text,d.revision,d.migration_state FROM rich_document d JOIN field_value v ON v.document_id=d.id WHERE v.id=?1",
+        [value_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
+    let parsed = serde_json::from_str::<serde_json::Value>(&json);
+    let validated = parsed
+        .as_ref()
+        .map_err(|_| {
+            "This Rich Text value is damaged. Its original content is preserved.".to_string()
+        })
+        .and_then(|v| crate::domain::story::document_text(schema_version, v));
+    let read_only_reason = if migration_state != "current" {
+        Some("This Rich Text value needs recovery. Its original content is preserved.".into())
+    } else {
+        validated.as_ref().err().cloned()
+    };
+    Ok(RichFieldValue {
+        schema_version,
+        revision,
+        plain_text: validated.map(|(text, _)| text).unwrap_or(preserved),
+        content: if read_only_reason.is_none() {
+            parsed.ok()
+        } else {
+            None
+        },
+        original_json: read_only_reason.as_ref().map(|_| json),
+        read_only_reason,
+    })
+}
+
+fn set_rich_value(
+    tx: &Transaction<'_>,
+    entry: EntryId,
+    field: FieldId,
+    submitted: Option<FieldValue>,
+    prior: Option<&FieldValue>,
+    now: &str,
+) -> Result<(), PersistenceError> {
+    let previous = match prior {
+        Some(FieldValue::RichText(value)) => Some(value),
+        _ => None,
+    };
+    if let Some(reason) = previous.and_then(|v| v.read_only_reason.as_ref()) {
+        return Err(invalid(reason));
+    }
+    // Creation of an empty default has no document. Existing writing can only
+    // be cleared with a validated, revision-checked empty document.
+    let Some(FieldValue::RichText(value)) = submitted else {
+        return if previous.is_none() && submitted.is_none() {
+            Ok(())
+        } else {
+            Err(invalid(
+                "Rich Text edits require a document and its saved revision",
+            ))
+        };
+    };
+    if value.revision != previous.map_or(0, |v| v.revision) {
+        return Err(PersistenceError::StaleDocumentRevision);
+    }
+    let active: bool = tx.query_row(
+        "SELECT workspace_state='active' FROM record_identity WHERE record_id=?1",
+        [entry.to_string()],
+        |r| r.get(0),
+    )?;
+    if !active {
+        return Err(invalid(
+            "Restore this Entry before editing its Rich Text Fields",
+        ));
+    }
+    let content = value
+        .content
+        .ok_or_else(|| invalid("Rich Text content is required"))?;
+    let (plain, count) =
+        crate::domain::story::document_text(value.schema_version, &content).map_err(invalid)?;
+    // Keep formatting-only documents; only the exact empty editor forms clear.
+    let empty = content == serde_json::json!({"type":"doc","content":[{"type":"paragraph"}]})
+        || content == serde_json::json!({"type":"doc","content":[]})
+        || content == serde_json::json!({"type":"doc"});
+    if empty {
+        tx.execute(
+            "DELETE FROM field_value WHERE entry_id=?1 AND field_id=?2",
+            params![entry.to_string(), field.to_string()],
+        )?;
+        return Ok(());
+    }
+    let area = format!("field:{field}");
+    // Use the next Project revision so a cleared/recreated value cannot reuse
+    // an older document revision and accept an unrelated stale editor (ABA).
+    let document_revision: i64 = tx.query_row(
+        "SELECT last_committed_revision+1 FROM project_meta WHERE id=1",
+        [],
+        |r| r.get(0),
+    )?;
+    tx.execute("INSERT INTO rich_document(id,owner_kind,owner_id,area,document_schema_version,canonical_json,plain_text,word_count,migration_state,created_at,updated_at,revision) VALUES(?1,'entry',?2,?3,?4,?5,?6,?7,'current',?8,?8,?9) ON CONFLICT(owner_kind,owner_id,area) DO UPDATE SET canonical_json=excluded.canonical_json,plain_text=excluded.plain_text,word_count=excluded.word_count,updated_at=excluded.updated_at,revision=excluded.revision",
+        params![uuid::Uuid::now_v7().to_string(),entry.to_string(),area,value.schema_version,content.to_string(),plain,count,now,document_revision])?;
+    let document_id: String = tx.query_row(
+        "SELECT id FROM rich_document WHERE owner_kind='entry' AND owner_id=?1 AND area=?2",
+        params![entry.to_string(), area],
+        |r| r.get(0),
+    )?;
+    tx.execute("INSERT INTO field_value(id,entry_id,field_id,document_id,value_kind,created_at,updated_at,revision) VALUES(?1,?2,?3,?4,'rich_text',?5,?5,1) ON CONFLICT(entry_id,field_id,ordinal) DO UPDATE SET updated_at=excluded.updated_at,revision=field_value.revision+1",
+        params![uuid::Uuid::now_v7().to_string(),entry.to_string(),field.to_string(),document_id,now])?;
+    Ok(())
 }

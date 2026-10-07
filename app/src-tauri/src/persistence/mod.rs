@@ -5,11 +5,13 @@
 //! decisions and is not reachable from `react_ui` except through
 //! `application` and `tauri_boundary`.
 
+mod entry_description;
 pub mod error;
 mod fields;
 pub mod lifecycle;
 pub mod lock;
 pub mod migrations;
+mod navigation;
 pub mod pragmas;
 mod relationships;
 mod search;
