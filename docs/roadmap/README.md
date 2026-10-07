@@ -22,7 +22,7 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 | W01 | Rolling automatic backups with safe retention | Decision needed | Existing backup service |
 | W02 | Reproducible Windows build and release process | Ready for build verification | Baseline consolidation; W01 before release readiness |
 | W03 | Rich Entry descriptions | Ready | Existing Chapter document editor |
-| W04 | Complete Type management | Rename ready; lifecycle decision needed | Existing Category and Type manager |
+| W04 | Complete Type management | Rename implemented; lifecycle decision needed | Existing Category and Type manager; [W04a verification](../milestones/TYPE_RENAMING_VERIFICATION.md) |
 | W05 | Rich Text and ordinary Entry Reference Fields | Ready within existing Field semantics | W03 shared document work recommended |
 | W06 | Tags and named creative Status Systems | Scope decision needed | Stable record identities |
 | W07 | Structured Explore and saved views | Core filters ready | W06 only for Tag and Status filters |
