@@ -182,7 +182,9 @@ it("creates an optional Chapter without a Book, reorders by stable identity, and
       onRevision={vi.fn()}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Move Next up" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Move Next in reading order" }));
+  fireEvent.change(screen.getByLabelText("New reading position"), { target: { value: "1" } });
+  fireEvent.click(screen.getByRole("button", { name: "Move Chapter" }));
   await waitFor(() =>
     expect(applyStory).toHaveBeenCalledWith("project", 3, {
       kind: "move",
@@ -364,4 +366,104 @@ it("shows current Chapter assignments in the Role catalog and opens exact Projec
   fireEvent.click(within(options).getByRole("button", { name: "Find Chapters using POV" }));
   expect(findRole).toHaveBeenCalledWith(initial.roles[0]);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("browses and searches over 100 linked Entries while keeping the writing areas mounted", async () => {
+  const initial = chapterFixture();
+  initial.links = Array.from({ length: 105 }, (_, index) => ({
+    id: `link-${index}`,
+    entryId: `entry-${index}`,
+    label: `Traveller ${String(index + 1).padStart(3, "0")}`,
+    workspaceState: "active",
+    roles: index === 104 ? [initial.roles[0]] : [],
+  }));
+  show(initial);
+  const manuscript = await screen.findByRole("textbox", { name: "Manuscript" });
+  const context = screen.getByRole("complementary", { name: "Chapter context" });
+  expect(within(context).getAllByRole("button", { name: /^Roles for/ })).toHaveLength(10);
+  expect(within(context).getByText("1–10 of 105")).toBeVisible();
+  fireEvent.click(within(context).getByRole("button", { name: "Next Linked material" }));
+  expect(within(context).getByText("Traveller 011")).toBeVisible();
+  fireEvent.change(within(context).getByRole("searchbox"), { target: { value: "pov" } });
+  expect(within(context).getAllByRole("button", { name: /^Roles for/ })).toHaveLength(1);
+  expect(within(context).getByText("Traveller 105")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Hide context" }));
+  expect(screen.getByRole("textbox", { name: "Manuscript" })).toBe(manuscript);
+  fireEvent.click(screen.getByRole("tab", { name: "Notes" }));
+  const notes = screen.getByRole("textbox", { name: "Chapter notes" });
+  fireEvent.click(screen.getByRole("button", { name: "Show context" }));
+  expect(screen.getByRole("textbox", { name: "Chapter notes" })).toBe(notes);
+  expect(within(context).getByRole("searchbox")).toHaveValue("pov");
+  fireEvent.click(screen.getByRole("tab", { name: "Manuscript" }));
+  expect(screen.getByRole("textbox", { name: "Manuscript" })).toBe(manuscript);
+  expect(applyStory).not.toHaveBeenCalled();
+});
+
+it("bounds large Role pickers and catalogs without losing assignments or unapplied drafts", async () => {
+  const initial = chapterFixture();
+  initial.roles = Array.from({ length: 105 }, (_, index) => ({
+    id: `role-${index}`,
+    name: `Role ${String(index + 1).padStart(3, "0")}`,
+  }));
+  initial.links = [
+    {
+      id: "link",
+      entryId: "person",
+      label: "Traveller",
+      workspaceState: "active",
+      roles: [initial.roles[0]],
+    },
+  ];
+  vi.mocked(applyStory).mockResolvedValue({
+    ...initial,
+    globalRevision: 4,
+    links: [{ ...initial.links[0], roles: [initial.roles[0], initial.roles[104]] }],
+  });
+  show(initial);
+  fireEvent.click(screen.getByRole("button", { name: "Roles for Traveller" }));
+  const picker = screen.getByRole("dialog", { name: "Roles for Traveller" });
+  expect(within(picker).getAllByRole("checkbox")).toHaveLength(12);
+  fireEvent.change(within(picker).getByLabelText("Role assignments page"), {
+    target: { value: "8" },
+  });
+  expect(within(picker).getByRole("checkbox", { name: "Role 105" })).toBeVisible();
+  fireEvent.change(within(picker).getByRole("searchbox"), { target: { value: "Role 105" } });
+  fireEvent.click(within(picker).getByRole("checkbox", { name: "Role 105" }));
+  await waitFor(() =>
+    expect(within(picker).getByRole("checkbox", { name: "Role 105" })).toBeChecked(),
+  );
+  expect(applyStory).toHaveBeenCalledWith("project", 3, {
+    kind: "set_link",
+    chapterId: "chapter",
+    entryId: "person",
+    roleIds: ["role-0", "role-104"],
+  });
+  fireEvent.click(within(picker).getByRole("button", { name: "Manage available Roles" }));
+  const options = screen.getByRole("dialog", { name: "Chapter options" });
+  expect(within(options).getAllByRole("button", { name: /^Find Chapters using/ })).toHaveLength(12);
+  fireEvent.change(within(options).getByLabelText("New Story Role"), {
+    target: { value: "Unfinished idea" },
+  });
+  fireEvent.click(within(options).getByRole("button", { name: "Close Chapter options" }));
+  expect(controller.canSubmit).toBe(false);
+  fireEvent.click(within(picker).getByRole("button", { name: "Manage available Roles" }));
+  expect(within(options).getByLabelText("New Story Role")).toHaveValue("Unfinished idea");
+  fireEvent.click(within(options).getByRole("button", { name: "Cancel Role draft" }));
+  expect(controller.canSubmit).toBe(true);
+  expect(applyStory).toHaveBeenCalledTimes(1);
+});
+
+it("keeps archived writing read-only and exposes restore separately from Role management", () => {
+  const initial = chapterFixture();
+  initial.chapter.workspaceState = "archived";
+  show(initial);
+  expect(screen.getByLabelText("Chapter title")).toBeDisabled();
+  expect(screen.queryByRole("textbox", { name: "Manuscript" })).not.toBeInTheDocument();
+  expect(screen.getByText("Thron arrived.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Link Entry" })).toBeDisabled();
+  fireEvent.click(menuItem("Edit", "Chapter", "Chapter options…"));
+  const options = screen.getByRole("dialog", { name: "Chapter options" });
+  expect(within(options).getByLabelText("New Story Role")).toBeDisabled();
+  expect(within(options).getByRole("button", { name: "Restore Chapter" })).toBeVisible();
+  expect(applyStory).not.toHaveBeenCalled();
 });

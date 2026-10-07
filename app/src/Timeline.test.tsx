@@ -211,6 +211,113 @@ it("bounds lists, searches occurrence notes, and filters only explicit links", a
   expect(screen.getByText("1 occurrences · Orbit")).toBeVisible();
   expect(screen.getByRole("button", { name: /Moment 24/ })).toBeVisible();
 });
+it("caps large rail and list pages, keeps filters across views, and resets paging for a new search", async () => {
+  const s = fixture();
+  s.occurrences = Array.from({ length: 125 }, (_, i) => ({
+    ...occurrence(String(i)),
+    title: `Moment ${i}`,
+    date: { year: i - 100, month: 1, day: 1 },
+    notes: i === 124 ? "The last signal" : "",
+  }));
+  vi.mocked(readTimeline).mockResolvedValue(s);
+  render(<Host />);
+  await screen.findByText("125 occurrences · Orbit");
+  expect(screen.getAllByRole("button", { name: /Moment \d+.*Moment/ })).toHaveLength(10);
+  for (let i = 0; i < 4; i++) fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }));
+  expect(screen.getAllByRole("button", { name: /Moment \d+.*Moment/ })).toHaveLength(50);
+  expect(screen.queryByRole("button", { name: "Show 10 more" })).not.toBeInTheDocument();
+  screen.getByRole("region", { name: "Chronological timeline" }).scrollLeft = 600;
+  fireEvent.click(screen.getByRole("button", { name: "Next 50" }));
+  expect(screen.getByText("Showing 51–100 of 125")).toBeVisible();
+  expect(screen.getByRole("region", { name: "Chronological timeline" }).scrollLeft).toBe(0);
+  fireEvent.click(screen.getByRole("button", { name: "List" }));
+  expect(screen.getByRole("list", { name: "Timeline occurrences" })).toBeVisible();
+  expect(screen.getAllByRole("button", { name: /Moment \d+.*Moment/ })).toHaveLength(50);
+  fireEvent.click(screen.getByRole("button", { name: "Next 50" }));
+  expect(screen.getByText("Showing 101–125 of 125")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Search timeline"), {
+    target: { value: "The last signal" },
+  });
+  expect(screen.getByText("Showing 1–1 of 1")).toBeVisible();
+  expect(screen.getByRole("button", { name: /Moment 124/ })).toBeVisible();
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "Timeline presentation" })).getByRole("button", {
+      name: "Timeline",
+    }),
+  );
+  expect(screen.getByRole("region", { name: "Chronological timeline" })).toBeVisible();
+  expect(screen.getByLabelText("Search timeline")).toHaveValue("The last signal");
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(screen.getByText("Showing 1–10 of 125")).toBeVisible();
+});
+it("explains filtered empty results separately from a new timeline", async () => {
+  vi.mocked(readTimeline).mockResolvedValue({ ...fixture(), occurrences: [] });
+  render(<Host />);
+  expect(
+    await screen.findByRole("heading", { name: "Every world begins with a moment" }),
+  ).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Search timeline"), { target: { value: "Missing" } });
+  expect(screen.getByRole("heading", { name: "No moments match these filters" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Clear filters" })).toBeVisible();
+});
+it("bounds and searches a thousand selected links while preserving off-page selections and the mounted draft", async () => {
+  const s = fixture();
+  s.occurrences[0].entries = Array.from({ length: 1000 }, (_, i) => ({
+    id: `person-${i}`,
+    label: `Person ${String(i).padStart(4, "0")}`,
+    workspaceState: "active",
+  }));
+  vi.mocked(readTimeline).mockResolvedValue(s);
+  vi.mocked(applyTimeline).mockImplementation(async (_project, revision, command) => ({
+    ...s,
+    globalRevision: revision + 1,
+    occurrences: s.occurrences.map((item) =>
+      command.kind === "save" && item.id === command.id
+        ? {
+            ...item,
+            entries: item.entries.filter((entry) => command.draft.entryIds.includes(entry.id)),
+          }
+        : item,
+    ),
+  }));
+  render(<Host initial={{ ...initialTimelineView, occurrenceId: "moment" }} />);
+  const notes = await screen.findByRole("textbox", { name: "Notes" });
+  const summary = screen.getByText("Entries", { selector: "summary" });
+  fireEvent.click(summary);
+  const picker = within(summary.closest("details")!);
+  expect(picker.getAllByRole("button", { name: /^Unlink/ })).toHaveLength(10);
+  expect(picker.getByText("1–10 of 1000")).toBeVisible();
+  fireEvent.click(picker.getByRole("button", { name: "Next selected Entries" }));
+  expect(picker.getByRole("button", { name: "Unlink Person 0010" })).toBeVisible();
+  expect(screen.getByRole("textbox", { name: "Notes" })).toBe(notes);
+  fireEvent.change(picker.getByRole("searchbox", { name: "Find entries" }), {
+    target: { value: "Person 0999" },
+  });
+  expect(picker.getAllByRole("button", { name: /^Unlink/ })).toHaveLength(1);
+  fireEvent.click(picker.getByRole("button", { name: "Unlink Person 0999" }));
+  await act(async () => {
+    await controller.submit();
+  });
+  const calls = vi.mocked(applyTimeline).mock.calls;
+  const saved = calls[calls.length - 1]?.[2];
+  expect(saved?.kind).toBe("save");
+  if (saved?.kind !== "save") throw new Error("Expected occurrence save");
+  expect(saved.draft.entryIds).toHaveLength(999);
+  expect(saved.draft.entryIds).toContain("person-0");
+  expect(saved.draft.entryIds).toContain("person-998");
+  expect(saved.draft.entryIds).not.toContain("person-999");
+  const linkedSummary = screen.getByText("Open linked pages", { selector: "summary" });
+  fireEvent.click(linkedSummary);
+  const linked = within(linkedSummary.closest("details")!);
+  expect(
+    within(linked.getByRole("list", { name: "Linked pages" })).getAllByRole("listitem"),
+  ).toHaveLength(10);
+  fireEvent.change(linked.getByRole("searchbox", { name: "Find a linked page" }), {
+    target: { value: "Person 0998" },
+  });
+  fireEvent.click(linked.getByRole("button", { name: "Person 0998" }));
+  await waitFor(() => expect(onEntry).toHaveBeenCalledWith("person-998"));
+});
 it("keeps inactive occurrences read-only and restores without erasing notes", async () => {
   vi.mocked(readTimeline).mockResolvedValue({
     ...fixture(),

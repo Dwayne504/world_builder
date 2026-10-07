@@ -1,0 +1,115 @@
+.manager-search-select {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.manager-search-select > label {
+  margin: 0;
+}
+.manager-search-select > select,
+.manager-search-select input {
+  width: 100%;
+  min-width: 0;
+}
+.manager-list-footer,
+.manager-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+.manager-list-footer {
+  margin-block: 0.5rem;
+  color: var(--muted);
+}
+.manager-list-toolbar {
+  margin-block: 0.85rem;
+}
+.manager-list-toolbar > label {
+  flex: 1 1 15rem;
+  margin: 0;
+}
+.manager-list-toolbar input {
+  width: 100%;
+}
+.manager-secondary {
+  margin-block: 0.75rem;
+  border-block-start: 1px solid var(--line);
+  padding-block-start: 0.6rem;
+}
+.manager-secondary > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+}
+.manager-secondary[open] > summary {
+  margin-block-end: 0.75rem;
+}
+.manager-current-scope {
+  margin: 0.5rem 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-inline-start: 3px solid var(--accent);
+  background: var(--tint);
+  border-radius: 0.25rem;
+}
+.manager-types li:has([aria-pressed="true"]) {
+  background: var(--tint);
+  border-inline-start: 3px solid var(--accent);
+  padding-inline-start: 0.6rem;
+}
+.category-main .manager-types li {
+  min-height: 44px;
+  padding-block: 4px;
+  gap: 4px 10px;
+}
+.category-main .manager-types li > span {
+  flex: 1 1 10rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.category-main .manager-types li > button {
+  min-height: 32px;
+  padding-block: 4px;
+  margin: 0;
+}
+.manager-bounded-list {
+  max-height: 22rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.field-manager-workspace .manager-table-scroll {
+  max-height: min(45vh, 30rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.field-manager-workspace .field-manager-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+.manager-count {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.relationship-search-toolbar {
+  margin-block: 1.2rem 0.75rem;
+}
+.relationship-search-toolbar input {
+  width: 100%;
+}
+.relationship-filters > .manager-search-select {
+  flex: 1 1 12rem;
+  align-self: start;
+}
+@media (max-width: 700px) {
+  .manager-list-toolbar {
+    align-items: stretch;
+  }
+  .field-manager-workspace .manager-table-scroll {
+    max-height: 24rem;
+  }
+}

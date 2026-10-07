@@ -447,6 +447,24 @@ Project with the build that last saved it or a newer compatible build. The
 compatibility refusal remains fail-closed; never lower the version in a manifest
 or database to bypass it. This navigation change does not add a migration.
 
+### Browsing larger workspaces
+
+Entries and Chapters now offer search and manageable pages. Chapter display
+sorting leaves the reading order intact; **Move** changes its actual position.
+Returning from a Chapter keeps the current library search and display settings.
+Managers provide searchable Field, Type and Entry choices and keep less frequent
+actions in expandable sections. Entry settings separate structure, aliases and
+recoverable deletion.
+
+Timeline offers a horizontal rail as well as a list. Nearby dots reveal an event
+card; same-day moments share a date and undated ideas stay separate. The rail is
+labelled **not to scale**. Sidebar labels gently magnify within fixed rows, so
+neither the sidebar nor the editor changes size. Pointer illumination works over
+surfaces, respects reduced motion/high contrast, and never intercepts clicks.
+
+See [workspace usability and verification](docs/milestones/WORKSPACE_USABILITY_VERIFICATION.md)
+for scope, large-library tests, and the Windows manual checklist.
+
 ### Manual native-close verification
 
 In a packaged Tauri build, verify title-bar and OS close shortcuts: clean Projects

@@ -9,6 +9,9 @@ export interface WorkspaceLocation {
   relationshipView: RelationshipView;
   entryId: string | null;
   entryState: "active" | "archived" | "trashed";
+  entryQuery?: string;
+  entryPage?: number;
+  entryPageSize?: number;
   categoryId: string;
   typeId: string;
   scrollY: number;
@@ -16,6 +19,7 @@ export interface WorkspaceLocation {
   focusKey: string | null;
 }
 export interface RelationshipView {
+  query?: string;
   relationshipId?: string;
   entryIds: string[];
   definitionId: string;

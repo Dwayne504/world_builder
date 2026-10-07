@@ -1,0 +1,236 @@
+.chapter-library .section-heading {
+  margin-bottom: 0.3rem;
+}
+
+.chapter-library-intro {
+  margin: 0 0 1.25rem;
+}
+
+.chapter-library .chapter-views {
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1rem;
+}
+
+.chapter-view-count {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.chapter-library-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, 13rem);
+  gap: 1rem;
+}
+
+.chapter-library-toolbar label,
+.chapter-context-search {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.chapter-library-toolbar input,
+.chapter-library-toolbar select,
+.chapter-context-search input {
+  margin-top: 0.3rem;
+}
+
+.chapter-library-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  margin: 0.8rem 0;
+}
+
+.chapter-library-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 58vh;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border-top: 1px solid var(--line);
+}
+
+.chapter-library-list > li {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.35rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.chapter-library-list > li:hover {
+  background: var(--tint);
+}
+
+.chapter-reading-number {
+  min-width: 2.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chapter-library-title {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.chapter-library-title .chapter-link {
+  max-width: 100%;
+  padding: 0.15rem 0;
+  text-align: left;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.chapter-library-title small {
+  font-size: 0.75rem;
+}
+
+.chapter-library-list .row {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.chapter-library-list .row button {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.chapter-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding-top: 0.75rem;
+  color: var(--muted);
+}
+
+.chapter-pagination-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.chapter-pagination .chapter-pagination-controls label {
+  margin: 0;
+  min-width: 0;
+}
+
+.chapter-pagination .chapter-pagination-controls select,
+.chapter-pagination .chapter-pagination-controls button {
+  width: auto;
+  margin: 0;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.78rem;
+}
+
+.chapter-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chapter-empty {
+  padding: 1.5rem 0;
+}
+
+.chapter-editor .chapter-context .section-heading {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.chapter-editor .chapter-context h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.chapter-editor .chapter-context-results {
+  max-height: 55vh;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.chapter-editor .chapter-world-link {
+  padding: 0.65rem 0.2rem;
+}
+
+.chapter-editor .chapter-world-link > details > summary {
+  font-size: 0.9rem;
+}
+
+.chapter-editor .chapter-world-link > details > summary small {
+  font-size: 0.75rem;
+}
+
+.chapter-editor .chapter-context-search {
+  display: block;
+  margin-bottom: 0.8rem;
+}
+
+.chapter-editor .story-role-options,
+.chapter-editor .story-role-catalog {
+  max-height: 17rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.chapter-editor .story-role-options label {
+  overflow-wrap: anywhere;
+}
+
+.chapter-editor .story-role-options input {
+  flex-shrink: 0;
+}
+
+.chapter-editor .chapter-lifecycle-options {
+  margin-top: 1.25rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.chapter-lifecycle-options > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.chapter-entry-results small {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .chapter-library-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
+  }
+
+  .chapter-library-list > li {
+    gap: 0.5rem;
+  }
+
+  .chapter-reading-number {
+    min-width: 1.8rem;
+  }
+}

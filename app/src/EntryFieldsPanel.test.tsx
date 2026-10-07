@@ -56,6 +56,27 @@ function show() {
   return onController;
 }
 describe("Field authoring", () => {
+  it("keeps a shared definition draft reachable when manager search hides its row", async () => {
+    const onController = show();
+    await screen.findByLabelText("Value: Eye colour");
+    fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
+    fireEvent.click(screen.getByRole("button", { name: "Edit definition: Eye colour" }));
+    fireEvent.change(screen.getByLabelText("rename-field"), { target: { value: "Iris colour" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close Edit field definition" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a field" }), {
+      target: { value: "No matching field" },
+    });
+    expect(
+      screen.queryByRole("button", { name: "Edit definition: Eye colour" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue definition edits" }));
+    expect(screen.getByLabelText("rename-field")).toHaveValue("Iris colour");
+    expect(onController).toHaveBeenLastCalledWith(
+      expect.objectContaining({ state: "dirty", canSubmit: false }),
+    );
+    expect(applyFields).not.toHaveBeenCalled();
+  });
+
   it("keeps a dismissed creation draft and any failed save visible until explicitly cancelled", async () => {
     vi.mocked(applyFields).mockRejectedValueOnce(new Error("Disk full"));
     const controller = show();
@@ -273,6 +294,7 @@ describe("Field authoring", () => {
     await screen.findByLabelText("Value: Eye colour");
     fireEvent.click(menuItem("Edit", "Field", "Manage fields…"));
     fireEvent.click(screen.getByRole("button", { name: "Edit definition: Eye colour" }));
+    fireEvent.click(screen.getByText("Availability and retirement"));
     await act(async () =>
       fireEvent.click(
         screen.getByRole("button", { name: "Make available to this Type", hidden: true }),

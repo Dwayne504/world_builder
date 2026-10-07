@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { previewCategoryDelete } from "./api";
 import type { Category, CategoryDeletePreview, StructureCommand } from "./types";
+import { ManagerSearchSelect } from "./ManagerSearchSelect";
 
 export function CategoryDeleteReview({
   projectId,
@@ -49,23 +50,16 @@ export function CategoryDeleteReview({
             in Archive or Trash, will be moved to the Category you choose. Their values, links and
             features stay intact.
           </p>
-          <label>
-            Move Entries to
-            <select
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              disabled={busy}
-            >
-              <option value="">Choose a destination</option>
-              {categories
-                .filter((c) => c.id !== category.id)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-            </select>
-          </label>
+          <ManagerSearchSelect
+            label="Move Entries to"
+            value={destination}
+            onChange={setDestination}
+            disabled={busy}
+            emptyLabel="Choose a destination"
+            choices={categories
+              .filter((c) => c.id !== category.id)
+              .map((c) => ({ id: c.id, label: c.name }))}
+          />
           {!!preview.typeNames.length && (
             <>
               <p>These Types belong to this Category: {preview.typeNames.join(", ")}.</p>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getPreferences, mergeFields, pickDirectory, previewFieldMerge } from "./api";
 import type { FieldDefinition, FieldMergeOutcome, FieldMergePreview, FieldValue } from "./types";
 import { fieldLabel, matchingFields } from "./fieldLabels";
+import { ManagerSearchSelect } from "./ManagerSearchSelect";
 
 function display(value: FieldValue | null) {
   if (!value) return "Not filled in";
@@ -95,45 +96,31 @@ export function FieldMergeReview({
         identity stays the same.
       </p>
       <fieldset disabled={disabled || busy}>
-        <label>
-          Keep this Field
-          <select
-            aria-label="Keep Field"
-            value={targetId}
-            onChange={(e) => {
-              setTargetId(e.target.value);
-              setSourceId("");
-              clearPreview();
-            }}
-          >
-            <option value="">Choose a Field</option>
-            {definitions
-              .filter((d) => !d.retired && matchingFields(definitions, d.name).length > 1)
-              .map((d) => (
-                <option key={d.id} value={d.id}>
-                  {fieldLabel(d, definitions)}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label>
-          Combine this duplicate into it
-          <select
-            aria-label="Duplicate Field"
-            value={sourceId}
-            onChange={(e) => {
-              setSourceId(e.target.value);
-              clearPreview();
-            }}
-          >
-            <option value="">Choose a duplicate</option>
-            {candidates.map((d) => (
-              <option key={d.id} value={d.id}>
-                {fieldLabel(d, definitions)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ManagerSearchSelect
+          label="Keep this Field"
+          ariaLabel="Keep Field"
+          value={targetId}
+          onChange={(id) => {
+            setTargetId(id);
+            setSourceId("");
+            clearPreview();
+          }}
+          emptyLabel="Choose a Field"
+          choices={definitions
+            .filter((d) => !d.retired && matchingFields(definitions, d.name).length > 1)
+            .map((d) => ({ id: d.id, label: fieldLabel(d, definitions) }))}
+        />
+        <ManagerSearchSelect
+          label="Combine this duplicate into it"
+          ariaLabel="Duplicate Field"
+          value={sourceId}
+          onChange={(id) => {
+            setSourceId(id);
+            clearPreview();
+          }}
+          emptyLabel="Choose a duplicate"
+          choices={candidates.map((d) => ({ id: d.id, label: fieldLabel(d, definitions) }))}
+        />
         <button disabled={!targetId || !sourceId} onClick={() => void review()}>
           Review merge
         </button>

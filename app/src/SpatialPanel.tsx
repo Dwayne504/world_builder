@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applySpatial, readSpatial } from "./api";
 import { Dialog } from "./Dialog";
+import { ManagerSearchSelect } from "./ManagerSearchSelect";
 import type { FieldsController } from "./EntryFieldsPanel";
 import type { Category, SpatialCommand, SpatialSnapshot, RelationshipSnapshot } from "./types";
 import type { SubmitOutcome } from "./useProjectRename";
@@ -416,19 +417,15 @@ export function SpatialPanel({
                 Child name (optional)
                 <input value={name} onChange={(e) => setName(e.target.value)} />
               </label>
-              <label>
-                Child Category
-                <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-                  <option value="">Uncategorized</option>
-                  {categories
-                    .filter((c) => !c.isUncategorized)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
+              <ManagerSearchSelect
+                label="Child Category"
+                value={categoryId}
+                onChange={setCategoryId}
+                emptyLabel="Uncategorized"
+                choices={categories
+                  .filter((c) => !c.isUncategorized)
+                  .map((c) => ({ id: c.id, label: c.name }))}
+              />
               <button
                 onClick={() =>
                   perform({
