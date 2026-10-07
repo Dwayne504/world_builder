@@ -21,7 +21,7 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 | --- | --- | --- | --- |
 | W01 | Rolling automatic backups with safe retention | Decision needed | Existing backup service |
 | W02 | Reproducible Windows build and release process | Ready for build verification | Baseline consolidation; W01 before release readiness |
-| W03 | Rich Entry descriptions | Ready | Existing Chapter document editor |
+| W03 | Rich Entry descriptions | Implemented; review and native acceptance pending | [Verification](../milestones/ENTRY_DESCRIPTIONS_VERIFICATION.md) |
 | W04 | Complete Type management | Rename ready; lifecycle decision needed | Existing Category and Type manager |
 | W05 | Rich Text and ordinary Entry Reference Fields | Ready within existing Field semantics | W03 shared document work recommended |
 | W06 | Tags and named creative Status Systems | Scope decision needed | Stable record identities |
@@ -60,4 +60,4 @@ Some original milestone checklists and README wording predate implemented featur
 
 ## Completion tracking
 
-All workloads below are **planned**, not completed. Record completed slice IDs, PR links, verification results and remaining decisions here as sessions finish. Do not guess future merge SHAs or preallocate future database schema versions.
+W03 is implemented on `feature/entry-descriptions`: optional rich descriptions, revision-safe autosave/recovery, migration and Search, with 353 frontend and 244 Rust tests passing. See its verification note for native acceptance still outstanding. Other workloads remain planned unless their own delivered slice records a later status. Do not guess future merge SHAs or preallocate future database schema versions.

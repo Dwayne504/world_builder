@@ -5,6 +5,7 @@
 //! decisions and is not reachable from `react_ui` except through
 //! `application` and `tauri_boundary`.
 
+mod entry_description;
 pub mod error;
 mod fields;
 pub mod lifecycle;

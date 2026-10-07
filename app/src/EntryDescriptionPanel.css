@@ -1,0 +1,24 @@
+.entry-description {
+  margin-block: 1.25rem;
+  min-width: 0;
+}
+
+.entry-description-writing > summary {
+  width: fit-content;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+
+.entry-description .rich-writing {
+  max-width: 85ch;
+}
+
+.entry-description .rich-writing .tiptap {
+  min-height: 9rem;
+  max-height: 65vh;
+  overflow: auto;
+}
+
+.description-preserved-text {
+  white-space: pre-wrap;
+}
