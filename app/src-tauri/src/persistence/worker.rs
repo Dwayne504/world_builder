@@ -57,6 +57,10 @@ use crate::domain::structure::FieldId;
 
 use crate::domain::search::{AliasCommand, EntryAliases, SearchRequest, SearchResults};
 enum Job {
+    Navigation {
+        command: Option<crate::domain::navigation::NavigationCommand>,
+        reply: Reply<crate::domain::navigation::NavigationSnapshot>,
+    },
     ReadEntryDescription {
         entry_id: EntryId,
         reply: Reply<crate::domain::entry_description::EntryDescriptionSnapshot>,
@@ -386,6 +390,13 @@ impl ProjectDbWorker {
         let _ = conn.execute("UPDATE derived_index_state SET dirty=1 WHERE id=1", []);
         for job in jobs {
             match job {
+                Job::Navigation { command, reply } => {
+                    let result = match command {
+                        Some(command) => super::navigation::apply(&mut conn, command),
+                        None => super::navigation::read(&conn),
+                    };
+                    let _ = reply.send(result);
+                }
                 Job::ReadEntryDescription { entry_id, reply } => {
                     let _ = reply.send(super::entry_description::read(&conn, entry_id));
                 }
@@ -677,6 +688,12 @@ impl ProjectDbWorker {
             command,
             reply,
         })
+    }
+    pub fn navigation(
+        &self,
+        command: Option<crate::domain::navigation::NavigationCommand>,
+    ) -> Result<crate::domain::navigation::NavigationSnapshot, PersistenceError> {
+        self.call(|reply| Job::Navigation { command, reply })
     }
     pub fn read_entry_description(
         &self,
@@ -1628,7 +1645,8 @@ mod tests {
         let db_path = dir.path().join("project.sqlite");
         let conn = Connection::open(&db_path).unwrap();
         conn.execute_batch(
-            "DROP TRIGGER field_category_restrict;
+            "DROP TABLE project_pin; DROP TABLE project_recent; DROP TABLE project_navigation_settings;
+             DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
              DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;

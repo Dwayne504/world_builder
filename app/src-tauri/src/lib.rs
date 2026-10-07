@@ -48,6 +48,8 @@ pub fn run() {
             tauri_boundary::read_timeline,
             tauri_boundary::apply_timeline,
             tauri_boundary::read_chapter,
+            tauri_boundary::read_workspace_navigation,
+            tauri_boundary::apply_workspace_navigation,
             tauri_boundary::read_entry_description,
             tauri_boundary::save_entry_description,
             tauri_boundary::story_usage,

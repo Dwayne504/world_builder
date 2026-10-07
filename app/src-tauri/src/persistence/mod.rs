@@ -11,6 +11,7 @@ mod fields;
 pub mod lifecycle;
 pub mod lock;
 pub mod migrations;
+mod navigation;
 pub mod pragmas;
 mod relationships;
 mod search;
