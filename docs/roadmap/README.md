@@ -25,7 +25,7 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 | W04 | Complete Type management | Rename ready; lifecycle decision needed | Existing Category and Type manager |
 | W05 | Rich Text and ordinary Entry Reference Fields | Ready within existing Field semantics | W03 shared document work recommended |
 | W06 | Tags and named creative Status Systems | Scope decision needed | Stable record identities |
-| W07 | Structured Explore and saved views | Core filters ready | W06 only for Tag and Status filters |
+| W07 | Structured Explore and saved views | W07a implemented; saved views planned | W06 only for Tag and Status filters |
 | W08 | Portable images and attachments | UX and limits decision needed | W01; existing package and document services |
 | W09 | Pins, record tabs and restart restoration | Pins ready; tab behavior decision needed | Existing navigation and close guards |
 | W10 | Manuscript export and writing recovery improvements | Export decision needed | Existing Chapter documents; W01 |
@@ -60,4 +60,6 @@ Some original milestone checklists and README wording predate implemented featur
 
 ## Completion tracking
 
-All workloads below are **planned**, not completed. Record completed slice IDs, PR links, verification results and remaining decisions here as sessions finish. Do not guess future merge SHAs or preallocate future database schema versions.
+Workloads are **planned** except where a completed slice is recorded below. Record completed slice IDs, PR links, verification results and remaining decisions as sessions finish. Do not guess future merge SHAs or preallocate future database schema versions.
+
+- **W07a:** implemented on `feature/explore`. [Verification and remaining scope](../milestones/EXPLORE_FOUNDATION_VERIFICATION.md) record composable filters, canonical Spatial matching, bounded results, and session navigation. Saved views and Tags/Statuses are not part of this slice.

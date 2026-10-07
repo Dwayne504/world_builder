@@ -74,6 +74,10 @@ enum Job {
         command: crate::domain::timeline::TimelineCommand,
         reply: Reply<crate::domain::timeline::TimelineSnapshot>,
     },
+    Explore {
+        request: crate::domain::explore::ExploreRequest,
+        reply: Reply<crate::domain::explore::ExploreResults>,
+    },
     Search {
         request: SearchRequest,
         reply: Reply<SearchResults>,
@@ -384,6 +388,9 @@ impl ProjectDbWorker {
                 } => {
                     let _ = reply.send(super::lifecycle::apply(&mut conn, expected, command));
                 }
+                Job::Explore { request, reply } => {
+                    let _ = reply.send(super::explore::query(&conn, request));
+                }
                 Job::Search { request, reply } => {
                     let _ = reply.send(super::search::query(&conn, request));
                 }
@@ -606,6 +613,13 @@ impl ProjectDbWorker {
         reply_rx
             .recv()
             .map_err(|_| PersistenceError::WorkerShutDown)?
+    }
+
+    pub fn explore_project(
+        &self,
+        request: crate::domain::explore::ExploreRequest,
+    ) -> Result<crate::domain::explore::ExploreResults, PersistenceError> {
+        self.call(|reply| Job::Explore { request, reply })
     }
 
     pub fn search_project(
