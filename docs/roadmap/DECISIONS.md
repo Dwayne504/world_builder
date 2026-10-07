@@ -30,7 +30,9 @@ W09a pins can use explicit author-controlled ordering. Before tabs and restart r
 
 ## D07 Export and writing history
 
-Before W10a, confirm the first export format and inclusion rules. Recommendation: UTF-8 Markdown of selected Chapters' manuscripts in reading order, excluding Plan, Notes and Summary by default, with an explicit preview of the chosen scope. DOCX and EPUB follow separately. Writing revision history needs its own retention, restore and conflict policy; existing emergency draft recovery must not be presented as a full version-history system.
+Approved by the author on 7 October 2026: first export is UTF-8 Markdown of selected Chapters' manuscripts in reading order, excluding Plan, Notes and Summary. Show the chosen scope before export. Word export follows later; EPUB remains deferred. Export does not rewrite manuscript content or serve as a Project backup.
+
+Writing revision history still needs its own retention, restore and conflict policy; existing emergency draft recovery must not be presented as a full version-history system.
 
 ## D08 Story hierarchy
 

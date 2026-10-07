@@ -1,0 +1,54 @@
+.manuscript-export-dialog {
+  width: min(62rem, calc(100vw - 2rem));
+  max-width: 62rem;
+}
+.export-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+.export-filters > label {
+  flex: 1;
+  min-width: 12rem;
+}
+.export-chapter-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0;
+}
+.export-chapter-list label {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.export-chapter-list input {
+  width: auto;
+  margin: 0;
+  flex: none;
+}
+.export-chapter-list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.export-chapter-list small,
+.export-preview-order small {
+  display: block;
+  color: var(--muted);
+  font-weight: normal;
+}
+.export-selection {
+  margin: 1rem 0;
+}
+.manuscript-export-preview textarea {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  white-space: pre;
+  overflow: auto;
+}
+.export-destination {
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+}

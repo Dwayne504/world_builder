@@ -28,7 +28,7 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 | W07 | Structured Explore and saved views | Core filters ready | W06 only for Tag and Status filters |
 | W08 | Portable images and attachments | UX and limits decision needed | W01; existing package and document services |
 | W09 | Pins, record tabs and restart restoration | Pins ready; tab behavior decision needed | Existing navigation and close guards |
-| W10 | Manuscript export and writing recovery improvements | Export decision needed | Existing Chapter documents; W01 |
+| W10 | Manuscript export and writing recovery improvements | W10a Markdown implemented; Word/history remain later | Existing Chapter documents; W01 |
 | W11 | Books, Parts and Scenes | Design session first | Existing Chapters; W10 independent |
 | W12 | More expressive Timeline dates and calendars | Design session first | Approved Timeline foundation |
 | W13 | Historical relationships, locations and age | Design session first | W12 time model |
@@ -60,4 +60,4 @@ Some original milestone checklists and README wording predate implemented featur
 
 ## Completion tracking
 
-All workloads below are **planned**, not completed. Record completed slice IDs, PR links, verification results and remaining decisions here as sessions finish. Do not guess future merge SHAs or preallocate future database schema versions.
+W10a is implemented on `feature/manuscript-export` under the author's D07 approval. See [Markdown export verification](../milestones/MANUSCRIPT_EXPORT_VERIFICATION.md). This delivers selected manuscript export, not Word/EPUB or writing history. Other delivered slices are recorded in their individual PRs and verification notes; a completed slice does not complete the whole workload.

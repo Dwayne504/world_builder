@@ -6,6 +6,8 @@
 //! to talk to SQLite or the package filesystem directly.
 
 pub mod error;
+mod export_publication;
+pub mod manuscript_export;
 pub mod service;
 pub mod state;
 

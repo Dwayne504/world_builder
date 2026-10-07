@@ -12,6 +12,7 @@ import { readChapter } from "./api";
 import type { ChapterSnapshot } from "./storyTypes";
 import type { WritingPosition } from "./RichTextEditor";
 import { WorkspaceFrame } from "./WorkspaceFrame";
+import { ManuscriptExportDialog } from "./ManuscriptExportDialog";
 import { RelationshipsBrowser } from "./RelationshipsBrowser";
 import { ManagerSearchSelect } from "./ManagerSearchSelect";
 import type { RelationshipView } from "./workspaceHistory";
@@ -2763,6 +2764,15 @@ function ProjectScreen({
   project: ProjectSummary;
   onClosed: (notice?: string) => void;
 }) {
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportOperationRef = useRef<Promise<void> | null>(null);
+  const exportCloseIntentRef = useRef<CloseIntent | null>(null);
+  const receiveExportOperation = useCallback((operation: Promise<void>) => {
+    exportOperationRef.current = operation;
+    void operation.finally(() => {
+      if (exportOperationRef.current === operation) exportOperationRef.current = null;
+    });
+  }, []);
   const [projectDialog, setProjectDialog] = useState<"settings" | "backup" | "categories" | null>(
     null,
   );
@@ -2820,6 +2830,34 @@ function ProjectScreen({
     entryControllerRef.current = controller;
     setEntrySaveState(controller?.state ?? "saved");
   }, []);
+
+  async function flushForExport(): Promise<boolean> {
+    const entry = entryControllerRef.current;
+    const manager = managerControllerRef.current;
+    if (
+      [rename.saveState, entry?.state, manager?.state, mutations.state].includes("failed") ||
+      (entry?.state === "dirty" && entry.canSubmit === false) ||
+      (manager?.state === "dirty" && manager.canSubmit === false)
+    )
+      return false;
+    setBusy(true);
+    try {
+      const [name, writing, structural, shared] = await Promise.all([
+        renameSubmit(),
+        entry?.submit() ?? Promise.resolve({ kind: "no-op" } as SubmitOutcome),
+        waitForStructuralMutation(),
+        manager?.submit() ?? Promise.resolve({ kind: "no-op" } as SubmitOutcome),
+      ]);
+      return (
+        structural &&
+        [name, writing, shared].every(
+          (outcome) => outcome.kind === "committed" || outcome.kind === "no-op",
+        )
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     let current = true;
@@ -2980,6 +3018,18 @@ function ProjectScreen({
 
   const requestClose = useCallback(
     (intent: CloseIntent): void => {
+      if (exportOperationRef.current) {
+        if (!exportCloseIntentRef.current) {
+          exportCloseIntentRef.current = intent;
+          void exportOperationRef.current.then(() => {
+            const queued = exportCloseIntentRef.current;
+            exportCloseIntentRef.current = null;
+            if (queued) requestCloseRef.current(queued);
+          });
+        } else if (intent === "native-window") exportCloseIntentRef.current = intent;
+        return;
+      }
+      setExportOpen(false);
       setProjectDialog(null);
       setCloseError(null);
       if (isStructuralMutationPending()) {
@@ -3073,6 +3123,12 @@ function ProjectScreen({
     busy || entrySaveState !== "saved" || mutationState === "saving";
   useDesktopCommands("project", {
     file: [
+      {
+        id: "manuscript-export",
+        label: "Export manuscript…",
+        disabled: busy || !isTauriWindow(),
+        action: () => setExportOpen(true),
+      },
       {
         id: "backups",
         label: "Backups…",
@@ -3169,6 +3225,14 @@ function ProjectScreen({
           </span>
         </div>
       </header>
+      {exportOpen && (
+        <ManuscriptExportDialog
+          projectId={project.projectId}
+          beforePreview={flushForExport}
+          onOperation={receiveExportOperation}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
       {rename.recentProjectsWarning && (
         <p role="alert">
           The Recent Projects shortcut could not be updated. This does not affect saving your
