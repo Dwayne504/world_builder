@@ -25,6 +25,16 @@ This command intentionally opens the desktop application. Test with a newly crea
 
 ## Native acceptance still required
 
+### Recorded build verification — 7 October 2026
+
+The full script passed on Windows x64/MSVC at source commit `dd158d027cccb7bf8e9b8d1d2d3878713bc03841`, using Node 24.19.0 and Rust 1.98.1. It passed all 332 frontend and 232 Rust tests (three standalone subprocess helpers intentionally ignored), typecheck, lint, formatting, strict all-target Clippy, check, frontend production build and the native release build. The executable SHA-256 was `59f2d982e86ba36815f9e9f66640dcf89002737de0314096f7bbdb2924b4b7b0`. The later documentation commit does not change that tested executable's source.
+
+Tauri rewrites Cargo.toml with equivalent line endings on this Windows checkout; the script compares Git-normalized content, including staged changes, and separately rejects untracked files. It does not reset or modify source to make verification pass. A first run correctly stopped before issuing a report because its status-based check treated those line endings as a source change; the corrected complete run passed.
+
+The existing production bundle-size advisory and macOS bundle-identifier advisory remain. Dependency advisories present in this baseline are handled separately by PR #31; this build verification does not claim a clean dependency audit. GitHub secret scanning/push protection is enabled with zero open alerts at inspection; CodeQL results and a local CodeQL runner were unavailable. No executable, machine-specific path, supplied Project or backup is committed.
+
+### Manual checklist
+
 - Create, save, close and reopen a disposable Project; verify native folder selection and window-close save guards.
 - Exercise both themes, keyboard navigation and Windows display scaling. Component tests do not prove WebView2 behavior.
 - Use disposable older-version fixtures to verify upgrade, backup and Restore as Copy. Confirm a newer-version fixture is refused unchanged.
