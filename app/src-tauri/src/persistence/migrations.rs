@@ -226,6 +226,7 @@ mod tests {
     #[test]
     fn rich_fields_upgrade_preserves_populated_values_documents_and_navigation_and_rolls_back() {
         let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", false).unwrap();
         conn.pragma_update(None, "legacy_alter_table", true)
             .unwrap();
         apply_pending_chain(

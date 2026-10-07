@@ -457,6 +457,16 @@ fn delete_is_local_backed_up_and_rich_merges_are_blocked() {
         &f.dir.path().join("backups"),
     )
     .unwrap();
+    let copy = ProjectService::restore_backup_as_copy(
+        &f.state,
+        std::path::Path::new(&outcome.backup_path),
+        &f.dir.path().join("deleted-restore"),
+        None,
+    )
+    .unwrap();
+    let restored = ProjectService::read_fields(&f.state, copy.project_id, f.entry.id).unwrap();
+    assert!(restored.fields.iter().any(|field| field.definition.id==id && matches!(&field.value,Some(FieldValue::RichText(value)) if value.plain_text.contains("Keep in backup"))));
+    ProjectService::close_project(&f.state, copy.project_id).unwrap();
     assert_eq!(outcome.snapshot.fields.len(), 1);
     assert!(f.rich(other).plain_text.contains("Other writing"));
     assert_eq!(
@@ -503,4 +513,83 @@ fn document_ownership_and_scalar_kinds_remain_enforced() {
             .value,
         Some(FieldValue::Text("Existing Description".into()))
     );
+}
+
+#[test]
+fn concurrent_writers_reject_one_stale_edit_and_inactive_or_wrong_project_writes_fail() {
+    use worldcrafter_lib::domain::{lifecycle::StructureCommand, story::WorkspaceState};
+    let f = Fixture::new();
+    let id = f.create(FieldKind::RichText, None);
+    f.write(id, prose("Original"));
+    let global = f.read().global_revision;
+    let document = f.rich(id).revision;
+    let results = std::thread::scope(|scope| {
+        let threads = ["One", "Two"].map(|text| {
+            let fixture = &f;
+            scope.spawn(move || {
+                ProjectService::apply_fields(
+                    &fixture.state,
+                    fixture.project,
+                    fixture.entry.id,
+                    global,
+                    FieldCommand::SetValues {
+                        edits: vec![FieldEdit {
+                            field_id: id,
+                            value: Some(rich(prose(text), document)),
+                        }],
+                    },
+                )
+            })
+        });
+        threads.map(|thread| thread.join().unwrap())
+    });
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .find_map(|result| result.as_ref().err())
+            .unwrap()
+            .kind(),
+        "revision_conflict"
+    );
+    let before = f.rich(id);
+    let other = Fixture::new();
+    assert!(ProjectService::apply_fields(
+        &other.state,
+        other.project,
+        other.entry.id,
+        other.read().global_revision,
+        FieldCommand::SetValues {
+            edits: vec![FieldEdit {
+                field_id: id,
+                value: Some(rich(prose("Wrong Project"), before.revision))
+            }]
+        }
+    )
+    .is_err());
+    ProjectService::apply_structure(
+        &f.state,
+        f.project,
+        f.read().global_revision,
+        StructureCommand::SetEntryState {
+            id: f.entry.id,
+            state: WorkspaceState::Archived,
+        },
+        None,
+    )
+    .unwrap();
+    assert!(ProjectService::apply_fields(
+        &f.state,
+        f.project,
+        f.entry.id,
+        f.read().global_revision,
+        FieldCommand::SetValues {
+            edits: vec![FieldEdit {
+                field_id: id,
+                value: Some(rich(prose("Inactive write"), before.revision))
+            }]
+        }
+    )
+    .is_err());
+    assert_eq!(f.rich(id), before);
 }
