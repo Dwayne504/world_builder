@@ -1646,7 +1646,8 @@ mod tests {
         let db_path = dir.path().join("project.sqlite");
         let conn = Connection::open(&db_path).unwrap();
         conn.execute_batch(
-            "DROP TABLE project_pin; DROP TABLE project_recent; DROP TABLE project_navigation_settings;
+            "DROP TRIGGER entry_reference_keep_target; DROP TABLE entry_reference_value;
+             DROP TABLE project_pin; DROP TABLE project_recent; DROP TABLE project_navigation_settings;
              DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;

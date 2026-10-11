@@ -6,11 +6,14 @@ import type { SubmitOutcome } from "./useProjectRename";
 export type FieldDraft = string | string[];
 export function valueDraft(value: FieldValue | null): FieldDraft {
   if (!value) return "";
+  if (value.kind === "entry_references") return JSON.stringify(value.value);
   if (value.kind === "rich_text") return value.value.plainText;
   return value.kind === "choices" ? [...value.value] : String(value.value);
 }
 export function parseFieldDraft(field: EntryField, draft: FieldDraft): FieldValue | null {
   switch (field.definition.kind) {
+    case "entry_reference":
+      return draft === "" ? null : { kind: "entry_references", value: JSON.parse(String(draft)) };
     case "rich_text":
       if (draft === "") return null;
       throw new Error("Rich Text Fields use the writing editor.");

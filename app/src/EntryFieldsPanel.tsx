@@ -1,4 +1,5 @@
 import { RichFieldPanel } from "./RichFieldPanel";
+import { EntryReferenceValue } from "./EntryReferenceValue";
 import { FieldManagerTables } from "./FieldManagerTables";
 import { DeleteEntryFieldDialog } from "./DeleteEntryFieldDialog";
 import { FieldSuggestions } from "./FieldSuggestions";
@@ -27,6 +28,7 @@ export interface FieldsController {
   waitForPending?: () => Promise<SubmitOutcome>;
 }
 const kinds: Record<FieldKind, string> = {
+  entry_reference: "Entry reference",
   rich_text: "Rich Text",
   short_text: "Short Text",
   number: "Number (optional unit)",
@@ -512,6 +514,20 @@ export function EntryFieldsPanel({
                   onDirty={updateProjectionDirty}
                   onNavigate={onNavigate}
                 />
+              ) : field.definition.kind === "entry_reference" ? (
+                <EntryReferenceValue
+                  projectId={projectId}
+                  field={field}
+                  draft={String(fields.drafts[field.definition.id] ?? valueDraft(field.value))}
+                  disabled={
+                    disabled ||
+                    formDirty ||
+                    fields.configurationPending ||
+                    fields.state === "saving"
+                  }
+                  onChange={(draft) => fields.change(field.definition.id, draft)}
+                  onNavigate={onNavigate}
+                />
               ) : field.definition.kind === "rich_text" ? (
                 <RichFieldPanel
                   projectId={projectId}
@@ -534,6 +550,7 @@ export function EntryFieldsPanel({
               )}
               {field.definition.kind !== "relationship" &&
                 field.definition.kind !== "rich_text" &&
+                field.definition.kind !== "entry_reference" &&
                 (field.value !== null || fields.drafts[field.definition.id] !== undefined) && (
                   <button
                     className="quiet-button clear-field"
@@ -628,6 +645,11 @@ export function EntryFieldsPanel({
               value={projection}
               onChange={setProjection}
             />
+          ) : newKind === "entry_reference" ? (
+            <p className="field-note">
+              Optional links such as “See also”. Choose Entries after creating this Field. For
+              ownership or other world facts, use Relationships.
+            </p>
           ) : newKind === "rich_text" ? (
             <p className="muted">
               Write in this Field after creating it. Empty defaults stay empty until you start

@@ -69,7 +69,14 @@ export interface Preferences {
 }
 
 export type FieldKind =
-  "short_text" | "rich_text" | "number" | "boolean" | "choice" | "multi_choice" | "relationship";
+  | "short_text"
+  | "rich_text"
+  | "entry_reference"
+  | "number"
+  | "boolean"
+  | "choice"
+  | "multi_choice"
+  | "relationship";
 export interface FieldProjection {
   relationshipDefinitionId: string;
   perspective: "source" | "target";
@@ -106,11 +113,22 @@ export interface RichFieldValue {
   originalJson: string | null;
 }
 export type FieldValue =
+  | { kind: "entry_references"; value: ReferenceSelection }
   | { kind: "rich_text"; value: RichFieldValue }
   | { kind: "text"; value: string }
   | { kind: "number"; value: number }
   | { kind: "boolean"; value: boolean }
   | { kind: "choices"; value: string[] };
+export interface ReferenceSelection {
+  expectedIds: string[];
+  items: ({ kind: "existing"; referenceId: string } | { kind: "entry"; entryId: string })[];
+}
+export interface ReferenceTarget {
+  id: string;
+  targetId: string | null;
+  label: string;
+  workspaceState: Entry["workspaceState"] | null;
+}
 export interface EntryField {
   definition: FieldDefinition;
   available: boolean;
@@ -118,6 +136,7 @@ export interface EntryField {
   defaultSources?: FieldDefinition["bindings"];
   value: FieldValue | null;
   projectedRelationships?: Relationship[];
+  referenceTargets?: ReferenceTarget[];
 }
 export interface EntryFields {
   globalRevision: number;

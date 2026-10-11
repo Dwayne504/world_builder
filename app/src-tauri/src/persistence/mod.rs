@@ -6,6 +6,7 @@
 //! `application` and `tauri_boundary`.
 
 mod entry_description;
+mod entry_references;
 pub mod error;
 mod fields;
 pub mod lifecycle;

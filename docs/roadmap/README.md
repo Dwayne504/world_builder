@@ -23,7 +23,7 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 | W02 | Reproducible Windows build and release process | Ready for build verification | Baseline consolidation; W01 before release readiness |
 | W03 | Rich Entry descriptions | Implemented; review and native acceptance pending | [Verification](../milestones/ENTRY_DESCRIPTIONS_VERIFICATION.md) |
 | W04 | Complete Type management | Rename and reviewed retirement implemented; review/native acceptance pending | [Rename](../milestones/TYPE_RENAMING_VERIFICATION.md), [retirement](../milestones/TYPE_RETIREMENT_VERIFICATION.md) |
-| W05 | Rich Text and ordinary Entry Reference Fields | Rich Text implemented; Entry References remain a separate slice | [Rich Text verification](../milestones/RICH_TEXT_FIELDS_VERIFICATION.md) |
+| W05 | Rich Text and ordinary Entry Reference Fields | Both foundation slices implemented; review/native acceptance pending | [Rich Text](../milestones/RICH_TEXT_FIELDS_VERIFICATION.md), [Entry References](../milestones/ENTRY_REFERENCE_FIELDS_VERIFICATION.md) |
 | W06 | Tags and named creative Status Systems | Scope decision needed | Stable record identities |
 | W07 | Structured Explore and saved views | Core filters ready | W06 only for Tag and Status filters |
 | W08 | Portable images and attachments | UX and limits decision needed | W01; existing package and document services |

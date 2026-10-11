@@ -329,6 +329,8 @@ fn schema_twelve_upgrade_is_atomic_and_preserves_content_and_recovery() {
     let f = Fixture::new();
     ProjectService::close_project(&f.state, f.project).unwrap();
     let db = f.db();
+    db.execute_batch(include_str!("fixtures/remove_entry_references.sql"))
+        .unwrap();
     db.execute_batch(include_str!("fixtures/remove_type_retirement.sql"))
         .unwrap();
     db.execute_batch("DROP TABLE project_pin; DROP TABLE project_recent; DROP TABLE project_navigation_settings; PRAGMA user_version=12; UPDATE project_meta SET schema_version=12; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();

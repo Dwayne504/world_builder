@@ -726,6 +726,8 @@ fn schema_ten_upgrade_preserves_references_and_recovers_after_injected_failure()
     let root = std::path::Path::new(&project.package_path);
     let db = Connection::open(root.join("data/project.sqlite")).unwrap();
     // Construct a genuine schema-10 registry, preserving the populated reference graph.
+    db.execute_batch(include_str!("fixtures/remove_entry_references.sql"))
+        .unwrap();
     db.execute_batch(include_str!("fixtures/remove_type_retirement.sql"))
         .unwrap();
     db.execute_batch("PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;

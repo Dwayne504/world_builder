@@ -630,6 +630,8 @@ fn schema_eleven_migration_preserves_chapters_and_rolls_back_atomically() {
     let start = old.find("CREATE TABLE rich_document (").unwrap();
     let end = old.find("CREATE TABLE story_role (").unwrap();
     db.execute_batch(&old[start..end]).unwrap();
+    db.execute_batch(include_str!("fixtures/remove_entry_references.sql"))
+        .unwrap();
     db.execute_batch(include_str!("fixtures/remove_type_retirement.sql"))
         .unwrap();
     db.execute_batch("INSERT INTO rich_document SELECT * FROM rich_document_new; DROP TABLE rich_document_new; PRAGMA user_version=11; UPDATE project_meta SET schema_version=11; CREATE TRIGGER fail_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
