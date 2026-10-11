@@ -19,6 +19,7 @@ pub mod snapshot;
 mod spatial;
 mod story;
 mod timeline;
+mod type_retirement;
 pub mod worker;
 
 pub use error::PersistenceError;

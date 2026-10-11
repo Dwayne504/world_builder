@@ -45,6 +45,7 @@ export interface TypeDef {
   categoryId: string;
   parentTypeId: string | null;
   name: string;
+  retiredAt: string | null;
   revision: number;
   globalRevision: number;
 }
@@ -262,6 +263,7 @@ export interface CategoryDeletePreview {
   defaultCount: number;
 }
 export type StructureCommand =
+  | { kind: "set_type_retired"; id: string; retired: boolean }
   | { kind: "rename_type"; id: string; name: string }
   | { kind: "rename_category"; id: string; name: string }
   | { kind: "delete_category"; id: string; destinationId: string; removeTypes: boolean }
@@ -269,4 +271,28 @@ export type StructureCommand =
 export interface StructureOutcome {
   globalRevision: number;
   backupPath: string | null;
+}
+
+export interface TypeRetirementPreview {
+  globalRevision: number;
+  typeId: string;
+  categoryId: string;
+  name: string;
+  retiredAt: string | null;
+  assignedEntries: {
+    id: string;
+    label: string;
+    workspaceState: string;
+    typeId: string;
+    typeName: string;
+  }[];
+  descendantTypes: {
+    id: string;
+    name: string;
+    parentTypeId: string | null;
+    retiredAt: string | null;
+  }[];
+  directEntryCount: number;
+  inheritedEntryCount: number;
+  defaultFields: { id: string; name: string; kind: string }[];
 }

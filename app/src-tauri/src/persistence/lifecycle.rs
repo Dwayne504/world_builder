@@ -58,6 +58,9 @@ pub(super) fn apply(
     }
     let now = chrono::Utc::now().to_rfc3339();
     match command {
+        StructureCommand::SetTypeRetired { id, retired } => {
+            super::type_retirement::set_retired(&tx, id, retired, &now)?;
+        }
         StructureCommand::RenameType { id, name } => {
             let name = require_definition_name(&name).map_err(invalid)?;
             if tx.execute(

@@ -418,7 +418,7 @@ mod tests {
         let type_a = crate::domain::TypeId::new().to_string();
         let type_b = crate::domain::TypeId::new().to_string();
         conn.execute(
-            "INSERT INTO type_def VALUES (?1, ?3, NULL, 'A1', ?5, ?5, 1),
+            "INSERT INTO type_def(id,category_id,parent_type_id,name,created_at,updated_at,revision) VALUES (?1, ?3, NULL, 'A1', ?5, ?5, 1),
                                          (?2, ?3, ?1, 'A2', ?5, ?5, 1)",
             rusqlite::params![type_a, type_b, category_a, category_b, now],
         )
