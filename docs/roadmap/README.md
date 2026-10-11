@@ -11,7 +11,7 @@ Prepared on 7 October 2026 against `main` at `7da49ea`, the merge of PR #29 inco
 3. Check its [open decisions](DECISIONS.md). Proposed defaults are not approved behavior.
 4. Implement and verify that slice, open an unmerged PR, and update its status here.
 
-The first recommended session is **W01a: automatic backup policy and failure model**. Once that policy is approved, implement W01b. If the author is unavailable for a decision, **W03a: rich Entry descriptions** is the first substantial implementation slice that can proceed under the existing design.
+The ready foundation slices have now been implemented in separate unmerged PRs. Review the [October delivery record](SESSION_2026_10.md), integrate in dependency order after approval, then perform native Windows acceptance. Choose only the next necessary product decision from the register before starting a gated workload.
 
 ## Recommended order
 
@@ -19,22 +19,22 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 
 | Workload | Outcome | First slice | Dependencies |
 | --- | --- | --- | --- |
-| W01 | Rolling automatic backups with safe retention | Decision needed | Existing backup service |
-| W02 | Reproducible Windows build and release process | Ready for build verification | Baseline consolidation; W01 before release readiness |
-| W03 | Rich Entry descriptions | Ready | Existing Chapter document editor |
-| W04 | Complete Type management | Rename ready; lifecycle decision needed | Existing Category and Type manager |
-| W05 | Rich Text and ordinary Entry Reference Fields | Ready within existing Field semantics | W03 shared document work recommended |
+| W01 | Rolling automatic backups with safe retention | Implemented in #36; review/native acceptance pending | Existing backup service |
+| W02 | Reproducible Windows build and release process | Build proof in #34; distribution still needs D02 | Baseline consolidation; W01 before release readiness |
+| W03 | Rich Entry descriptions | Implemented in #33; review/native acceptance pending | Existing Chapter document editor |
+| W04 | Complete Type management | Rename #32 and reviewed retirement #40 implemented | Existing Category and Type manager |
+| W05 | Rich Text and ordinary Entry Reference Fields | Foundation kinds implemented in #39 and #41 | See delivery record for stacked dependencies and deferred constraints |
 | W06 | Tags and named creative Status Systems | Scope decision needed | Stable record identities |
-| W07 | Structured Explore and saved views | Core filters ready | W06 only for Tag and Status filters |
+| W07 | Structured Explore and saved views | Core filters implemented in #35; later operators/views remain | W06 for Tag and Status filters |
 | W08 | Portable images and attachments | UX and limits decision needed | W01; existing package and document services |
-| W09 | Pins, record tabs and restart restoration | Pins ready; tab behavior decision needed | Existing navigation and close guards |
+| W09 | Pins, record tabs and restart restoration | Pins/recents implemented in #37; tabs/restart need D06 | Existing navigation and close guards |
 | W10 | Manuscript export and writing recovery improvements | W10a Markdown implemented; Word/history remain later | Existing Chapter documents; W01 |
 | W11 | Books, Parts and Scenes | Design session first | Existing Chapters; W10 independent |
 | W12 | More expressive Timeline dates and calendars | Design session first | Approved Timeline foundation |
 | W13 | Historical relationships, locations and age | Design session first | W12 time model |
 | W14 | Desktop release acceptance and performance | Ready to establish baseline | Repeat at release candidate after relevant workloads |
 
-This is a priority order, not a requirement to block all authoring work behind release administration. W02 build verification, W03, W04a and W07a can proceed independently of the unresolved backup policy. Do not combine them into one large PR.
+This is a priority order, not a requirement to block all authoring work behind release administration. The PRs above remain reviewable slices; a branch's passing tests do not prove a future combined build.
 
 ## What already exists
 
@@ -59,5 +59,10 @@ Maps and map pins, a draggable relationship graph, storyboards, multiparty relat
 Some original milestone checklists and README wording predate implemented features. Use the approved feature notes and current code to determine what is complete. Do not treat an old exclusion as evidence that an implemented, separately approved feature should be removed. Likewise, do not treat a broad long-term concept as a fully specified implementation contract.
 
 ## Completion tracking
+
+See the [October delivery record](SESSION_2026_10.md) for the implemented slices,
+PR dependencies, exact changed files, verification and native acceptance limits.
+The original ordering above is a planning baseline; use that record and the
+individual PRs to identify work already implemented.
 
 W10a is implemented on `feature/manuscript-export` under the author's D07 approval. See [Markdown export verification](../milestones/MANUSCRIPT_EXPORT_VERIFICATION.md). This delivers selected manuscript export, not Word/EPUB or writing history. Other delivered slices are recorded in their individual PRs and verification notes; a completed slice does not complete the whole workload.

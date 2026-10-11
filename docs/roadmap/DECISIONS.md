@@ -1,12 +1,12 @@
 # Product decisions for upcoming work
 
-These are open choices, not approved defaults. Resolve only the decisions needed for the selected workload. Record the author's answer, date and affected packet here; avoid asking for the entire roadmap at once.
+These are decision records and open choices. Only choices explicitly marked approved are implementation defaults. Resolve the decisions needed for the selected workload; avoid asking for the entire roadmap at once.
 
 ## D01 Automatic backup policy
 
-Required before W01b. The concept requires rolling automatic backups but does not settle a concrete cadence or retention count for the current implementation.
+Approved by the author on 7 October 2026: enabled by default; back up changed Projects every 15 minutes while open; keep the newest 20 automatic snapshots per Project; never automatically remove manual or safety backups; show failures without interrupting typing. Autosave remains separate.
 
-Proposal for review: back up changed Projects after a configurable interval while open, coalesce missed intervals after sleep, and bound retained automatic snapshots. Preserve manual and operation-specific safety snapshots unless the author explicitly removes them. Decide the initial interval/count, whether automatic backups start enabled, whether to offer a final backup on close, and how storage exhaustion is presented. Pruning may touch only positively identified automatic snapshots for that Project, after a new snapshot validates successfully. A folder name or file age alone must never confer permission to delete.
+Coalesce missed intervals after sleep rather than creating a burst of identical snapshots. Pruning may touch only positively identified automatic snapshots for that Project, after a new snapshot validates successfully. A folder name or file age alone never confers permission to delete. A forced backup on close, adjustable cadence and adjustable retention are outside this first approved slice.
 
 ## D02 Windows release distribution
 
@@ -14,7 +14,7 @@ W02a may establish a reproducible local installer build without this decision. B
 
 ## D03 Type lifecycle
 
-W04a renaming is already supported by the identity rules. Before retirement/removal, settle the visible behavior for existing Entries, child Types, inherited defaults and restoration. Recommendation: retirement prevents new assignment while preserving existing assignments and authored values, with a reviewed impact list. Permanent definition deletion and automatic child reparenting remain outside that first slice. Confirm how a retired parent contributes defaults before implementation; do not silently drop inherited structure.
+Approved by the author on 7 October 2026: retirement prevents new assignments while existing Entries and child Types keep their assignments and inherited Fields. Show a reviewed impact list, allow restoration, and preserve all authored values. W04a renaming remains governed by stable identity. Permanent definition deletion and automatic child reparenting remain outside this slice.
 
 ## D04 Tag and Status scope
 
