@@ -10,6 +10,7 @@ pub mod explore;
 pub mod fields;
 pub mod ids;
 pub mod lifecycle;
+pub mod manuscript_export;
 pub mod navigation;
 pub mod relationships;
 pub mod search;

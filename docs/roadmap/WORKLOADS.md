@@ -147,7 +147,7 @@ Each packet defines a user outcome, bounded slices, code starting points and acc
 
 **Deferred:** publishing platforms, print layout, alternate story variants, passage links and EPUB until separately selected. Do not make ordinary export depend on finishing W11 hierarchy.
 
-**Session selection:** D07, then W10a. Branch suggestion: `feature/manuscript-export`.
+**Status:** D07's Markdown export scope is approved and W10a is implemented on `feature/manuscript-export`. See [verification](../milestones/MANUSCRIPT_EXPORT_VERIFICATION.md). Word/EPUB and writing-history policy remain separate work.
 
 ## W11 Story hierarchy and passage links
 

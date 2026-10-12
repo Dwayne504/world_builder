@@ -9,9 +9,9 @@ Prepared on 7 October 2026 against `main` at `7da49ea`, the merge of PR #29 inco
 1. Read the [session instructions](SESSION_START.md).
 2. Choose one slice from the [workload packets](WORKLOADS.md).
 3. Check its [open decisions](DECISIONS.md). Proposed defaults are not approved behavior.
-4. Implement and verify that slice, open an unmerged PR, and update its status here.
+4. Implement and verify that slice, open a PR, and update its status here. Follow the author's current merge authorization in the session instructions.
 
-The first recommended session is **W01a: automatic backup policy and failure model**. Once that policy is approved, implement W01b. If the author is unavailable for a decision, **W03a: rich Entry descriptions** is the first substantial implementation slice that can proceed under the existing design.
+The ready foundation slices have been consolidated in PRs #31–41 under the author's 12 October merge authorization. PR #38 is the final integration step. Review the [October delivery record](SESSION_2026_10.md), fetch current `main` after that PR lands, then perform W14a native Windows acceptance. Choose only the next necessary product decision from the register before starting a gated workload.
 
 ## Recommended order
 
@@ -19,26 +19,26 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 
 | Workload | Outcome | First slice | Dependencies |
 | --- | --- | --- | --- |
-| W01 | Rolling automatic backups with safe retention | W01a–c implemented; native acceptance remains | Existing backup service |
-| W02 | Reproducible Windows build and release process | Build procedure verified; native acceptance pending | [Verification](../milestones/WINDOWS_BUILD_VERIFICATION.md); W01 before release readiness |
-| W03 | Rich Entry descriptions | Implemented; review and native acceptance pending | [Verification](../milestones/ENTRY_DESCRIPTIONS_VERIFICATION.md) |
-| W04 | Complete Type management | Rename and reviewed retirement implemented; review/native acceptance pending | [Rename](../milestones/TYPE_RENAMING_VERIFICATION.md), [retirement](../milestones/TYPE_RETIREMENT_VERIFICATION.md) |
-| W05 | Rich Text and ordinary Entry Reference Fields | Both foundation slices implemented; review/native acceptance pending | [Rich Text](../milestones/RICH_TEXT_FIELDS_VERIFICATION.md), [Entry References](../milestones/ENTRY_REFERENCE_FIELDS_VERIFICATION.md) |
+| W01 | Rolling automatic backups with safe retention | Merged in #36; native acceptance pending | Existing backup service |
+| W02 | Reproducible Windows build and release process | Build proof in #34; distribution still needs D02 | Baseline consolidation; W01 before release readiness |
+| W03 | Rich Entry descriptions | Merged in #33; native acceptance pending | Existing Chapter document editor |
+| W04 | Complete Type management | Rename #32 and reviewed retirement #40 implemented | Existing Category and Type manager |
+| W05 | Rich Text and ordinary Entry Reference Fields | Foundation kinds merged in #39 and #41 | See delivery record for deferred constraints |
 | W06 | Tags and named creative Status Systems | Scope decision needed | Stable record identities |
-| W07 | Structured Explore and saved views | W07a implemented; saved views planned | W06 only for Tag and Status filters |
+| W07 | Structured Explore and saved views | Core filters implemented in #35; later operators/views remain | W06 for Tag and Status filters |
 | W08 | Portable images and attachments | UX and limits decision needed | W01; existing package and document services |
-| W09 | Pins, record tabs and restart restoration | W09a implemented; tabs/restart still need D06 | Existing navigation and close guards |
-| W10 | Manuscript export and writing recovery improvements | Export decision needed | Existing Chapter documents; W01 |
+| W09 | Pins, record tabs and restart restoration | Pins/recents implemented in #37; tabs/restart need D06 | Existing navigation and close guards |
+| W10 | Manuscript export and writing recovery improvements | W10a Markdown implemented; Word/history remain later | Existing Chapter documents; W01 |
 | W11 | Books, Parts and Scenes | Design session first | Existing Chapters; W10 independent |
 | W12 | More expressive Timeline dates and calendars | Design session first | Approved Timeline foundation |
 | W13 | Historical relationships, locations and age | Design session first | W12 time model |
 | W14 | Desktop release acceptance and performance | Ready to establish baseline | Repeat at release candidate after relevant workloads |
 
-This is a priority order, not a requirement to block all authoring work behind release administration. W02 build verification, W03, W04a and W07a can proceed independently of the unresolved backup policy. Do not combine them into one large PR.
+This is a priority order, not a requirement to block all authoring work behind release administration. The combined code passed Linux CI and the Windows build workflow: 449 frontend tests, 316 Rust tests and a native executable build. Interactive desktop acceptance remains outstanding; build success does not establish UI, DPI, installer or upgrade behavior.
 
 ## What already exists
 
-The current implementation includes Project creation and recovery, directory preferences, manual and operation-specific safety backups, Categories, Types, Entries, unit-bearing Number Fields, relationship projections, Spatial containment, search and aliases, Chapter writing and Story Roles, and a dated Timeline foundation. It also includes desktop menus, recoverable Entry deletion, focused Field management, Chapter browsing and a horizontal Timeline rail.
+The current implementation includes Project creation and recovery, directory preferences, manual and operation-specific safety backups, Categories, Types, Entries, unit-bearing Number Fields, relationship projections, Spatial containment, search and aliases, Chapter writing and Story Roles, and a dated Timeline foundation. It also includes desktop menus, recoverable Entry deletion, focused Field management, Chapter browsing and a horizontal Timeline rail. October's consolidated slices add automatic backups, Type renaming and reviewed retirement, Entry descriptions, Rich Text and Entry Reference Fields, Explore, pins and recent records, and Markdown manuscript export.
 
 The remaining Timeline work is about richer dates and historical meaning; an interactive rail is already present. Chapter work should extend the existing library and editor rather than recreate them. Story Roles are functions on explicit Chapter links, not Entry Types or generic tags.
 
@@ -60,9 +60,11 @@ Some original milestone checklists and README wording predate implemented featur
 
 ## Completion tracking
 
-W03 is implemented on `feature/entry-descriptions`: optional rich descriptions, revision-safe autosave/recovery, migration and Search, with 353 frontend and 244 Rust tests passing. See its verification note for native acceptance still outstanding. Other workloads remain planned unless their own delivered slice records a later status. Do not guess future merge SHAs or preallocate future database schema versions.
+Use the [October delivery and integration record](SESSION_2026_10.md) for the PRs, fixed implementation commits, exact changed files and combined verification. Earlier feature-branch test counts in individual verification notes are historical, not counts for today's combined build. Do not preallocate future schema versions or recreate a delivered slice.
 
-W09a is implemented on `feature/workspace-pins`, stacked on W03. See [pins and recents verification](../milestones/WORKSPACE_PINS_VERIFICATION.md). This completes the shortcut slice, not tabs or automatic restart restoration.
-- **W07a:** implemented on `feature/explore`. [Verification and remaining scope](../milestones/EXPLORE_FOUNDATION_VERIFICATION.md) record composable filters, canonical Spatial matching, bounded results, and session navigation. Saved views and Tags/Statuses are not part of this slice.
+- W01a–c: [automatic backups](../milestones/AUTOMATIC_BACKUPS_VERIFICATION.md), under approved D01. Native storage and long-running session acceptance remain.
+- W09a: [pins and recents](../milestones/WORKSPACE_PINS_VERIFICATION.md). Tabs and automatic restart restoration remain separate.
+- W07a: [Explore foundation](../milestones/EXPLORE_FOUNDATION_VERIFICATION.md). Later operators, saved views and Tag/Status filters remain separate.
+- W10a: [Markdown export](../milestones/MANUSCRIPT_EXPORT_VERIFICATION.md), under approved D07. Word/EPUB and writing history remain separate.
 
-W01a–c are implemented on `feature/automatic-backups` under the approved D01 policy. See [automatic backup verification](../milestones/AUTOMATIC_BACKUPS_VERIFICATION.md) for retention safeguards, tests and remaining native Windows acceptance. Other workloads remain planned unless recorded separately; completion of one slice does not complete a whole workload.
+Next: W14a acceptance of the combined desktop app using disposable Projects. A completed foundation slice does not complete its entire workload.
