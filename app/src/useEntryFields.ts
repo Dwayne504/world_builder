@@ -6,10 +6,14 @@ import type { SubmitOutcome } from "./useProjectRename";
 export type FieldDraft = string | string[];
 export function valueDraft(value: FieldValue | null): FieldDraft {
   if (!value) return "";
+  if (value.kind === "rich_text") return value.value.plainText;
   return value.kind === "choices" ? [...value.value] : String(value.value);
 }
 export function parseFieldDraft(field: EntryField, draft: FieldDraft): FieldValue | null {
   switch (field.definition.kind) {
+    case "rich_text":
+      if (draft === "") return null;
+      throw new Error("Rich Text Fields use the writing editor.");
     case "relationship":
       throw new Error("Relationship Fields are edited through their connections.");
     case "short_text":
@@ -43,6 +47,8 @@ export function useEntryFields(
   const [state, setState] = useState<SaveState>("saved");
   const [configurationPending, setConfigurationPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const snapshotRef = useRef(snapshot);
   const draftsRef = useRef(drafts);
   const revisionRef = useRef(onRevision);
@@ -60,20 +66,30 @@ export function useEntryFields(
     setSnapshot(updated);
     revisionRef.current(updated.globalRevision);
   }, []);
-  const reload = useCallback(async () => {
-    const request = ++generation.current;
-    try {
-      const updated = await readFields(projectId, entryId);
-      if (!mounted.current || request !== generation.current) return;
-      accept(updated);
-      setError(null);
-      setState(Object.keys(draftsRef.current).length ? "dirty" : "saved");
-    } catch (err) {
-      if (!mounted.current || request !== generation.current) return;
-      setError(err instanceof Error ? err.message : "Fields could not be loaded.");
-      setState("failed");
-    }
-  }, [projectId, entryId, accept]);
+  const reload = useCallback(
+    async (onlyWhenClean = false) => {
+      const dirty = () =>
+        stateRef.current !== "saved" ||
+        !!inFlight.current ||
+        Object.keys(draftsRef.current).length > 0;
+      if (onlyWhenClean && dirty()) return;
+      const request = ++generation.current;
+      try {
+        const updated = await readFields(projectId, entryId);
+        if (!mounted.current || request !== generation.current || (onlyWhenClean && dirty()))
+          return;
+        accept(updated);
+        setError(null);
+        setState(Object.keys(draftsRef.current).length ? "dirty" : "saved");
+      } catch (err) {
+        if (!mounted.current || request !== generation.current || (onlyWhenClean && dirty()))
+          return;
+        setError(err instanceof Error ? err.message : "Fields could not be loaded.");
+        setState("failed");
+      }
+    },
+    [projectId, entryId, accept],
+  );
   useEffect(() => {
     mounted.current = true;
     void reload();

@@ -31,6 +31,7 @@ import type {
 import type { SubmitOutcome } from "./useProjectRename";
 
 const kinds: Record<FieldKind, string> = {
+  rich_text: "Rich Text",
   short_text: "Short Text",
   number: "Number (optional unit)",
   boolean: "Boolean",

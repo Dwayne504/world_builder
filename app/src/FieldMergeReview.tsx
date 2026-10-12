@@ -6,6 +6,7 @@ import { ManagerSearchSelect } from "./ManagerSearchSelect";
 
 function display(value: FieldValue | null) {
   if (!value) return "Not filled in";
+  if (value.kind === "rich_text") return value.value.plainText || "Preserved Rich Text";
   if (value.kind === "boolean") return value.value ? "Yes" : "No";
   if (value.kind === "choices") return "Choice selection";
   return String(value.value);

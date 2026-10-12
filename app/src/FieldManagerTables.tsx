@@ -120,7 +120,12 @@ export function FieldManagerTables({
                         </button>
                         <button
                           className="quiet-button"
-                          disabled={disabled}
+                          disabled={
+                            disabled ||
+                            !!(
+                              field.value?.kind === "rich_text" && field.value.value.readOnlyReason
+                            )
+                          }
                           aria-label={`${field.definition.kind === "relationship" ? "Remove from Fields" : "Delete from Entry"}: ${field.definition.name}`}
                           title={
                             field.definition.kind === "relationship"
