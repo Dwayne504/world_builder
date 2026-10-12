@@ -21,6 +21,13 @@ use super::state::{AppState, OpenProject, ProjectSummary};
 pub struct ProjectService;
 
 impl ProjectService {
+    pub fn preview_type_retirement(
+        state: &AppState,
+        project: ProjectId,
+        id: TypeId,
+    ) -> Result<crate::domain::lifecycle::TypeRetirementPreview, AppError> {
+        Self::with_worker(state, project, |worker| worker.preview_type_retirement(id))
+    }
     pub fn navigation(
         state: &AppState,
         project: ProjectId,

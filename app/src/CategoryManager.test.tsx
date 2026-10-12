@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { CategoryManager } from "./CategoryManager";
+import { typeRetirementPreview } from "./typeRetirementTestFixtures";
 import {
   applyStructure,
+  previewTypeRetirement,
   previewCategoryDelete,
   applyTemplateFields,
   applySpatial,
@@ -21,6 +23,7 @@ import type { FieldsController } from "./EntryFieldsPanel";
 import type { FieldCatalog, FieldDefinition } from "./types";
 vi.mock("./api", () => ({
   applyStructure: vi.fn(),
+  previewTypeRetirement: vi.fn(),
   previewCategoryDelete: vi.fn(),
   readSpatial: vi.fn().mockResolvedValue({ globalRevision: 1, entries: [], defaults: [] }),
   applySpatial: vi.fn(),
@@ -48,6 +51,7 @@ const sword = {
   categoryId: "weapons",
   parentTypeId: null,
   name: "Sword",
+  retiredAt: null,
   revision: 1,
   globalRevision: 1,
 };
@@ -76,6 +80,7 @@ const props = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(applyStructure).mockReset();
+  vi.mocked(previewTypeRetirement).mockReset();
   vi.mocked(previewCategoryDelete).mockReset();
   vi.mocked(listCategories).mockResolvedValue([weapons]);
   vi.mocked(listTypes).mockImplementation((_project, categoryId) =>
@@ -176,6 +181,99 @@ async function show() {
   await screen.findByText("Types in Weapons");
   return view;
 }
+it("reviews retirement, retains defaults through acknowledgement, and restores the same Type", async () => {
+  let retiredAt: string | null = null;
+  vi.mocked(listTypes).mockImplementation(async () => [
+    { ...sword, retiredAt },
+    { ...sword, id: "cutlass", name: "Cutlass", parentTypeId: "sword" },
+  ]);
+  vi.mocked(previewTypeRetirement).mockImplementation(async () =>
+    typeRetirementPreview({ retiredAt }),
+  );
+  vi.mocked(readFieldCatalog).mockResolvedValue({
+    globalRevision: 4,
+    definitions: [
+      { ...mass, bindings: [{ provider: { kind: "type", id: "sword" }, label: "Sword" }] },
+    ],
+  });
+  let finish!: (value: { globalRevision: number; backupPath: null }) => void;
+  vi.mocked(applyStructure).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Defaults for Sword" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retire Type…" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retire Type" }));
+  expect(applyStructure).toHaveBeenCalledExactlyOnceWith("project", 4, {
+    kind: "set_type_retired",
+    id: "sword",
+    retired: true,
+  });
+  expect(controller.state).toBe("saving");
+  expect(screen.getByRole("button", { name: "Retire Type" })).toBeDisabled();
+  retiredAt = "2026-10-01T12:00:00Z";
+  await act(async () => finish({ globalRevision: 5, backupPath: null }));
+  await screen.findByRole("button", { name: "Defaults for Sword · retired" });
+  expect(screen.getByLabelText("Default field scope")).toHaveValue("sword");
+  expect(screen.getByText("Mass")).toBeVisible();
+  expect(screen.getByText(/Existing Entries and child Types keep its defaults/)).toBeVisible();
+  expect(applyTemplateFields).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Restore Type…" }));
+  vi.mocked(applyStructure).mockImplementationOnce(async () => {
+    retiredAt = null;
+    return { globalRevision: 6, backupPath: null };
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Restore Type" }));
+  await screen.findByRole("button", { name: "Defaults for Sword" });
+  expect(applyStructure).toHaveBeenLastCalledWith("project", 4, {
+    kind: "set_type_retired",
+    id: "sword",
+    retired: false,
+  });
+  expect(changed).toHaveBeenLastCalledWith(6);
+});
+
+it("requires an explicit fresh retirement review after stale mutation and can cancel without writing", async () => {
+  vi.mocked(previewTypeRetirement).mockResolvedValue(typeRetirementPreview());
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Defaults for Sword" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retire Type…" }));
+  const review = within(await screen.findByRole("dialog", { name: "Type availability" }));
+  fireEvent.click(review.getByRole("button", { name: "Cancel" }));
+  expect(applyStructure).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Retire Type…" }));
+  vi.mocked(applyStructure).mockRejectedValueOnce(new Error("Project changed. Review again."));
+  fireEvent.click(await screen.findByRole("button", { name: "Retire Type" }));
+  await screen.findByText(/Project changed/);
+  await screen.findByText(/The Type was not changed/);
+  expect(screen.queryByRole("button", { name: "Retire Type" })).not.toBeInTheDocument();
+  vi.mocked(previewTypeRetirement).mockResolvedValue(typeRetirementPreview({ globalRevision: 9 }));
+  vi.mocked(applyStructure).mockResolvedValueOnce({ globalRevision: 10, backupPath: null });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh review" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retire Type" }));
+  await waitFor(() => expect(changed).toHaveBeenLastCalledWith(10));
+  expect(applyStructure).toHaveBeenLastCalledWith("project", 9, {
+    kind: "set_type_retired",
+    id: "sword",
+    retired: true,
+  });
+});
+
+it("keeps active child Types available and excludes retired parents from new Type creation", async () => {
+  vi.mocked(listTypes).mockResolvedValue([
+    { ...sword, retiredAt: "2026-10-01T12:00:00Z" },
+    { ...sword, id: "cutlass", name: "Cutlass", parentTypeId: "sword" },
+  ]);
+  await show();
+  expect(screen.getByRole("button", { name: "Defaults for Cutlass" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Add Type" }));
+  const parents = within(screen.getByLabelText("Parent Type"));
+  expect(parents.queryByRole("option", { name: /Sword/ })).not.toBeInTheDocument();
+  expect(parents.getByRole("option", { name: "Cutlass" })).toBeEnabled();
+});
 it("renames the selected Type, refreshes its defaults and retains its identity", async () => {
   await show();
   expect(screen.queryByRole("button", { name: "Rename Type" })).not.toBeInTheDocument();

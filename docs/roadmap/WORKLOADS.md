@@ -63,7 +63,7 @@ Each packet defines a user outcome, bounded slices, code starting points and acc
 
 **Deferred:** deep inheritance editors, automatic conversion between incompatible Categories and destructive definition cleanup.
 
-**Session selection:** W04a is implemented on `feature/type-renaming`; see [behavior and verification](../milestones/TYPE_RENAMING_VERIFICATION.md). Confirm its merge status before continuing. W04b remains gated by D03; no retirement or deletion policy was added by W04a.
+**Session selection:** W04a is implemented on `feature/type-renaming`; see [rename verification](../milestones/TYPE_RENAMING_VERIFICATION.md). W04b is implemented under the author's D03 approval on `feature/type-retirement`; see [retirement verification](../milestones/TYPE_RETIREMENT_VERIFICATION.md). It preserves existing assignments and inheritance and adds restoration. Permanent deletion remains deferred. Confirm dependency merge status before continuing.
 
 ## W05 Remaining foundational Field kinds
 

@@ -232,6 +232,19 @@ pub fn preview_category_delete(
     .map_err(Into::into)
 }
 #[tauri::command]
+pub fn preview_type_retirement(
+    state: State<'_, AppState>,
+    project_id: String,
+    type_id: String,
+) -> Result<crate::domain::lifecycle::TypeRetirementPreview, AppErrorDto> {
+    ProjectService::preview_type_retirement(
+        &state,
+        parse_project_id(&project_id)?,
+        TypeId::parse(&type_id).map_err(invalid_input)?,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
 pub fn apply_structure(
     app: AppHandle,
     state: State<'_, AppState>,

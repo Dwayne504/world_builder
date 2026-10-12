@@ -57,6 +57,10 @@ use crate::domain::structure::FieldId;
 
 use crate::domain::search::{AliasCommand, EntryAliases, SearchRequest, SearchResults};
 enum Job {
+    PreviewTypeRetirement {
+        id: TypeId,
+        reply: Reply<crate::domain::lifecycle::TypeRetirementPreview>,
+    },
     Navigation {
         command: Option<crate::domain::navigation::NavigationCommand>,
         reply: Reply<crate::domain::navigation::NavigationSnapshot>,
@@ -416,6 +420,9 @@ impl ProjectDbWorker {
                         schema_version,
                         content,
                     ));
+                }
+                Job::PreviewTypeRetirement { id, reply } => {
+                    let _ = reply.send(super::type_retirement::preview(&conn, id));
                 }
                 Job::PreviewCategory { id, reply } => {
                     let _ = reply.send(super::lifecycle::preview(&conn, id));
@@ -880,6 +887,12 @@ impl ProjectDbWorker {
         self.call(|reply| Job::CreateCategory { id, name, reply })
     }
 
+    pub fn preview_type_retirement(
+        &self,
+        id: TypeId,
+    ) -> Result<crate::domain::lifecycle::TypeRetirementPreview, PersistenceError> {
+        self.call(|reply| Job::PreviewTypeRetirement { id, reply })
+    }
     pub fn list_types(&self, category_id: CategoryId) -> Result<Vec<TypeDef>, PersistenceError> {
         self.call(|reply| Job::ListTypes { category_id, reply })
     }
@@ -1216,7 +1229,7 @@ fn list_types(
         |row| row.get(0),
     )?;
     let mut statement = conn.prepare(
-        "SELECT id, category_id, parent_type_id, name, revision
+        "SELECT id, category_id, parent_type_id, name, revision, retired_at
              FROM type_def WHERE category_id = ?1 ORDER BY name COLLATE NOCASE, id",
     )?;
     let rows = statement.query_map([category_id.to_string()], |row| {
@@ -1226,10 +1239,11 @@ fn list_types(
             row.get::<_, Option<String>>(2)?,
             row.get::<_, String>(3)?,
             row.get::<_, i64>(4)?,
+            row.get::<_, Option<String>>(5)?,
         ))
     })?;
     rows.map(|row| {
-        let (id, category, parent, name, revision) = row?;
+        let (id, category, parent, name, revision, retired_at) = row?;
         Ok(TypeDef {
             id: TypeId::parse(&id).map_err(|e| PersistenceError::Other(e.to_string()))?,
             category_id: CategoryId::parse(&category)
@@ -1239,6 +1253,7 @@ fn list_types(
                 .transpose()
                 .map_err(|e| PersistenceError::Other(e.to_string()))?,
             name,
+            retired_at,
             revision,
             global_revision,
         })
@@ -1254,6 +1269,12 @@ fn create_type(
     name: &str,
 ) -> Result<TypeDef, PersistenceError> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    super::type_retirement::validate_assignment(
+        &tx,
+        &category_id.to_string(),
+        parent_type_id,
+        None,
+    )?;
     let now = Utc::now().to_rfc3339();
     let global_revision = next_global_revision(&tx, &now)?;
     tx.execute(
@@ -1274,6 +1295,7 @@ fn create_type(
         category_id,
         parent_type_id,
         name: name.to_string(),
+        retired_at: None,
         revision: 1,
         global_revision,
     })
@@ -1369,7 +1391,7 @@ fn create_entry(
             CategoryId::parse(&raw).map_err(|e| PersistenceError::Other(e.to_string()))?
         }
     };
-    validate_type_category(&tx, category_id, type_id)?;
+    super::type_retirement::validate_assignment(&tx, &category_id.to_string(), type_id, None)?;
     let now = Utc::now().to_rfc3339();
     let global_revision = next_global_revision(&tx, &now)?;
     tx.execute(
@@ -1400,28 +1422,6 @@ fn create_entry(
         revision: 1,
         global_revision,
     })
-}
-
-fn validate_type_category(
-    tx: &rusqlite::Transaction<'_>,
-    category_id: CategoryId,
-    type_id: Option<TypeId>,
-) -> Result<(), PersistenceError> {
-    if let Some(type_id) = type_id {
-        let matches: bool = tx.query_row(
-            "SELECT EXISTS(
-                    SELECT 1 FROM type_def WHERE id = ?1 AND category_id = ?2
-                 )",
-            rusqlite::params![type_id.to_string(), category_id.to_string()],
-            |row| row.get(0),
-        )?;
-        if !matches {
-            return Err(PersistenceError::Other(
-                "the selected Type does not belong to the selected Category".to_string(),
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn checked_entry_revision(
@@ -1474,7 +1474,8 @@ fn change_entry_structure(
 ) -> Result<Entry, PersistenceError> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     checked_entry_revision(&tx, id, expected_revision)?;
-    validate_type_category(&tx, category_id, type_id)?;
+    let existing = get_entry(&tx, id)?.type_id;
+    super::type_retirement::validate_assignment(&tx, &category_id.to_string(), type_id, existing)?;
     let now = Utc::now().to_rfc3339();
     let global_revision = next_global_revision(&tx, &now)?;
     tx.execute(

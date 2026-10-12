@@ -61,6 +61,7 @@ pub struct TypeDef {
     pub category_id: CategoryId,
     pub parent_type_id: Option<TypeId>,
     pub name: String,
+    pub retired_at: Option<String>,
     pub revision: i64,
     pub global_revision: i64,
 }

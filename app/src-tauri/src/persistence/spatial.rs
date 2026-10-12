@@ -151,6 +151,7 @@ pub(super) fn apply(
                 )?,
             };
             let name = authored_name(name);
+            super::type_retirement::validate_assignment(&tx, &category, type_id, None)?;
             tx.execute("INSERT INTO record_identity(record_id,kind,workspace_state,lifecycle_changed_at,created_at) VALUES(?1,'entry','active',?2,?2)", params![id.to_string(),now])?;
             tx.execute("INSERT INTO entry(id,category_id,type_id,authored_name,created_at,updated_at,revision) VALUES(?1,?2,?3,?4,?5,?5,1)", params![id.to_string(),category,type_id.map(|id|id.to_string()),name,now])?;
             enable(&tx, id, &now)?;

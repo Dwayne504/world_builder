@@ -391,6 +391,12 @@ export function previewCategoryDelete(
 ): Promise<import("./types").CategoryDeletePreview> {
   return call("preview_category_delete", { projectId, categoryId });
 }
+export function previewTypeRetirement(
+  projectId: string,
+  typeId: string,
+): Promise<import("./types").TypeRetirementPreview> {
+  return call("preview_type_retirement", { projectId, typeId });
+}
 export function applyStructure(
   projectId: string,
   expectedRevision: number,

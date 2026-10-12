@@ -66,6 +66,7 @@ import {
   setDefaultProjectsDir,
 } from "./api";
 import type { Category, Entry, Preferences, ProjectSummary, SaveState, TypeDef } from "./types";
+import { assignmentTypeChoices, typeStatusLabel } from "./typePresentation";
 import { useProjectRename } from "./useProjectRename";
 import type { SubmitOutcome } from "./useProjectRename";
 import { useEntryName } from "./useEntryName";
@@ -947,7 +948,7 @@ function EntryEditor({
   const [newTypeName, setNewTypeName] = useState("");
   const [showTypeCreator, setShowTypeCreator] = useState(false);
   const [structureError, setStructureError] = useState<string | null>(null);
-  const [titleType, setTitleType] = useState<{ id: string; name: string } | null>(null);
+  const [titleType, setTitleType] = useState<TypeDef | null>(null);
   useEffect(() => {
     let current = true;
     if (editor.entry.typeId)
@@ -1058,6 +1059,10 @@ function EntryEditor({
   }, [categoryId, projectId, templateEpoch]);
 
   async function saveStructure() {
+    if (typeId !== editor.entry.typeId && types.find((type) => type.id === typeId)?.retiredAt) {
+      setStructureError("This Type is retired. Choose an available Type or No Type.");
+      return;
+    }
     const submittedCategoryId = categoryId;
     const submittedTypeId = typeId;
     const outcome = await mutations.run(
@@ -1168,7 +1173,7 @@ function EntryEditor({
             />
           </h2>
           {editor.entry.typeId && titleType?.id === editor.entry.typeId && (
-            <p className="entry-type">{titleType.name}</p>
+            <p className="entry-type">{typeStatusLabel(titleType)}</p>
           )}
         </div>
       </div>
@@ -1265,9 +1270,16 @@ function EntryEditor({
                     },
                   ]
                 : []),
-              ...types.map((type) => ({ id: type.id, label: type.name })),
+              ...assignmentTypeChoices(types, editor.entry.typeId ?? "", typeId),
             ]}
           />
+          {types.find((type) => type.id === typeId)?.retiredAt && (
+            <p className="field-note">
+              {typeId === editor.entry.typeId
+                ? "This Type is retired. This Entry keeps its assignment and inherited Fields."
+                : "This Type is retired. Choose an available Type or No Type."}
+            </p>
+          )}
           <button
             disabled={
               aliasDirty ||
@@ -1341,6 +1353,8 @@ function EntryEditor({
                 spatialState !== "saved" ||
                 !categoryTypeDirty ||
                 !!newTypeName ||
+                (typeId !== editor.entry.typeId &&
+                  !!types.find((type) => type.id === typeId)?.retiredAt) ||
                 (categoryId !== editor.entry.categoryId && !structureTypeChosen)
               }
               onClick={() => void saveStructure()}
@@ -1599,6 +1613,7 @@ function EntryWorkflow({
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [browseTypes, setBrowseTypes] = useState<TypeDef[]>([]);
+  const browseTypeScope = useRef<{ projectId: string; categoryId: string | null } | null>(null);
   const [typesLoading, setTypesLoading] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const navigatingRef = useRef(false);
@@ -1665,7 +1680,12 @@ function EntryWorkflow({
 
   useEffect(() => {
     let current = true;
-    setBrowseTypes([]);
+    if (
+      browseTypeScope.current?.projectId !== projectId ||
+      browseTypeScope.current?.categoryId !== location.categoryId
+    )
+      setBrowseTypes([]);
+    browseTypeScope.current = { projectId, categoryId: location.categoryId };
     setTypesLoading(!!location.categoryId);
     if (location.categoryId)
       void listTypes(projectId, location.categoryId)
@@ -2269,6 +2289,10 @@ function EntryWorkflow({
   }
 
   async function addEntry() {
+    if (typeId && !types.some((type) => type.id === typeId && !type.retiredAt)) {
+      setError("Choose an available Type or No Type before creating this Entry.");
+      return;
+    }
     const outcome = await mutations.run(
       () =>
         createEntry(
@@ -2693,9 +2717,16 @@ function EntryWorkflow({
               >
                 <option value="">All Types</option>
                 <option value="__untyped">No Type</option>
+                {location.typeId &&
+                  location.typeId !== "__untyped" &&
+                  !browseTypes.some((type) => type.id === location.typeId) && (
+                    <option value={location.typeId} disabled>
+                      Selected Type — {typesLoading ? "loading…" : "unavailable"}
+                    </option>
+                  )}
                 {browseTypes.map((type) => (
                   <option value={type.id} key={type.id}>
-                    {type.name}
+                    {typeStatusLabel(type)}
                   </option>
                 ))}
               </select>
@@ -2870,8 +2901,18 @@ function EntryWorkflow({
                 setCreationTouched(true);
               }}
               emptyLabel="No Type"
-              choices={types.map((type) => ({ id: type.id, label: type.name }))}
+              choices={[
+                ...(typeId && !types.some((type) => type.id === typeId)
+                  ? [{ id: typeId, label: "Unavailable Type — choose another", disabled: true }]
+                  : []),
+                ...assignmentTypeChoices(types, "", typeId),
+              ]}
             />
+            {types.find((type) => type.id === typeId)?.retiredAt && (
+              <p className="field-note">
+                This Type is retired. Choose an available Type or No Type.
+              </p>
+            )}
             <button
               disabled={!categoryId || mutations.state === "saving"}
               onClick={() => setShowTypeCreator(true)}
@@ -2909,7 +2950,12 @@ function EntryWorkflow({
               </fieldset>
             )}
             <button
-              disabled={mutations.state === "saving" || !!newCategoryName || !!newTypeName}
+              disabled={
+                mutations.state === "saving" ||
+                !!newCategoryName ||
+                !!newTypeName ||
+                (!!typeId && !types.some((type) => type.id === typeId && !type.retiredAt))
+              }
               onClick={() => void addEntry()}
             >
               Create Entry
@@ -3121,17 +3167,28 @@ function ProjectScreen({
           Promise.resolve({ kind: "no-op" } as SubmitOutcome),
       ])
         .then(([renameOutcome, entryOutcome, structuralSuccessful, managerOutcome]) => {
+          // Cancelling the close request never cancels the write itself.
+          // Its acknowledgement must not close the app or reopen that prompt.
+          const retainedIntent = waitingCloseIntentRef.current;
+          if (!retainedIntent) return undefined;
           if (
             structuralSuccessful &&
             [renameOutcome, entryOutcome, managerOutcome].every(
               (outcome) => outcome.kind === "committed" || outcome.kind === "no-op",
             )
           ) {
-            return closeAfterBackend(waitingCloseIntentRef.current ?? intent);
+            return closeAfterBackend(retainedIntent);
           }
           if (!structuralSuccessful) {
             setCloseError(currentMutationError() ?? "Structural save failed.");
           }
+          // A completed save can leave an unrelated or newer draft behind.
+          // Keep the original close request visible for explicit review.
+          setPendingCloseIntent((current) =>
+            current === "native-window" || retainedIntent === "native-window"
+              ? "native-window"
+              : "project",
+          );
           return undefined;
         })
         .finally(() => {
@@ -3195,6 +3252,12 @@ function ProjectScreen({
 
   function handleClose() {
     requestClose("project");
+  }
+
+  function cancelCloseRequest() {
+    waitingCloseIntentRef.current = null;
+    setPendingCloseIntent(null);
+    setCloseError(null);
   }
 
   function handleForceCloseDiscarding() {
@@ -3482,10 +3545,7 @@ function ProjectScreen({
       <Dialog
         open={!!pendingCloseIntent || !!closeError}
         title="Before you leave"
-        onClose={() => {
-          setPendingCloseIntent(null);
-          setCloseError(null);
-        }}
+        onClose={cancelCloseRequest}
       >
         {pendingCloseIntent && (
           <div role="alert" className="error-banner">
@@ -3502,7 +3562,7 @@ function ProjectScreen({
             <button disabled={combinedSaveState === "saving"} onClick={handleForceCloseDiscarding}>
               {closeWarningActionLabel(pendingCloseIntent)}
             </button>
-            <button onClick={() => setPendingCloseIntent(null)}>Cancel</button>
+            <button onClick={cancelCloseRequest}>Cancel</button>
           </div>
         )}
         {closeError && (
