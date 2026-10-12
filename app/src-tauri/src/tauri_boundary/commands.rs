@@ -16,6 +16,23 @@ use crate::preferences::{self, PreferencesError, PreferencesStore};
 
 use super::dto::{AppErrorDto, CategoryDto, EntryDto, PreferencesDto, ProjectSummaryDto, TypeDto};
 
+#[tauri::command]
+pub fn read_workspace_navigation(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<crate::domain::navigation::NavigationSnapshot, AppErrorDto> {
+    ProjectService::navigation(&state, parse_project_id(&project_id)?, None).map_err(Into::into)
+}
+#[tauri::command]
+pub fn apply_workspace_navigation(
+    state: State<'_, AppState>,
+    project_id: String,
+    command: crate::domain::navigation::NavigationCommand,
+) -> Result<crate::domain::navigation::NavigationSnapshot, AppErrorDto> {
+    ProjectService::navigation(&state, parse_project_id(&project_id)?, Some(command))
+        .map_err(Into::into)
+}
+
 /// Read-only information about this backend, independent of any open Project.
 #[tauri::command]
 pub fn get_build_info() -> super::dto::BuildInfoDto {

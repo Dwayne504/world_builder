@@ -625,7 +625,7 @@ fn schema_eleven_migration_preserves_chapters_and_rolls_back_atomically() {
     let c = ProjectService::read_chapter(&f.state, f.project, c.chapter.id).unwrap();
     ProjectService::close_project(&f.state, f.project).unwrap();
     let db = f.db();
-    db.execute_batch("DROP TRIGGER rich_document_owner_insert; DROP TRIGGER rich_document_owner_update; DROP TRIGGER rich_document_keep_entry; DROP TRIGGER rich_document_keep_chapter; ALTER TABLE rich_document RENAME TO rich_document_new;").unwrap();
+    db.execute_batch("DROP TABLE project_pin; DROP TABLE project_recent; DROP TABLE project_navigation_settings; DROP TRIGGER rich_document_owner_insert; DROP TRIGGER rich_document_owner_update; DROP TRIGGER rich_document_keep_entry; DROP TRIGGER rich_document_keep_chapter; ALTER TABLE rich_document RENAME TO rich_document_new;").unwrap();
     let old = include_str!("../src/persistence/migrations/0009_story.sql");
     let start = old.find("CREATE TABLE rich_document (").unwrap();
     let end = old.find("CREATE TABLE story_role (").unwrap();

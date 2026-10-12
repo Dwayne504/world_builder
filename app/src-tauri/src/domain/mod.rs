@@ -9,6 +9,7 @@ pub mod error;
 pub mod fields;
 pub mod ids;
 pub mod lifecycle;
+pub mod navigation;
 pub mod relationships;
 pub mod search;
 pub mod spatial;

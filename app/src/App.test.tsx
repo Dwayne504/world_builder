@@ -65,6 +65,8 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("./api", () => ({
+  readWorkspaceNavigation: vi.fn().mockResolvedValue({ pins: [], recents: [], recentLimit: 20 }),
+  applyWorkspaceNavigation: vi.fn().mockResolvedValue({ pins: [], recents: [], recentLimit: 20 }),
   readEntryDescription: vi.fn().mockImplementation(async (_projectId: string, entryId: string) => ({
     globalRevision: 1,
     entryId,
@@ -139,6 +141,8 @@ import App from "./App";
 import { chapterFixture, textDocument } from "./chapterTestFixtures";
 import { descriptionFixture } from "./entryDescriptionTestFixtures";
 import {
+  readWorkspaceNavigation,
+  applyWorkspaceNavigation,
   readEntryDescription,
   saveEntryDescription,
   applyStructure,
@@ -167,6 +171,7 @@ import {
   applyRelationships,
   readProjectRelationships,
 } from "./api";
+import { navigationRecord, navigationSnapshot } from "./workspaceNavigationTestFixtures";
 
 async function renderApp() {
   const result = render(<App />);
@@ -405,6 +410,8 @@ describe("Project screen Saved contract", () => {
 
   beforeEach(() => {
     localStorage.clear();
+    vi.mocked(readWorkspaceNavigation).mockReset().mockResolvedValue(navigationSnapshot());
+    vi.mocked(applyWorkspaceNavigation).mockReset().mockResolvedValue(navigationSnapshot());
     vi.mocked(readEntryDescription)
       .mockReset()
       .mockImplementation(async (_projectId, entryId) => ({
@@ -478,6 +485,146 @@ describe("Project screen Saved contract", () => {
       },
     );
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("opens pinned records by identity and records a visit only after the content loads", async () => {
+    const entry = mockEditableEntry();
+    const loaded = deferred<typeof entry>();
+    getEntryMock.mockReturnValueOnce(loaded.promise);
+    vi.mocked(readWorkspaceNavigation).mockResolvedValue(
+      navigationSnapshot({ pins: [navigationRecord("entry", { label: "Previous name" })] }),
+    );
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Previous name Entry" }));
+    expect(getEntryMock).toHaveBeenCalledWith(project.projectId, "entry");
+    expect(applyWorkspaceNavigation).not.toHaveBeenCalled();
+    await act(async () => loaded.resolve(entry));
+    await screen.findByLabelText("entry-name");
+    await waitFor(() =>
+      expect(applyWorkspaceNavigation).toHaveBeenCalledWith(project.projectId, {
+        kind: "visit",
+        target: { recordKind: "entry", recordId: "entry" },
+      }),
+    );
+    expect(screen.getByLabelText("entry-name")).toHaveValue("Thron");
+  });
+
+  it("pins the current Entry from View and resolves labels again after an acknowledged rename", async () => {
+    const entry = mockEditableEntry();
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    const input = await screen.findByLabelText("entry-name");
+    await waitFor(() => expect(applyWorkspaceNavigation).toHaveBeenCalled());
+    vi.mocked(applyWorkspaceNavigation).mockResolvedValue(
+      navigationSnapshot({ pins: [navigationRecord("entry", { label: "Thron" })] }),
+    );
+    fireEvent.click(
+      await waitFor(() => {
+        const item = menuItem("View", "Pin current record");
+        expect(item).toBeEnabled();
+        return item;
+      }),
+    );
+    await screen.findByRole("button", { name: "Thron Entry" });
+    expect(applyWorkspaceNavigation).toHaveBeenLastCalledWith(project.projectId, {
+      kind: "pin",
+      target: { recordKind: "entry", recordId: "entry" },
+      pinned: true,
+    });
+    updateEntryNameMock.mockResolvedValue({
+      ...entry,
+      authoredName: "Captain",
+      displayName: "Captain",
+      revision: 2,
+      globalRevision: 2,
+    });
+    vi.mocked(readWorkspaceNavigation).mockResolvedValue(
+      navigationSnapshot({ pins: [navigationRecord("entry", { label: "Captain" })] }),
+    );
+    fireEvent.change(input, { target: { value: "Captain" } });
+    await screen.findByRole("button", { name: "Captain Entry" });
+  });
+
+  it("protects an unsaved Entry when opening a pinned Chapter and does not record failed visits", async () => {
+    mockEditableEntry();
+    vi.mocked(readWorkspaceNavigation).mockResolvedValue(
+      navigationSnapshot({
+        pins: [navigationRecord("chapter", { label: "Opening", recordKind: "story_unit" })],
+      }),
+    );
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    const input = await screen.findByLabelText("entry-name");
+    updateEntryNameMock.mockRejectedValue(new Error("Disk full"));
+    fireEvent.change(input, { target: { value: "Unfinished" } });
+    fireEvent.click(screen.getByRole("button", { name: "Opening Chapter" }));
+    await waitFor(() => expect(updateEntryNameMock).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText(/unsaved changes.*navigating/i)).toBeVisible());
+    expect(screen.getByLabelText("entry-name")).toHaveValue("Unfinished");
+    expect(readChapter).not.toHaveBeenCalled();
+    expect(applyWorkspaceNavigation).not.toHaveBeenCalledWith(
+      project.projectId,
+      expect.objectContaining({ target: { recordKind: "story_unit", recordId: "chapter" } }),
+    );
+  });
+
+  it("keeps authored Saved state and native close available while navigation metadata is pending or failed", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    const metadata = deferred<ReturnType<typeof navigationSnapshot>>();
+    vi.mocked(applyWorkspaceNavigation).mockReturnValueOnce(metadata.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByLabelText("entry-name");
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+    await act(async () => metadata.reject(new Error("Shortcut store unavailable")));
+    expect(await screen.findByText("Pinned and recent records need attention.")).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("save-state")).toHaveTextContent("Saved");
+    fireEvent.click(menuItem("View", "Hide sidebar"));
+    expect(screen.getByRole("button", { name: "Review shortcuts" })).toBeVisible();
+    closeProjectMock.mockResolvedValue(undefined);
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    await waitFor(() => expect(nativeWindowCloseMock).toHaveBeenCalled());
+  });
+
+  it("records a Timeline shortcut only when its occurrence exists in acknowledged content", async () => {
+    mockEditableEntry();
+    vi.mocked(readWorkspaceNavigation).mockResolvedValue(
+      navigationSnapshot({
+        pins: [navigationRecord("moment", { label: "Arrival", recordKind: "temporal_occurrence" })],
+      }),
+    );
+    const loaded = deferred<Awaited<ReturnType<typeof readTimeline>>>();
+    vi.mocked(readTimeline).mockReturnValueOnce(loaded.promise);
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Arrival Occurrence" }));
+    expect(applyWorkspaceNavigation).not.toHaveBeenCalled();
+    await act(async () =>
+      loaded.resolve({
+        globalRevision: 3,
+        calendar: null,
+        occurrences: [
+          {
+            id: "moment",
+            title: "Arrival",
+            notes: "",
+            date: null,
+            eventEntry: null,
+            entries: [],
+            chapters: [],
+            workspaceState: "active",
+          },
+        ],
+      }),
+    );
+    await waitFor(() =>
+      expect(applyWorkspaceNavigation).toHaveBeenCalledWith(project.projectId, {
+        kind: "visit",
+        target: { recordKind: "temporal_occurrence", recordId: "moment" },
+      }),
+    );
+    expect(screen.getByLabelText("Occurrence title (optional)")).toHaveValue("Arrival");
   });
 
   it("offers Category settings on the chosen Category page", async () => {

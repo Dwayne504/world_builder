@@ -336,6 +336,7 @@ export function Timeline({
   onEntry,
   onChapter,
   locked,
+  onRecordOpened,
 }: {
   projectId: string;
   view: TimelineView;
@@ -345,6 +346,7 @@ export function Timeline({
   onEntry: (id: string) => void;
   onChapter: (id: string) => void;
   locked: boolean;
+  onRecordOpened?: (id: string | null) => void;
 }) {
   const timeline = useTimeline(projectId, onRevision);
   const { snapshot, draft, state, error, flush } = timeline;
@@ -393,6 +395,10 @@ export function Timeline({
     });
   }, [state, draft, snapshot?.calendar, flush, onController]);
   const chosen = snapshot?.occurrences.find((o) => o.id === view.occurrenceId);
+  const chosenId = chosen?.id ?? null;
+  useEffect(() => {
+    onRecordOpened?.(chosenId);
+  }, [chosenId, onRecordOpened]);
   // A navigation visit loads the latest committed occurrence; saves keep its inputs mounted.
   useEffect(() => {
     if (view.occurrenceId && !draft) timeline.edit(view.occurrenceId);
