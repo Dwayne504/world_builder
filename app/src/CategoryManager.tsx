@@ -66,6 +66,7 @@ export function CategoryManager({
   const [typeId, setTypeId] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [renamingType, setRenamingType] = useState(false);
   const [typeName, setTypeName] = useState("");
   const [parentId, setParentId] = useState("");
   const [fieldName, setFieldName] = useState("");
@@ -81,7 +82,7 @@ export function CategoryManager({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<
-    "category" | "type" | "field" | "reuse" | "merge" | "rename" | "delete" | null
+    "category" | "type" | "field" | "reuse" | "merge" | "rename" | "rename-type" | "delete" | null
   >(null);
   const [mergeBackup, setMergeBackup] = useState<string | null>(null);
   const [typeSearch, setTypeSearch] = useState("");
@@ -93,12 +94,17 @@ export function CategoryManager({
   const changedRef = useRef(onChanged);
   changedRef.current = onChanged;
   const fieldDirty = !!(fieldName || unit || options || projection.relationshipDefinitionId);
-  const dirty = !!(renaming || categoryName || typeName || fieldDirty);
+  const dirty = !!(renaming || renamingType || categoryName || typeName || fieldDirty);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const busy = saveState === "saving";
   const selectedCategory = categories.find((c) => c.id === categoryId);
   const categoryTypes = types.filter((t) => t.categoryId === categoryId);
+  const selectedType = categoryTypes.find((t) => t.id === typeId);
+  const typeLabel = (type: TypeDef) =>
+    categoryTypes.some((other) => other.id !== type.id && other.name === type.name)
+      ? `${type.name} · ${type.id}`
+      : type.name;
   const provider: FieldProvider = { kind: typeId ? "type" : "category", id: typeId || categoryId };
   const targetLabel =
     categoryTypes.find((t) => t.id === typeId)?.name ?? selectedCategory?.name ?? "";
@@ -182,6 +188,7 @@ export function CategoryManager({
     setSaveState("saved");
     setCategoryName("");
     setRenaming(false);
+    setRenamingType(false);
     setTypeName("");
     setParentId("");
     setFieldName("");
@@ -225,13 +232,15 @@ export function CategoryManager({
   }
   const activeDraft = fieldDirty
     ? "field"
-    : typeName
-      ? "type"
-      : renaming
-        ? "rename"
-        : categoryName
-          ? "category"
-          : null;
+    : renamingType
+      ? "rename-type"
+      : typeName
+        ? "type"
+        : renaming
+          ? "rename"
+          : categoryName
+            ? "category"
+            : null;
   const dismissForm = () => setForm(null);
   const formFeedback = (
     <>
@@ -368,7 +377,7 @@ export function CategoryManager({
                     {matchingTypes.slice(0, typeLimit).map((t) => (
                       <li key={t.id}>
                         <span>
-                          {t.name}
+                          {typeLabel(t)}
                           {t.parentTypeId && (
                             <small>
                               {" "}
@@ -387,7 +396,7 @@ export function CategoryManager({
                             setFieldLimit(12);
                           }}
                         >
-                          Defaults for {t.name}
+                          Defaults for {typeLabel(t)}
                         </button>
                       </li>
                     ))}
@@ -438,7 +447,7 @@ export function CategoryManager({
                   emptyLabel={`All ${selectedCategory.name} Entries`}
                   choices={categoryTypes.map((type) => ({
                     id: type.id,
-                    label: `${type.name} Entries`,
+                    label: `${typeLabel(type)} Entries`,
                   }))}
                   onChange={(id) => {
                     setTypeId(id);
@@ -449,6 +458,19 @@ export function CategoryManager({
                 />
                 <p className="manager-current-scope">
                   Editing defaults for <strong>{targetLabel}</strong> · {supplied.length} fields
+                  {selectedType && (
+                    <button
+                      className="quiet-button"
+                      disabled={busy || dirty || loading || !catalog}
+                      onClick={() => {
+                        setRenamingType(true);
+                        setTypeName(selectedType.name);
+                        setForm("rename-type");
+                      }}
+                    >
+                      Rename Type
+                    </button>
+                  )}
                 </p>
                 {typeId && (
                   <p className="muted">
@@ -553,6 +575,39 @@ export function CategoryManager({
           </div>
         </div>
       </Dialog>
+      <Dialog open={open && form === "rename-type"} title="Rename Type" onClose={dismissForm}>
+        <p>
+          Rename {selectedType ? typeLabel(selectedType) : "this Type"} in {selectedCategory?.name}.
+          Existing Entries, defaults and links stay together.
+        </p>
+        {form === "rename-type" && formFeedback}
+        <label>
+          New Type name
+          <input
+            disabled={busy}
+            value={typeName}
+            onChange={(event) => setTypeName(event.target.value)}
+          />
+        </label>
+        <button
+          className="primary-button"
+          disabled={busy || loading || !typeName.trim() || !selectedType || !catalog}
+          onClick={() =>
+            catalog &&
+            selectedType &&
+            perform(() =>
+              applyStructure(projectId, catalog.globalRevision, {
+                kind: "rename_type",
+                id: selectedType.id,
+                name: typeName,
+              }),
+            )
+          }
+        >
+          Save Type name
+        </button>
+        {cancelButton}
+      </Dialog>
       <Dialog open={open && form === "rename"} title="Rename Category" onClose={dismissForm}>
         {form === "rename" && formFeedback}
         <label>
@@ -656,7 +711,7 @@ export function CategoryManager({
             value={parentId}
             onChange={setParentId}
             emptyLabel="No parent"
-            choices={categoryTypes.map((type) => ({ id: type.id, label: type.name }))}
+            choices={categoryTypes.map((type) => ({ id: type.id, label: typeLabel(type) }))}
           />
           <button
             className="primary-button"

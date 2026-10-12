@@ -58,6 +58,16 @@ pub(super) fn apply(
     }
     let now = chrono::Utc::now().to_rfc3339();
     match command {
+        StructureCommand::RenameType { id, name } => {
+            let name = require_definition_name(&name).map_err(invalid)?;
+            if tx.execute(
+                "UPDATE type_def SET name=?2,revision=revision+1,updated_at=?3 WHERE id=?1",
+                params![id.to_string(), name, now],
+            )? != 1
+            {
+                return Err(invalid("Type not found in this Project"));
+            }
+        }
         StructureCommand::RenameCategory { id, name } => {
             let name = require_definition_name(&name).map_err(invalid)?;
             if tx.execute("UPDATE category SET name=?2,revision=revision+1,updated_at=?3 WHERE id=?1 AND is_uncategorized=0", params![id.to_string(),name,now])? != 1 { return Err(invalid("Choose an author-created Category to rename")); }

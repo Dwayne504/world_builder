@@ -476,6 +476,130 @@ describe("Project screen Saved contract", () => {
     expect(within(dialog).getByRole("button", { name: "Delete Category…" })).toBeEnabled();
   });
 
+  function mockTypeRenaming() {
+    const entry = mockEditableEntry();
+    getEntryMock.mockResolvedValue(entry);
+    let typeName = "Human";
+    listTypesMock.mockImplementation((_project: string, category: string) =>
+      Promise.resolve(
+        category === "characters"
+          ? [
+              {
+                id: "human",
+                categoryId: "characters",
+                parentTypeId: null,
+                name: typeName,
+                revision: 1,
+                globalRevision: 1,
+              },
+            ]
+          : [],
+      ),
+    );
+    vi.mocked(applyStructure).mockImplementation(async (_project, _revision, command) => {
+      if (command.kind === "rename_type") typeName = command.name;
+      return { globalRevision: 2, backupPath: null };
+    });
+    vi.mocked(searchProject).mockImplementation(async () => ({
+      globalRevision: 2,
+      groups: [
+        {
+          kind: "entries",
+          total: 1,
+          hits: [
+            {
+              key: "entry:entry",
+              title: "Thron",
+              context: `Characters · ${typeName}`,
+              workspaceState: "active",
+              reason: "Name",
+              excerpt: "",
+              preview: "",
+              target: { kind: "entry", entryId: "entry" },
+            },
+          ],
+        },
+      ],
+    }));
+    async function renameType(name: string, fromSearch = false) {
+      fireEvent.click(
+        fromSearch
+          ? menuItem("Edit", "Category", "Categories and defaults…")
+          : menuItem("Edit", "Type", "Types and defaults…"),
+      );
+      const manager = within(
+        screen.getByRole("dialog", { name: /^(Category settings|Categories and defaults)$/ }),
+      );
+      fireEvent.click(await manager.findByRole("button", { name: `Defaults for ${typeName}` }));
+      fireEvent.click(manager.getByRole("button", { name: "Rename Type" }));
+      const rename = within(screen.getByRole("dialog", { name: "Rename Type" }));
+      fireEvent.change(rename.getByLabelText("New Type name"), { target: { value: name } });
+      fireEvent.click(rename.getByRole("button", { name: "Save Type name" }));
+      await manager.findByRole("button", { name: `Defaults for ${name}` });
+      fireEvent.click(
+        manager.getByRole("button", { name: /^Close Categor(y settings|ies and defaults)$/ }),
+      );
+    }
+    return renameType;
+  }
+
+  it("adopts a Type rename in the current Entry and selectors without reopening the Project", async () => {
+    const renameType = mockTypeRenaming();
+    await openTheProjectScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Thron" }));
+    await screen.findByLabelText("entry-name");
+    await waitFor(() => expect(document.querySelector(".entry-type")).toHaveTextContent("Human"));
+    await renameType("Astronaut");
+    await waitFor(() =>
+      expect(document.querySelector(".entry-type")).toHaveTextContent("Astronaut"),
+    );
+    fireEvent.click(menuItem("Edit", "Entry", "Entry settings…"));
+    expect(
+      within(screen.getByLabelText("entry-type")).getByRole("option", { name: "Astronaut" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("entry-type")).toHaveValue("human");
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    expect(createTypeMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a selected Category Type filter when that Type is renamed", async () => {
+    const renameType = mockTypeRenaming();
+    await openTheProjectScreen();
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Project navigation" })).getByRole("button", {
+        name: "Characters",
+      }),
+    );
+    fireEvent.change(await screen.findByLabelText("Filter by Type"), {
+      target: { value: "human" },
+    });
+    await renameType("Astronaut");
+    expect(await screen.findByRole("option", { name: "Astronaut" })).toHaveValue("human");
+    expect(screen.getByLabelText("Filter by Type")).toHaveValue("human");
+    expect(changeEntryStructureMock).not.toHaveBeenCalled();
+    expect(createTypeMock).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the current search after a Type rename without losing the query", async () => {
+    const renameType = mockTypeRenaming();
+    await openTheProjectScreen();
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Project navigation" })).getByRole("button", {
+        name: "Search",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Names, aliases, Roles, Fields, connections, or writing"),
+      { target: { value: "Thron" } },
+    );
+    await screen.findByText("Characters · Human");
+    await renameType("Navigator", true);
+    await screen.findByText("Characters · Navigator");
+    expect(
+      screen.getByLabelText("Names, aliases, Roles, Fields, connections, or writing"),
+    ).toHaveValue("Thron");
+  });
+
   it("confirms Entry deletion, flushes the latest title, and waits before returning to the list", async () => {
     const entry = mockEditableEntry();
     getEntryMock.mockResolvedValue(entry);

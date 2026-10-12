@@ -63,7 +63,7 @@ Each packet defines a user outcome, bounded slices, code starting points and acc
 
 **Deferred:** deep inheritance editors, automatic conversion between incompatible Categories and destructive definition cleanup.
 
-**Session selection:** W04a is ready; W04b is gated by D03. Branch suggestion: `feature/type-management`.
+**Session selection:** W04a is implemented on `feature/type-renaming`; see [behavior and verification](../milestones/TYPE_RENAMING_VERIFICATION.md). Confirm its merge status before continuing. W04b remains gated by D03; no retirement or deletion policy was added by W04a.
 
 ## W05 Remaining foundational Field kinds
 
