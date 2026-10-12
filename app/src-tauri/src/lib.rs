@@ -42,6 +42,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             tauri_boundary::get_build_info,
             tauri_boundary::search_project,
+            tauri_boundary::explore_project,
             tauri_boundary::read_aliases,
             tauri_boundary::apply_alias,
             tauri_boundary::read_story,

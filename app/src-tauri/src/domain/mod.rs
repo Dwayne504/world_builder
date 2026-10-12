@@ -6,6 +6,7 @@
 
 pub mod entry_description;
 pub mod error;
+pub mod explore;
 pub mod fields;
 pub mod ids;
 pub mod lifecycle;

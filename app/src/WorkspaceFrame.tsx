@@ -14,6 +14,7 @@ export function WorkspaceFrame({
   onChapters,
   onTimeline,
   onSearch,
+  onExplore,
   onAddEntry,
   onBack,
   onForward,
@@ -28,7 +29,7 @@ export function WorkspaceFrame({
   children: ReactNode;
   categories: Category[];
   entries: Entry[];
-  page: "entries" | "relationships" | "chapters" | "search" | "timeline";
+  page: "entries" | "relationships" | "chapters" | "search" | "timeline" | "explore";
   categoryId: string;
   collapsed: boolean;
   onBrowse: (id: string) => void;
@@ -36,6 +37,7 @@ export function WorkspaceFrame({
   onChapters: () => void;
   onTimeline?: () => void;
   onSearch: () => void;
+  onExplore?: () => void;
   onAddEntry: (categoryId: string) => void;
   onBack: () => void;
   onForward: () => void;
@@ -108,6 +110,16 @@ export function WorkspaceFrame({
           hidden={collapsed}
         >
           <nav aria-label="Project navigation">
+            {onExplore && (
+              <button
+                className="sidebar-destination"
+                aria-current={page === "explore" ? "page" : undefined}
+                disabled={busy || browsingDisabled}
+                onClick={onExplore}
+              >
+                <span>Explore</span>
+              </button>
+            )}
             <button
               className="sidebar-destination"
               aria-current={page === "search" ? "page" : undefined}
