@@ -50,6 +50,7 @@ beforeEach(() => {
     defaultProjectsDirExists: false,
     defaultBackupsDir: "/Backups",
     defaultBackupsDirExists: true,
+    automaticBackupsEnabled: true,
   });
   vi.mocked(previewFieldMerge).mockResolvedValue(preview);
   vi.mocked(mergeFields).mockResolvedValue({

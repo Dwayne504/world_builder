@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const PREFERENCES_SCHEMA_VERSION: i64 = 2;
+pub const PREFERENCES_SCHEMA_VERSION: i64 = 3;
 pub const PREFERENCES_FILE: &str = "preferences.json";
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -33,6 +33,7 @@ pub struct AppPreferences {
     // as the current schema version.
     pub schema_version: i64,
     pub appearance: Appearance,
+    pub automatic_backups_enabled: bool,
     pub default_projects_dir: Option<PathBuf>,
     pub default_backups_dir: Option<PathBuf>,
 }
@@ -41,6 +42,7 @@ impl Default for AppPreferences {
     fn default() -> Self {
         AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            automatic_backups_enabled: true,
             appearance: Appearance::Storybook,
             default_projects_dir: None,
             default_backups_dir: None,
@@ -48,8 +50,8 @@ impl Default for AppPreferences {
     }
 }
 
-/// Version 1 is migrated in memory; a read never rewrites a valid file.
-/// The next explicit preference update publishes version 2 through the same
+/// Versions 1 and 2 are migrated in memory; a read never rewrites a valid file.
+/// The next explicit preference update publishes version 3 through the same
 /// recoverable protocol. Unknown versions and invalid appearances fail closed.
 fn parse_and_check_version(bytes: &[u8]) -> Result<AppPreferences, PreferencesError> {
     let mut value: serde_json::Value =
@@ -62,6 +64,11 @@ fn parse_and_check_version(bytes: &[u8]) -> Result<AppPreferences, PreferencesEr
         1 => {
             value["schema_version"] = PREFERENCES_SCHEMA_VERSION.into();
             value["appearance"] = serde_json::to_value(Appearance::default()).unwrap();
+            value["automatic_backups_enabled"] = true.into();
+        }
+        2 => {
+            value["schema_version"] = PREFERENCES_SCHEMA_VERSION.into();
+            value["automatic_backups_enabled"] = true.into();
         }
         PREFERENCES_SCHEMA_VERSION => {}
         found => {
@@ -237,7 +244,7 @@ mod tests {
         let store = PreferencesStore::new(&path);
         let read = store.load().unwrap();
         assert_eq!(read.appearance, Appearance::Storybook);
-        assert_eq!(read.schema_version, 2);
+        assert_eq!(read.schema_version, 3);
         assert_eq!(fs::read(&path).unwrap(), bytes);
         store
             .update(|p| p.appearance = Appearance::Starship)
@@ -351,11 +358,32 @@ mod tests {
     }
 
     #[test]
+    fn older_preferences_enable_automatic_backups_without_rewriting_and_toggle_is_durable() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let old=br#"{"schema_version":2,"appearance":"starship","default_projects_dir":null,"default_backups_dir":null}"#;
+        fs::write(&path, old).unwrap();
+        let prefs = load(&path).unwrap();
+        assert!(prefs.automatic_backups_enabled);
+        assert_eq!(prefs.appearance, Appearance::Starship);
+        assert_eq!(prefs.schema_version, 3);
+        assert_eq!(fs::read(&path).unwrap(), old);
+        let store = PreferencesStore::new(&path);
+        store
+            .update(|p| p.automatic_backups_enabled = false)
+            .unwrap();
+        assert!(!store.load().unwrap().automatic_backups_enabled);
+        fs::write(&path,br#"{"schema_version":3,"appearance":"starship","default_projects_dir":null,"default_backups_dir":null,"automatic_backups_enabled":"yes"}"#).unwrap();
+        assert!(matches!(store.load(), Err(PreferencesError::Corrupt(_))));
+    }
+
+    #[test]
     fn round_trips_across_a_simulated_restart() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("preferences.json");
         let prefs = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            automatic_backups_enabled: true,
             appearance: Appearance::Storybook,
             default_projects_dir: Some(dir.path().join("Projects")),
             default_backups_dir: Some(dir.path().join("Backups")),
@@ -383,6 +411,7 @@ mod tests {
             &path,
             &AppPreferences {
                 schema_version: PREFERENCES_SCHEMA_VERSION,
+                automatic_backups_enabled: true,
                 appearance: Appearance::Storybook,
                 default_projects_dir: Some(PathBuf::from("/old/projects")),
                 default_backups_dir: None,
@@ -393,6 +422,7 @@ mod tests {
             &path,
             &AppPreferences {
                 schema_version: PREFERENCES_SCHEMA_VERSION,
+                automatic_backups_enabled: true,
                 appearance: Appearance::Storybook,
                 default_projects_dir: Some(PathBuf::from("/new/projects")),
                 default_backups_dir: None,
@@ -414,6 +444,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let prefs = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            automatic_backups_enabled: true,
             appearance: Appearance::Storybook,
             default_projects_dir: Some(PathBuf::from("/recovered")),
             default_backups_dir: None,
@@ -437,6 +468,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let prior = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            automatic_backups_enabled: true,
             appearance: Appearance::Storybook,
             default_projects_dir: Some(PathBuf::from("/prior")),
             default_backups_dir: None,
@@ -458,6 +490,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let current = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            automatic_backups_enabled: true,
             appearance: Appearance::Storybook,
             default_projects_dir: Some(PathBuf::from("/current")),
             default_backups_dir: None,
@@ -480,6 +513,7 @@ mod tests {
         let path = dir.path().join("preferences.json");
         let prior = AppPreferences {
             schema_version: PREFERENCES_SCHEMA_VERSION,
+            automatic_backups_enabled: true,
             appearance: Appearance::Storybook,
             default_projects_dir: Some(PathBuf::from("/still-valid")),
             default_backups_dir: None,

@@ -48,4 +48,4 @@ Before W13 implementation, decide how dated relationship and location assertions
 
 ## Approval record
 
-No new decisions in this register were approved by preparing this roadmap. Previously implemented approvals, including custom Number units, reviewed Field merging and the Timeline foundation, remain in force. Future answers should be recorded under the corresponding decision without rewriting that history.
+Preparing the original roadmap did not itself approve new behavior. D01 was subsequently approved explicitly on 7 October 2026. Previously implemented approvals, including custom Number units, reviewed Field merging and the Timeline foundation, remain in force. Future answers should be recorded under the corresponding decision without rewriting that history.

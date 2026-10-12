@@ -4989,6 +4989,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -4998,6 +4999,7 @@ dependencies = [
  "unicode-normalization",
  "unicode-segmentation",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

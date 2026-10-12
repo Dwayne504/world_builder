@@ -19,6 +19,9 @@ pub enum BackupError {
     #[error(transparent)]
     Domain(#[from] crate::domain::DomainError),
 
+    #[error("This backup contains database journal files and may be incomplete. It was left unchanged. Create a new backup from the open Project before restoring a copy.")]
+    UnexpectedJournal,
+
     #[error("backup snapshot at '{0}' failed SQLite integrity_check")]
     CorruptSnapshot(String),
 
