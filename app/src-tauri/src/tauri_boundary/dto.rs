@@ -74,6 +74,7 @@ pub struct TypeDto {
     pub category_id: String,
     pub parent_type_id: Option<String>,
     pub name: String,
+    pub retired_at: Option<String>,
     pub revision: i64,
     pub global_revision: i64,
 }
@@ -85,6 +86,7 @@ impl From<TypeDef> for TypeDto {
             category_id: value.category_id.to_string(),
             parent_type_id: value.parent_type_id.map(|id| id.to_string()),
             name: value.name,
+            retired_at: value.retired_at,
             revision: value.revision,
             global_revision: value.global_revision,
         }

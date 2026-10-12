@@ -1,4 +1,6 @@
 import { CategoryDeleteReview } from "./CategoryDeleteReview";
+import { TypeRetirementReview } from "./TypeRetirementReview";
+import { assignmentTypeChoices, typeStatusLabel } from "./typePresentation";
 import { applyStructure } from "./api";
 import { FieldSuggestions } from "./FieldSuggestions";
 import { ProjectionConfiguration } from "./ProjectionConfiguration";
@@ -83,7 +85,16 @@ export function CategoryManager({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<
-    "category" | "type" | "field" | "reuse" | "merge" | "rename" | "rename-type" | "delete" | null
+    | "category"
+    | "type"
+    | "field"
+    | "reuse"
+    | "merge"
+    | "rename"
+    | "rename-type"
+    | "type-lifecycle"
+    | "delete"
+    | null
   >(null);
   const [mergeBackup, setMergeBackup] = useState<string | null>(null);
   const [typeSearch, setTypeSearch] = useState("");
@@ -104,8 +115,8 @@ export function CategoryManager({
   const selectedType = categoryTypes.find((t) => t.id === typeId);
   const typeLabel = (type: TypeDef) =>
     categoryTypes.some((other) => other.id !== type.id && other.name === type.name)
-      ? `${type.name} · ${type.id}`
-      : type.name;
+      ? `${typeStatusLabel(type)} · ${type.id}`
+      : typeStatusLabel(type);
   const provider: FieldProvider = { kind: typeId ? "type" : "category", id: typeId || categoryId };
   const targetLabel =
     categoryTypes.find((t) => t.id === typeId)?.name ?? selectedCategory?.name ?? "";
@@ -114,7 +125,7 @@ export function CategoryManager({
     d.bindings.some((b) => b.provider.kind === provider.kind && b.provider.id === provider.id),
   );
   const matchingTypes = categoryTypes.filter((type) =>
-    `${type.name} ${categoryTypes.find((parent) => parent.id === type.parentTypeId)?.name ?? ""}`
+    `${typeStatusLabel(type)} ${categoryTypes.find((parent) => parent.id === type.parentTypeId)?.name ?? ""}`
       .toLocaleLowerCase()
       .includes(typeSearch.trim().toLocaleLowerCase()),
   );
@@ -223,6 +234,7 @@ export function CategoryManager({
       .finally(() => {
         pending.current = null;
       });
+    return pending.current;
   }
   function apply(command: FieldCommand) {
     if (catalog)
@@ -382,7 +394,13 @@ export function CategoryManager({
                           {t.parentTypeId && (
                             <small>
                               {" "}
-                              · {categoryTypes.find((p) => p.id === t.parentTypeId)?.name}
+                              ·{" "}
+                              {typeStatusLabel(
+                                categoryTypes.find((p) => p.id === t.parentTypeId) ?? {
+                                  name: "Parent Type",
+                                  retiredAt: null,
+                                },
+                              )}
                             </small>
                           )}
                         </span>
@@ -460,19 +478,33 @@ export function CategoryManager({
                 <p className="manager-current-scope">
                   Editing defaults for <strong>{targetLabel}</strong> · {supplied.length} fields
                   {selectedType && (
-                    <button
-                      className="quiet-button"
-                      disabled={busy || dirty || loading || !catalog}
-                      onClick={() => {
-                        setRenamingType(true);
-                        setTypeName(selectedType.name);
-                        setForm("rename-type");
-                      }}
-                    >
-                      Rename Type
-                    </button>
+                    <>
+                      <button
+                        className="quiet-button"
+                        disabled={busy || dirty || loading || !catalog}
+                        onClick={() => {
+                          setRenamingType(true);
+                          setTypeName(selectedType.name);
+                          setForm("rename-type");
+                        }}
+                      >
+                        Rename Type
+                      </button>
+                      <button
+                        className="quiet-button"
+                        disabled={busy || dirty || loading || !catalog}
+                        onClick={() => setForm("type-lifecycle")}
+                      >
+                        {selectedType.retiredAt ? "Restore Type…" : "Retire Type…"}
+                      </button>
+                    </>
                   )}
                 </p>
+                {selectedType?.retiredAt && (
+                  <p className="field-note">
+                    This Type is retired. Existing Entries and child Types keep its defaults.
+                  </p>
+                )}
                 {typeId && (
                   <p className="muted">
                     Category and parent-Type defaults are also available. The list below configures
@@ -575,6 +607,33 @@ export function CategoryManager({
             )}
           </div>
         </div>
+      </Dialog>
+      <Dialog
+        open={open && form === "type-lifecycle"}
+        title="Type availability"
+        onClose={dismissForm}
+      >
+        {form === "type-lifecycle" && selectedType && (
+          <>
+            {formFeedback}
+            <TypeRetirementReview
+              projectId={projectId}
+              typeId={selectedType.id}
+              busy={busy || loading}
+              onCancel={resetDrafts}
+              onConfirm={async (revision, retired) => {
+                const outcome = await perform(() =>
+                  applyStructure(projectId, revision, {
+                    kind: "set_type_retired",
+                    id: selectedType.id,
+                    retired,
+                  }),
+                );
+                return outcome?.kind === "committed";
+              }}
+            />
+          </>
+        )}
       </Dialog>
       <Dialog open={open && form === "rename-type"} title="Rename Type" onClose={dismissForm}>
         <p>
@@ -712,11 +771,22 @@ export function CategoryManager({
             value={parentId}
             onChange={setParentId}
             emptyLabel="No parent"
-            choices={categoryTypes.map((type) => ({ id: type.id, label: typeLabel(type) }))}
+            choices={assignmentTypeChoices(categoryTypes, "", parentId).map((choice) => ({
+              ...choice,
+              label: typeLabel(categoryTypes.find((type) => type.id === choice.id)!),
+            }))}
           />
+          {categoryTypes.find((type) => type.id === parentId)?.retiredAt && (
+            <p className="field-note">
+              This parent Type is retired. Choose an available parent or No parent.
+            </p>
+          )}
           <button
             className="primary-button"
-            disabled={!typeName.trim()}
+            disabled={
+              !typeName.trim() ||
+              (!!parentId && !categoryTypes.some((type) => type.id === parentId && !type.retiredAt))
+            }
             onClick={() =>
               perform(() => createType(projectId, categoryId, typeName, parentId || undefined))
             }
