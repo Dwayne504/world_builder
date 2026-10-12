@@ -136,11 +136,13 @@ function ResultRow({
 
 export function ProjectSearch({
   projectId,
+  refreshKey = 0,
   view,
   onViewChange,
   onOpen,
 }: {
   projectId: string;
+  refreshKey?: number;
   view: SearchView;
   onViewChange: (view: SearchView) => void;
   onOpen: (target: SearchTarget) => void;
@@ -190,6 +192,7 @@ export function ProjectSearch({
     };
   }, [
     projectId,
+    refreshKey,
     query,
     includeInactive,
     limitPerGroup,

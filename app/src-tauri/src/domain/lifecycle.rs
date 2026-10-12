@@ -1,4 +1,4 @@
-use super::{story::WorkspaceState, CategoryId, EntryId};
+use super::{story::WorkspaceState, CategoryId, EntryId, TypeId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
     rename_all_fields = "camelCase"
 )]
 pub enum StructureCommand {
+    RenameType {
+        id: TypeId,
+        name: String,
+    },
     RenameCategory {
         id: CategoryId,
         name: String,
