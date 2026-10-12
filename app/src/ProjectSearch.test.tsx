@@ -71,6 +71,34 @@ it("groups identities ahead of prose and opens the actual matching document area
     limitPerGroup: 10,
   });
 });
+it("labels Entry description matches and opens the Entry without treating prose as a Chapter link", async () => {
+  vi.mocked(searchProject).mockResolvedValue({
+    globalRevision: 4,
+    groups: [
+      {
+        kind: "text",
+        total: 1,
+        hits: [
+          {
+            key: "description-entry",
+            title: "Wanderer",
+            context: "Description · Text match",
+            workspaceState: "active",
+            reason: "Plain text · not a structural link",
+            excerpt: "The captain returned.",
+            target: { kind: "entry", entryId: "e" },
+          },
+        ],
+      },
+    ],
+  });
+  render(<Search initial={{ ...view, query: "captain" }} />);
+  expect(await screen.findByText("Description · Text match")).toBeVisible();
+  expect(screen.getByText("The captain returned.")).toBeVisible();
+  expect(screen.queryByRole("button", { name: /Open Chapter/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Wanderer" }));
+  expect(open).toHaveBeenCalledWith({ kind: "entry", entryId: "e" });
+});
 it("ignores a late response to an earlier query", async () => {
   let resolve!: (value: SearchResults) => void;
   vi.mocked(searchProject)

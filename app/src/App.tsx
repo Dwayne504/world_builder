@@ -65,6 +65,7 @@ import { useEntryName } from "./useEntryName";
 import { useMutationCoordinator } from "./useMutationCoordinator";
 import { decideClose, type CloseIntent } from "./closeDecision";
 import { EntryFieldsPanel, type FieldsController } from "./EntryFieldsPanel";
+import { EntryDescriptionPanel } from "./EntryDescriptionPanel";
 import { SpatialPanel } from "./SpatialPanel";
 import { EntryRelationshipsPanel } from "./EntryRelationshipsPanel";
 import { Dialog } from "./Dialog";
@@ -883,6 +884,14 @@ function EntryEditor({
     setRelationshipsCanSubmit(controller.canSubmit);
   }, []);
   const structureDirtyRef = useRef(false);
+  const descriptionController = useRef<FieldsController | null>(null);
+  const [descriptionState, setDescriptionState] = useState<SaveState>("saved");
+  const [descriptionCanSubmit, setDescriptionCanSubmit] = useState(true);
+  const receiveDescription = useCallback((controller: FieldsController) => {
+    descriptionController.current = controller;
+    setDescriptionState(controller.state);
+    setDescriptionCanSubmit(controller.canSubmit);
+  }, []);
   const fieldsController = useRef<FieldsController | null>(null);
   const [fieldsState, setFieldsState] = useState<SaveState>("saved");
   const [fieldsCanSubmit, setFieldsCanSubmit] = useState(true);
@@ -893,6 +902,10 @@ function EntryEditor({
   }, []);
   const submit = useCallback(
     async (applyingStructure = false): Promise<SubmitOutcome> => {
+      const descriptionOutcome = await (descriptionController.current?.submit() ??
+        Promise.resolve({ kind: "no-op" } as SubmitOutcome));
+      if (descriptionOutcome.kind === "failed" || descriptionOutcome.kind === "committed-stale")
+        return descriptionOutcome;
       // Capture pending writes before awaiting another editor. A failure must
       // remain a failure rather than turn into an accidental automatic retry.
       const spatialOutcome = await (spatialController.current?.submit() ??
@@ -961,18 +974,21 @@ function EntryEditor({
   structureDirtyRef.current = structureDirty;
   const combinedEntryState: SaveState =
     editor.saveState === "saving" ||
+    descriptionState === "saving" ||
     mutations.state === "saving" ||
     fieldsState === "saving" ||
     relationshipsState === "saving" ||
     spatialState === "saving"
       ? "saving"
       : editor.saveState === "failed" ||
+          descriptionState === "failed" ||
           mutations.state === "failed" ||
           fieldsState === "failed" ||
           relationshipsState === "failed" ||
           spatialState === "failed"
         ? "failed"
         : editor.saveState === "dirty" ||
+            descriptionState === "dirty" ||
             structureDirty ||
             fieldsState === "dirty" ||
             relationshipsState === "dirty" ||
@@ -984,12 +1000,31 @@ function EntryEditor({
     onController({
       state: combinedEntryState,
       submit,
-      canSubmit: !structureDirty && fieldsCanSubmit && relationshipsCanSubmit && spatialCanSubmit,
+      autoFlush:
+        descriptionState === "dirty" &&
+        descriptionCanSubmit &&
+        !structureDirty &&
+        editor.saveState === "saved" &&
+        fieldsState === "saved" &&
+        relationshipsState === "saved" &&
+        spatialState === "saved",
+      canSubmit:
+        !structureDirty &&
+        descriptionCanSubmit &&
+        fieldsCanSubmit &&
+        relationshipsCanSubmit &&
+        spatialCanSubmit,
     });
   }, [
     combinedEntryState,
     onController,
     structureDirty,
+    descriptionCanSubmit,
+    descriptionState,
+    editor.saveState,
+    fieldsState,
+    relationshipsState,
+    spatialState,
     fieldsCanSubmit,
     relationshipsCanSubmit,
     spatialCanSubmit,
@@ -1111,6 +1146,7 @@ function EntryEditor({
               placeholder="[Unnamed Entry]"
               disabled={
                 mutations.state === "saving" ||
+                descriptionState !== "saved" ||
                 relationshipsState === "saving" ||
                 spatialState !== "saved"
               }
@@ -1379,6 +1415,22 @@ function EntryEditor({
           </details>
         </section>
       </Dialog>
+      <EntryDescriptionPanel
+        projectId={projectId}
+        entryId={editor.entry.id}
+        disabled={
+          locked ||
+          mutations.state === "saving" ||
+          editor.saveState !== "saved" ||
+          fieldsState !== "saved" ||
+          relationshipsState !== "saved" ||
+          spatialState !== "saved" ||
+          structureDirty
+        }
+        onController={receiveDescription}
+        onRevision={receiveRevision}
+        getRevision={getRevision}
+      />
       <SpatialPanel
         projectId={projectId}
         entryId={editor.entry.id}
@@ -1387,6 +1439,7 @@ function EntryEditor({
           locked ||
           mutations.state === "saving" ||
           editor.saveState !== "saved" ||
+          descriptionState !== "saved" ||
           fieldsState !== "saved" ||
           relationshipsState !== "saved" ||
           structureDirty
@@ -1408,6 +1461,7 @@ function EntryEditor({
             locked ||
             mutations.state === "saving" ||
             editor.saveState === "saving" ||
+            descriptionState !== "saved" ||
             relationshipsState !== "saved" ||
             spatialState !== "saved"
           }
@@ -1431,6 +1485,7 @@ function EntryEditor({
             locked ||
             mutations.state === "saving" ||
             editor.saveState !== "saved" ||
+            descriptionState !== "saved" ||
             fieldsState !== "saved" ||
             spatialState !== "saved" ||
             structureDirty
@@ -1758,9 +1813,7 @@ function EntryWorkflow({
     if (
       mutations.isPending() ||
       controllerRef.current?.state === "saving" ||
-      ((chapter || location.page === "timeline") &&
-        controllerRef.current?.autoFlush &&
-        controllerRef.current.state === "dirty")
+      (controllerRef.current?.autoFlush && controllerRef.current.state === "dirty")
     ) {
       navigationRequestRef.current = true;
       setNavigating(true);

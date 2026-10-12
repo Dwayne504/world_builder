@@ -37,6 +37,9 @@ pub enum PersistenceError {
     #[error("expected revision {expected} is stale; the current committed revision is {current}")]
     StaleRevision { expected: i64, current: i64 },
 
+    #[error("This description changed since it was loaded. Review the saved version before replacing it.")]
+    StaleDocumentRevision,
+
     #[error("the Project worker has already shut down")]
     WorkerShutDown,
 
