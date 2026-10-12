@@ -6,7 +6,7 @@ Use these instructions with one slice from [the workload packets](WORKLOADS.md).
 
 1. Read `.github/copilot-instructions.md`, any applicable `AGENTS.md`, Concept V0.02, Milestone 01, Architecture Proposal V2, and the feature notes relevant to the chosen slice.
 2. Inspect status, current branch, recent commits, remotes, local changes and open PRs. Preserve all uncommitted and checkpointed work, including changes that appear to be only line endings.
-3. Verify PR #29 is incorporated into the intended base. It was merged into `main` at `7da49ea`; do not silently start from an older local checkout. Use the current remote base, including any later merged dependencies. Never merge a PR yourself.
+3. Verify PR #29 is incorporated into the intended base. It was merged into `main` at `7da49ea`; do not silently start from an older local checkout. Use the current remote base, including any later merged dependencies. Merge only under explicit author authorization and after checking the current head, CI, dependency order and combined result.
 4. Fetch and use the current remote base. Work on a new appropriately named feature branch or continue an existing unmerged PR for the same slice. Never reset, force-push, discard work or rewrite history.
 5. Check the packet's decision gates against recorded author answers. Do not re-request decisions already approved. If a new product question appears, describe it and prepare the reviewable design before implementing behavior that depends on the answer.
 
@@ -56,17 +56,17 @@ For documentation-only design slices, validate facts, links, formatting and the 
 ## Delivery contract
 
 - Review the complete diff and explicitly stage only intended files.
-- Commit the completed slice, push if authenticated, and create or update an unmerged PR. Use a human-readable problem statement, scope, tests and limitations. Attach the PR to the coding session where supported.
+- Commit the completed slice, push if authenticated, and create or update a PR. Use a human-readable problem statement, scope, tests and limitations. Attach the PR to the coding session where supported. Leave it unmerged unless current author authorization permits merging.
 - Report branch, commit, files changed, check results, unverified behavior and a short Windows manual-test checklist.
 - Update the roadmap's completion tracking and record any newly approved product decision. Do not mark an entire workload complete when only one slice is done.
-- Leave the next session a specific stopping point. Never merge the PR.
+- Leave the next session a specific stopping point. On 12 October 2026 the author explicitly authorized merging ready PRs and continuing to merge as needed. That supersedes this document's older blanket prohibition; it does not waive verification, product decision gates or preservation of local work.
 
 ## Reusable session prompt
 
-> Work on Worldcrafter workload **Wxx, slice x** from `docs/roadmap/WORKLOADS.md`. Follow `docs/roadmap/SESSION_START.md` and the relevant decisions in `docs/roadmap/DECISIONS.md`. Verify the current repository and PR state; use `main` only after it contains PR #29 and all required dependencies. State scope, acceptance tests and deferrals before editing. Implement only the selected slice if its behavior is already approved. If an unresolved product decision blocks it, prepare the concrete proposal and ask before implementing dependent behavior. Preserve existing work and all supplied real Projects/backups. Complete the applicable checks, commit and push the result, and open or update an unmerged PR. Do not merge anything.
+> Work on Worldcrafter workload **Wxx, slice x** from `docs/roadmap/WORKLOADS.md`. Follow `docs/roadmap/SESSION_START.md` and the relevant decisions in `docs/roadmap/DECISIONS.md`. Verify the current repository and PR state; use `main` only after it contains PR #29 and all required dependencies. State scope, acceptance tests and deferrals before editing. Implement only the selected slice if its behavior is already approved. If an unresolved product decision blocks it, prepare the concrete proposal and ask before implementing dependent behavior. Preserve existing work and all supplied real Projects/backups. Complete the applicable checks, commit and push the result, and open or update a PR. Merge only when the author's current authorization permits it and verification of the combined result passes.
 
-## First recommended session prompt
+## Next recommended session prompt
 
-> Prepare **W01a**, the automatic backup policy and failure model. Inspect the existing snapshot, recovery, worker and preference code. Produce a short proposal resolving D01, with suggested cadence, retention, snapshot ownership, disk-full behavior, sleep/resume and close behavior. Reuse the existing validated backup format. Show concrete acceptance tests and the implementation breakdown for W01b. Do not enable an unapproved schedule or delete any backups. If D01 has already been approved by the author, record that approval and proceed with W01b under the normal implementation verification contract.
+> Work on **W14a**, desktop release acceptance for the consolidated foundations. Start from current remote `main` after checking the October integration record and PR state. Use only synthetic disposable Projects. Verify the combined Entry, Field, Type, Explore, navigation, backup and export flows on native Windows; record UI, DPI, performance and failure-state evidence. Fix reproduced defects in bounded follow-up PRs. Do not claim installer, update or distribution readiness without the separate D02 decision.
 
-For an implementation session without a pending policy decision, substitute **W03a: rich Entry descriptions** in the reusable prompt.
+The first slices of W01 and W03 are already implemented. Consult the delivery record before selecting work so a new session does not recreate them.

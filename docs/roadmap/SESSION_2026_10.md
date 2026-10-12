@@ -1,6 +1,33 @@
 # Workload delivery — October 2026
 
-This records implemented slices, not completion of the whole Concept. Supplied real Projects and backups were not modified. All listed PRs remain unmerged. The implementation commits below are fixed review references; later documentation-only commits may advance a branch.
+This records implemented slices, not completion of the whole Concept. Supplied real Projects and backups were not modified. The author explicitly authorized merging ready work on 12 October. The implementation commits below remain fixed review references; use the integration record for the newer combined heads and checks.
+
+## Integration — 12 October 2026
+
+PR #31 was already merged by the author at `fa328f4c1ad6166b31cff483f9955ce87a49df97`. The remaining work was integrated in a separate clean checkout with ordinary merge commits. No history was rewritten, no branch was force-pushed, and prior worktrees and local edits were preserved. Shared menus, API commands, save controllers, tests and Windows dependency features were reconciled rather than choosing one branch's version wholesale.
+
+| Order | PR | Verified integrated head | Main merge commit |
+| --- | --- | --- | --- |
+| 1 | #34 Windows build | `aff4f015d76cb7fe6cb81a899a8cf16e3b785916` | `d81d41b015cd51e3effc1ec2e5411dfc000ca7bd` |
+| 2 | #32 Type renaming | `0c05806b671f39ab0ef0b4333ad7dd9156367fef` | `6a7c8dd7b15f475daf1709823772c9869306649a` |
+| 3 | #33 Entry descriptions | `929f412de1ec68eff73d212d992dcc460499f371` | `c890324458d02f052fc897063a7ff084dd54d3b8` |
+| 4 | #37 Pins and recents | `447c278ecc5c44d4986092e453d4c2dc66c94c7e` | `e1d88bbd5896a8855b7c1956e4a7be9a35b6dc4a` |
+| 5 | #39 Rich Text Fields | `479cee6ca14a7b453331e1be938fdf91c913068b` | `f62060cf03398f6509f6b8267fdaf3179ba035f4` |
+| 6 | #40 Type retirement | `69924e7b53913d1ecb1acc1395a860713f390c52` | `9513c0d9c74626757a90e447f1bf5ce9f16b7d99` |
+| 7 | #41 Entry References | `18d10d433440d9bf5fb2529162a70b6b781975f4` | `5ca9ddebdd1faefdf6ad7069bbb628dde0aac46f` |
+| 8 | #35 Explore | `ec0566c07fb3c09d9a37536be248e870153dcce2` | `cb7ec078adfb14fbdf220fdeab5398ee22dd0706` |
+| 9 | #36 Automatic backups | `4142cc48c54c470b4dab0b4eb781971c6a688c80` | `fa58cbe8a93549cf9c308142accbf79c9b52d21f` |
+| 10 | #38 Markdown export and this handoff | Code at `a3011d0df19e5713e19dfe5d238b1922d912bbc3`; this PR adds documentation only afterward | Final merge gate: current head CI and unchanged prospective merge content |
+
+Before each merge, the exact PR head, base, non-draft status and successful checks were verified. The prospective merge tree also had to equal the tested head's tree. Stacked PRs were retargeted to `main` as their dependencies landed. Fetch `main` after #38 merges; older feature checkouts are preserved historical work, not the launch target for all features.
+
+The combined code passed [Linux CI](https://github.com/Dwayne504/world_builder/actions/runs/38217426368) and a [clean Windows build](https://github.com/Dwayne504/world_builder/actions/runs/38218199087). Windows verified all 449 frontend tests, all 316 Rust tests, frontend typecheck/lint/format/build, Rust fmt/Clippy/check, Git whitespace and clean-source checks, and the native release executable. Three subprocess test helpers remain intentionally ignored as standalone tests and are invoked by parent tests. The workflow publishes the executable and its checksum/commit report as `worldcrafter-windows-a3011d0df19e5713e19dfe5d238b1922d912bbc3`.
+
+Local Windows Rust tests and strict checks passed too. Local frontend runs encountered five-second time limits under load; a later run was interrupted by computer suspension for nearly three hours. Focused reruns passed, but no clean full local frontend pass is claimed. The complete clean Windows CI run is the independent frontend evidence. Test assertions and timeouts were not relaxed. The existing frontend bundle-size advisory remains.
+
+Fresh npm audit reported zero vulnerabilities. GitHub secret scanning and push protection were enabled, with zero open alerts on 12 October. CodeQL and a local secret scanner were not configured; no successful run is claimed. Native interactive UI, display scaling, dialogs, long-running backup sessions, installers and updates still require separate acceptance. This is a verified build, not a completed release acceptance cycle.
+
+Integration resolutions are recorded in the merge commits above. The final handoff edits only `docs/roadmap/README.md`, `docs/roadmap/SESSION_START.md` and this file. No product decision was added. W14a desktop acceptance is the next useful workload; new gated features still require their recorded decisions.
 
 ## Delivered slices
 
@@ -20,19 +47,19 @@ This records implemented slices, not completion of the whole Concept. Supplied r
 
 Complete implementation checks mean frontend typecheck, test suite, lint, formatting and production build; Rust formatting, test suite, strict all-target Clippy and cargo check; and Git whitespace checks. Each Rust count excludes three intentionally ignored subprocess helpers exercised by parent tests. PR #31 changes frontend tooling only, so Rust was not rerun there. The existing large JavaScript chunk advisory remains.
 
-## Dependency order
+## Original implementation dependency order
 
 - PRs #31–36 and #38 start from the merged roadmap baseline at `e8267f9`.
 - #37 builds on #33; #39 builds on #37.
 - #40 Type retirement builds on #39 and includes the Type-renaming work from #32. #41 Entry References builds on #40.
 - Shared menus and command registration files may need reconciliation as independent PRs land. Green CI validates each branch, not a future combined build. Run the complete checks again after integration; do not drop another slice when resolving conflicts.
-- No PR has been merged by the agent. Older app builds must continue refusing newer Project schemas.
+- This was the original pre-integration dependency graph; the 12 October record supersedes its merge status. Older app builds must continue refusing newer Project schemas.
 
 ## Safety and independent verification
 
 The Windows build procedure produced a native executable from `dd158d027cccb7bf8e9b8d1d2d3878713bc03841`, SHA-256 `59f2d982e86ba36815f9e9f66640dcf89002737de0314096f7bbdb2924b4b7b0`. The final PR #34 commit adds verification documentation after that build. This is build proof, not installer, DPI, native dialog or interactive desktop release acceptance.
 
-PR #31 fixes the four dependency advisories found in the baseline. Feature branches based directly on that baseline do not themselves include that dependency update. GitHub secret scanning and push protection were enabled with no open alerts when inspected on 11 October. No local secret-scanner or CodeQL runner/workflow was configured, so no passing local security scan is claimed.
+PR #31 fixes the four dependency advisories found in the baseline. The original implementation commits based directly on that baseline did not include the update; all integrated heads now do. GitHub secret scanning and push protection were enabled with no open alerts when inspected on 11 October and again during integration on 12 October. No local secret-scanner or CodeQL runner/workflow was configured, so no passing local security scan is claimed.
 
 The Markdown export fixture was read by an independent CommonMark implementation. Reading order, Unicode, formatting, literal markup and exclusion of non-manuscript text were checked without modifying the source. Native Save As interaction remains a desktop acceptance item.
 
