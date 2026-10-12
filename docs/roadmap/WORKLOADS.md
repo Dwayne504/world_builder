@@ -133,7 +133,7 @@ Each packet defines a user outcome, bounded slices, code starting points and acc
 
 **Deferred:** pop-out windows, cross-Project tabs, synchronization across machines and automatic reopening behavior beyond D06.
 
-**Session selection:** W09a can start from the existing navigation specification. Branch suggestion: `feature/workspace-pins`.
+**Status:** W09a is implemented on `feature/workspace-pins`, stacked on the Entry descriptions slice. See [verification](../milestones/WORKSPACE_PINS_VERIFICATION.md). W09b still requires D06.
 
 ## W10 Manuscript export and writing recovery
 
