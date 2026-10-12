@@ -3,12 +3,13 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryFieldsPanel } from "./EntryFieldsPanel";
-import { applyFields, readFields, deleteEntryField } from "./api";
+import { applyFields, readFields, deleteEntryField, listEntries } from "./api";
 import type { Entry, EntryFields, FieldDefinition } from "./types";
 vi.mock("./api", () => ({
   applyFields: vi.fn(),
   readFields: vi.fn(),
   deleteEntryField: vi.fn(),
+  listEntries: vi.fn(),
 }));
 const entry: Entry = {
   workspaceState: "active",
@@ -55,6 +56,76 @@ function show() {
   );
   return onController;
 }
+it("creates an empty Entry Reference Field without serializing a scalar initial value", async () => {
+  show();
+  await screen.findByLabelText("Value: Eye colour");
+  fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+  fireEvent.change(screen.getByLabelText("new-field-name"), { target: { value: "See also" } });
+  fireEvent.change(screen.getByLabelText("new-field-kind"), {
+    target: { value: "entry_reference" },
+  });
+  expect(screen.getByText(/Choose Entries after creating this Field/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Create field" }));
+  await waitFor(() =>
+    expect(applyFields).toHaveBeenCalledWith(
+      "project",
+      "entry",
+      2,
+      expect.objectContaining({
+        kind: "create",
+        fieldKind: "entry_reference",
+        value: null,
+      }),
+    ),
+  );
+});
+it("autosaves references, waits for acknowledgement and preserves a failed selection", async () => {
+  const reference: FieldDefinition = {
+    ...definition,
+    name: "See also",
+    kind: "entry_reference",
+    options: [],
+  };
+  const data: EntryFields = {
+    ...snapshot,
+    definitions: [reference],
+    fields: [{ definition: reference, available: true, value: null, referenceTargets: [] }],
+  };
+  vi.mocked(readFields).mockResolvedValue(data);
+  vi.mocked(listEntries).mockResolvedValue([{ ...entry, id: "target", displayName: "Atlas" }]);
+  let reject!: (error: Error) => void;
+  vi.mocked(applyFields).mockReturnValue(
+    new Promise((_yes, no) => {
+      reject = no;
+    }),
+  );
+  const controller = show();
+  await screen.findByText("Not filled in");
+  await act(async () => fireEvent.click(screen.getByText("Edit references")));
+  fireEvent.click(await screen.findByRole("button", { name: "Add reference: Atlas" }));
+  await waitFor(() =>
+    expect(applyFields).toHaveBeenCalledWith("project", "entry", 2, {
+      kind: "set_values",
+      edits: [
+        {
+          fieldId: "field",
+          value: {
+            kind: "entry_references",
+            value: { expectedIds: [], items: [{ kind: "entry", entryId: "target" }] },
+          },
+        },
+      ],
+    }),
+  );
+  expect(controller.mock.lastCall![0].state).toBe("saving");
+  expect(screen.getByRole("button", { name: "Remove reference: Atlas" })).toBeDisabled();
+  await act(async () => reject(new Error("Disk unavailable")));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Disk unavailable");
+  expect(screen.getByRole("list", { name: "Selected Entries: See also" })).toHaveTextContent(
+    "Atlas",
+  );
+  expect(controller.mock.lastCall![0].state).toBe("failed");
+});
 describe("Field authoring", () => {
   it("keeps a shared definition draft reachable when manager search hides its row", async () => {
     const onController = show();

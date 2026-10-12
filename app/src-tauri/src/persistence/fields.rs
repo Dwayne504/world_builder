@@ -200,6 +200,11 @@ fn read_snapshot(
                     default_sources,
                     value,
                     projected_relationships,
+                    reference_targets: if definition.kind == FieldKind::EntryReference {
+                        super::entry_references::targets(conn, entry, definition.id)?
+                    } else {
+                        vec![]
+                    },
                 });
             }
         }
@@ -217,6 +222,9 @@ fn read_value(
     entry: EntryId,
     definition: &FieldDefinition,
 ) -> Result<Option<FieldValue>, PersistenceError> {
+    if definition.kind == FieldKind::EntryReference {
+        return super::entry_references::read_value(conn, entry, definition.id);
+    }
     type ValueRow = (String, Option<String>, Option<f64>, Option<bool>);
     let row: Option<ValueRow> = conn.query_row("SELECT id,text_value,number_value,bool_value FROM field_value WHERE entry_id = ?1 AND field_id = ?2",
         params![entry.to_string(), definition.id.to_string()], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
@@ -246,7 +254,7 @@ fn read_value(
             );
             values
         }
-        FieldKind::Relationship => {
+        FieldKind::Relationship | FieldKind::EntryReference => {
             return Err(invalid("Relationship Fields cannot contain scalar values"))
         }
     }))
@@ -594,6 +602,9 @@ fn set_value(
             now,
         );
     }
+    if d.kind == FieldKind::EntryReference {
+        return super::entry_references::set(tx, entry, edit.field_id, edit.value);
+    }
     let value = match edit.value {
         Some(FieldValue::Text(ref s)) if s.is_empty() => None,
         Some(FieldValue::Choices(ref ids)) if ids.is_empty() => None,
@@ -688,6 +699,9 @@ pub(super) fn preview_merge(
     }
     if source.kind == FieldKind::RichText || target.kind == FieldKind::RichText {
         blockers.push("Rich Text Fields cannot be combined yet. Both documents are preserved; choose which Field to use without merging.".into());
+    }
+    if source.kind == FieldKind::EntryReference || target.kind == FieldKind::EntryReference {
+        blockers.push("Entry Reference Fields cannot be combined yet. Both selections are preserved; reuse one Field without merging.".into());
     }
     if source.name.trim().to_lowercase() != target.name.trim().to_lowercase() {
         blockers.push("Only same-name duplicates can be merged. Rename deliberately before reviewing a merge.".into());
@@ -838,6 +852,10 @@ pub(super) fn delete_local(
     }
     let now = Utc::now().to_rfc3339();
     tx.execute("DELETE FROM field_choice_value WHERE value_id IN (SELECT id FROM field_value WHERE entry_id=?1 AND field_id=?2)", params![entry.to_string(),field.to_string()])?;
+    tx.execute(
+        "DELETE FROM entry_reference_value WHERE entry_id=?1 AND field_id=?2",
+        params![entry.to_string(), field.to_string()],
+    )?;
     tx.execute(
         "DELETE FROM field_value WHERE entry_id=?1 AND field_id=?2",
         params![entry.to_string(), field.to_string()],
