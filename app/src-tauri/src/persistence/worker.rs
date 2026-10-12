@@ -77,6 +77,10 @@ enum Job {
         content: serde_json::Value,
         reply: Reply<crate::domain::entry_description::EntryDescriptionSnapshot>,
     },
+    ReadManuscripts {
+        chapter_ids: Vec<crate::domain::structure::ChapterId>,
+        reply: Reply<crate::domain::manuscript_export::ManuscriptSelection>,
+    },
     PreviewCategory {
         id: CategoryId,
         reply: Reply<crate::domain::lifecycle::CategoryDeletePreview>,
@@ -467,6 +471,9 @@ impl ProjectDbWorker {
                 } => {
                     let _ = reply.send(super::timeline::apply(&mut conn, expected, command));
                 }
+                Job::ReadManuscripts { chapter_ids, reply } => {
+                    let _ = reply.send(super::manuscript_export::read(&conn, chapter_ids));
+                }
                 Job::ReadStory { reply } => {
                     let _ = reply.send(super::story::index(&conn));
                 }
@@ -738,6 +745,12 @@ impl ProjectDbWorker {
             content,
             reply,
         })
+    }
+    pub fn read_manuscripts(
+        &self,
+        chapter_ids: Vec<crate::domain::structure::ChapterId>,
+    ) -> Result<crate::domain::manuscript_export::ManuscriptSelection, PersistenceError> {
+        self.call(|reply| Job::ReadManuscripts { chapter_ids, reply })
     }
     pub fn read_story(&self) -> Result<crate::domain::story::StoryIndex, PersistenceError> {
         self.call(|reply| Job::ReadStory { reply })

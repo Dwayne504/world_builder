@@ -12,6 +12,7 @@ mod explore;
 mod fields;
 pub mod lifecycle;
 pub mod lock;
+mod manuscript_export;
 pub mod migrations;
 mod navigation;
 pub mod pragmas;
