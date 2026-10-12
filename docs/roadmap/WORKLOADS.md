@@ -21,7 +21,7 @@ Each packet defines a user outcome, bounded slices, code starting points and acc
 
 **Deferred:** cloud backup, external sync engines, arbitrary folder cleanup and changing the existing backup format. Architecture V2's initial packaging proposal does not authorize replacing the current validated snapshot format during this slice.
 
-**Session selection:** W01a first; W01b and W01c only after D01. Branch suggestion: `feature/automatic-backups`.
+**Status:** W01a policy is approved; W01b–c are implemented on `feature/automatic-backups`. See [verification and native acceptance](../milestones/AUTOMATIC_BACKUPS_VERIFICATION.md). Retention and scheduling ship together; this does not claim release acceptance.
 
 ## W02 Reliable Windows builds and releases
 

@@ -19,7 +19,7 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 
 | Workload | Outcome | First slice | Dependencies |
 | --- | --- | --- | --- |
-| W01 | Rolling automatic backups with safe retention | Decision needed | Existing backup service |
+| W01 | Rolling automatic backups with safe retention | W01a–c implemented; native acceptance remains | Existing backup service |
 | W02 | Reproducible Windows build and release process | Build procedure verified; native acceptance pending | [Verification](../milestones/WINDOWS_BUILD_VERIFICATION.md); W01 before release readiness |
 | W03 | Rich Entry descriptions | Implemented; review and native acceptance pending | [Verification](../milestones/ENTRY_DESCRIPTIONS_VERIFICATION.md) |
 | W04 | Complete Type management | Rename and reviewed retirement implemented; review/native acceptance pending | [Rename](../milestones/TYPE_RENAMING_VERIFICATION.md), [retirement](../milestones/TYPE_RETIREMENT_VERIFICATION.md) |
@@ -64,3 +64,5 @@ W03 is implemented on `feature/entry-descriptions`: optional rich descriptions, 
 
 W09a is implemented on `feature/workspace-pins`, stacked on W03. See [pins and recents verification](../milestones/WORKSPACE_PINS_VERIFICATION.md). This completes the shortcut slice, not tabs or automatic restart restoration.
 - **W07a:** implemented on `feature/explore`. [Verification and remaining scope](../milestones/EXPLORE_FOUNDATION_VERIFICATION.md) record composable filters, canonical Spatial matching, bounded results, and session navigation. Saved views and Tags/Statuses are not part of this slice.
+
+W01a–c are implemented on `feature/automatic-backups` under the approved D01 policy. See [automatic backup verification](../milestones/AUTOMATIC_BACKUPS_VERIFICATION.md) for retention safeguards, tests and remaining native Windows acceptance. Other workloads remain planned unless recorded separately; completion of one slice does not complete a whole workload.
