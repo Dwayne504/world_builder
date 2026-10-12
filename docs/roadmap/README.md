@@ -25,7 +25,7 @@ The first recommended session is **W01a: automatic backup policy and failure mod
 | W04 | Complete Type management | Rename and reviewed retirement implemented; review/native acceptance pending | [Rename](../milestones/TYPE_RENAMING_VERIFICATION.md), [retirement](../milestones/TYPE_RETIREMENT_VERIFICATION.md) |
 | W05 | Rich Text and ordinary Entry Reference Fields | Both foundation slices implemented; review/native acceptance pending | [Rich Text](../milestones/RICH_TEXT_FIELDS_VERIFICATION.md), [Entry References](../milestones/ENTRY_REFERENCE_FIELDS_VERIFICATION.md) |
 | W06 | Tags and named creative Status Systems | Scope decision needed | Stable record identities |
-| W07 | Structured Explore and saved views | Core filters ready | W06 only for Tag and Status filters |
+| W07 | Structured Explore and saved views | W07a implemented; saved views planned | W06 only for Tag and Status filters |
 | W08 | Portable images and attachments | UX and limits decision needed | W01; existing package and document services |
 | W09 | Pins, record tabs and restart restoration | W09a implemented; tabs/restart still need D06 | Existing navigation and close guards |
 | W10 | Manuscript export and writing recovery improvements | Export decision needed | Existing Chapter documents; W01 |
@@ -63,3 +63,4 @@ Some original milestone checklists and README wording predate implemented featur
 W03 is implemented on `feature/entry-descriptions`: optional rich descriptions, revision-safe autosave/recovery, migration and Search, with 353 frontend and 244 Rust tests passing. See its verification note for native acceptance still outstanding. Other workloads remain planned unless their own delivered slice records a later status. Do not guess future merge SHAs or preallocate future database schema versions.
 
 W09a is implemented on `feature/workspace-pins`, stacked on W03. See [pins and recents verification](../milestones/WORKSPACE_PINS_VERIFICATION.md). This completes the shortcut slice, not tabs or automatic restart restoration.
+- **W07a:** implemented on `feature/explore`. [Verification and remaining scope](../milestones/EXPLORE_FOUNDATION_VERIFICATION.md) record composable filters, canonical Spatial matching, bounded results, and session navigation. Saved views and Tags/Statuses are not part of this slice.

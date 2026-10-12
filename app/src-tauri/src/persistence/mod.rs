@@ -8,6 +8,7 @@
 mod entry_description;
 mod entry_references;
 pub mod error;
+mod explore;
 mod fields;
 pub mod lifecycle;
 pub mod lock;
