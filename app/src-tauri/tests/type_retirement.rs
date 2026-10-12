@@ -594,6 +594,8 @@ fn schema_fourteen_upgrade_is_atomic_recoverable_and_keeps_assignments_and_value
     .unwrap();
     ProjectService::close_project(&f.state, f.project).unwrap();
     let db = f.db();
+    db.execute_batch(include_str!("fixtures/remove_entry_references.sql"))
+        .unwrap();
     db.execute_batch(include_str!("fixtures/remove_type_retirement.sql"))
         .unwrap();
     db.execute_batch("PRAGMA user_version=14; UPDATE project_meta SET schema_version=14; CREATE TRIGGER fail_retirement_upgrade BEFORE UPDATE OF schema_version ON project_meta BEGIN SELECT RAISE(ABORT,'injected migration failure'); END;").unwrap();
@@ -621,7 +623,10 @@ fn schema_fourteen_upgrade_is_atomic_recoverable_and_keeps_assignments_and_value
         .unwrap();
     drop(db);
     let open = ProjectService::open_project(&f.state, root, false).unwrap();
-    assert_eq!(open.schema_version, 15);
+    assert_eq!(
+        open.schema_version,
+        worldcrafter_lib::persistence::migrations::CURRENT_SCHEMA_VERSION
+    );
     assert_eq!(
         ProjectService::get_entry(&f.state, f.project, entry.id)
             .unwrap()

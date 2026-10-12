@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum FieldKind {
     ShortText,
     RichText,
+    EntryReference,
     Number,
     Boolean,
     Choice,
@@ -21,6 +22,7 @@ impl FieldKind {
         match self {
             Self::ShortText => "short_text",
             Self::RichText => "rich_text",
+            Self::EntryReference => "entry_reference",
             Self::Number => "number",
             Self::Boolean => "boolean",
             Self::Choice => "choice",
@@ -59,9 +61,37 @@ pub struct FieldProvider {
 pub enum FieldValue {
     Text(String),
     RichText(RichFieldValue),
+    EntryReferences(ReferenceSelection),
     Number(f64),
     Boolean(bool),
     Choices(Vec<ChoiceOptionId>),
+}
+
+/// Only identities are writable. Labels and target lifecycle are resolved on read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReferenceSelection {
+    pub expected_ids: Vec<String>,
+    pub items: Vec<ReferenceItem>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ReferenceItem {
+    Existing { reference_id: String },
+    Entry { entry_id: super::EntryId },
+}
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceTarget {
+    pub id: String,
+    pub target_id: Option<String>,
+    pub label: String,
+    pub workspace_state: Option<String>,
 }
 
 /// Versioned document content; display metadata is derived, never trusted on save.
@@ -84,6 +114,7 @@ impl FieldValue {
         match (self, kind) {
             (Self::Text(_), FieldKind::ShortText) | (Self::Boolean(_), FieldKind::Boolean) => true,
             (Self::RichText(_), FieldKind::RichText) => true,
+            (Self::EntryReferences(_), FieldKind::EntryReference) => true,
             (Self::Number(n), FieldKind::Number) => n.is_finite(),
             (Self::Choices(ids), FieldKind::Choice) => ids.len() == 1,
             (Self::Choices(ids), FieldKind::MultiChoice) => !ids.is_empty(),
@@ -212,6 +243,7 @@ pub struct EntryField {
     pub value: Option<FieldValue>,
     /// Derived from canonical current relationships, never a Field Value.
     pub projected_relationships: Vec<Relationship>,
+    pub reference_targets: Vec<ReferenceTarget>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

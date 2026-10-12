@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-const INDEX_VERSION: i64 = 6;
+const INDEX_VERSION: i64 = 7;
 const CREATE_INDEX: &str = "CREATE VIRTUAL TABLE search_index USING fts5(payload UNINDEXED, terms, tokenize='unicode61 remove_diacritics 0')";
 fn invalid(message: impl ToString) -> PersistenceError {
     PersistenceError::Other(message.to_string())
@@ -215,6 +215,19 @@ fn sources(conn: &Connection) -> Result<Vec<Document>, PersistenceError> {
         let mut d = doc("structured",format!("field:{id}"),title.clone(),format!("{context} · {field}"),state.clone(),SearchTarget::Entry{entry_id:entry.clone()},format!("{field}: {value} {unit}").trim().into());
         d.entry_ids.push(entry);
         d.structured_kind = Some(StructuredKind::Fields);
+        result.push(d);
+    }
+    // Generic backlinks resolve from the same pointers as the owning Field.
+    // They never create semantic inverses or independently authored links.
+    for row in conn.prepare("SELECT r.id,r.entry_id,r.target_record_id,f.name,COALESCE(e.authored_name,json_extract(r.unresolved_snapshot,'$.label'),'[Unnamed Entry]') FROM entry_reference_value r JOIN field_definition f ON f.id=r.field_id LEFT JOIN entry e ON e.id=r.target_record_id ORDER BY r.entry_id,r.field_id,r.ordinal")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))? {
+        let (id,entry,target,field,label)=row?;
+        let (owner,_,state)=entry_context.get(&entry).ok_or_else(||invalid("Reference owner is missing"))?;
+        let aliases=target.as_ref().and_then(|id|alias_map.get(id)).cloned().unwrap_or_default();
+        let mut d=doc("structured",format!("reference:{id}"),format!("{owner} · {field}"),"Entry reference".into(),state.clone(),SearchTarget::Entry{entry_id:entry.clone()},format!("{owner} {field} {label} {}",aliases.join(" ")));
+        d.preview_text=Some(format!("References {label}"));
+        d.entry_ids.push(entry);
+        if let Some(target)=target { d.entry_ids.push(target); }
+        d.structured_kind=Some(StructuredKind::Fields);
         result.push(d);
     }
     // Search terms include both labels. Display wording uses one perspective;

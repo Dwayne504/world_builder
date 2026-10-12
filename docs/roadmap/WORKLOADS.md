@@ -77,7 +77,7 @@ Each packet defines a user outcome, bounded slices, code starting points and acc
 
 **Deferred:** computed Fields, formulas, automatic unit conversion, new relationship semantics and migration of arbitrary short text into references.
 
-**Session selection:** W05a is implemented on `feature/rich-text-fields`; see [Rich Text Fields verification](../milestones/RICH_TEXT_FIELDS_VERIFICATION.md) for evidence and remaining manual checks. W05b remains a separate slice, subject to the documented reference-cardinality review. Branch suggestion: `feature/entry-reference-fields`.
+**Session selection:** W05a is implemented on `feature/rich-text-fields`; see [Rich Text Fields verification](../milestones/RICH_TEXT_FIELDS_VERIFICATION.md). W05b's optional ordered collection is implemented on `feature/entry-reference-fields`, stacked on reviewed Type retirement; see [reference verification](../milestones/ENTRY_REFERENCE_FIELDS_VERIFICATION.md). Zero, one and multiple pointers follow the existing reference model. Configurable single-only cardinality, target restrictions, conversion and merging remain separate slices. Review and native acceptance are still required.
 
 ## W06 Tags and creative Status Systems
 

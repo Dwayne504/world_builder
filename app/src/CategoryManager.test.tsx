@@ -717,3 +717,31 @@ it.each(["category", "type"])("creates an optional Rich Text default on a %s", a
   );
   await waitFor(() => expect(controller.state).toBe("saved"));
 });
+
+it.each(["category", "type"])(
+  "creates an optional Entry Reference default on a %s",
+  async (scope) => {
+    await show();
+    if (scope === "type")
+      fireEvent.change(screen.getByLabelText("Default field scope"), {
+        target: { value: "sword" },
+      });
+    fireEvent.click(screen.getByRole("button", { name: "Add default field" }));
+    change("Default field name", "See also");
+    change("Default field kind", "entry_reference");
+    fireEvent.click(screen.getByRole("button", { name: "Create default field" }));
+    await waitFor(() =>
+      expect(applyTemplateFields).toHaveBeenCalledWith(
+        "project",
+        1,
+        expect.objectContaining({
+          kind: "create",
+          fieldKind: "entry_reference",
+          value: null,
+          provider: { kind: scope, id: scope === "type" ? "sword" : "weapons" },
+        }),
+      ),
+    );
+    await waitFor(() => expect(controller.state).toBe("saved"));
+  },
+);

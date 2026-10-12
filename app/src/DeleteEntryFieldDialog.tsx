@@ -18,21 +18,25 @@ export function DeleteEntryFieldDialog({
 }) {
   const value = field.value;
   const description =
-    value?.kind === "rich_text"
-      ? value.value.plainText || "Preserved Rich Text"
-      : value?.kind === "choices"
-        ? value.value
-            .map(
-              (id) => field.definition.options.find((o) => o.id === id)?.label ?? "Unknown option",
-            )
-            .join(", ")
-        : value?.kind === "boolean"
+    value?.kind === "entry_references"
+      ? (field.referenceTargets ?? []).map((target) => target.label).join(", ") ||
+        "Entry references"
+      : value?.kind === "rich_text"
+        ? value.value.plainText || "Preserved Rich Text"
+        : value?.kind === "choices"
           ? value.value
-            ? "Yes"
-            : "No"
-          : value
-            ? String(value.value)
-            : "Not filled in";
+              .map(
+                (id) =>
+                  field.definition.options.find((o) => o.id === id)?.label ?? "Unknown option",
+              )
+              .join(", ")
+          : value?.kind === "boolean"
+            ? value.value
+              ? "Yes"
+              : "No"
+            : value
+              ? String(value.value)
+              : "Not filled in";
   return (
     <Dialog open title={`Delete ${field.definition.name} from this Entry?`} onClose={onClose}>
       <p>

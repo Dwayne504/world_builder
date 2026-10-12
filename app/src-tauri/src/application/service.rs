@@ -1057,7 +1057,7 @@ mod tests {
 
         let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
         conn.execute_batch(
-            "DROP TRIGGER field_category_restrict;
+            "DROP TRIGGER entry_reference_keep_target; DROP TABLE entry_reference_value; DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
              DROP TABLE project_pin; DROP TABLE project_recent; DROP TABLE project_navigation_settings; DROP TRIGGER rich_document_owner_insert; DROP TRIGGER rich_document_owner_update; DROP TRIGGER rich_document_keep_entry; DROP TRIGGER rich_document_keep_chapter; DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
@@ -1161,7 +1161,7 @@ mod tests {
         manifest.write(&paths.manifest_path()).unwrap();
         let conn = rusqlite::Connection::open(paths.db_path()).unwrap();
         conn.execute_batch(
-            "DROP TRIGGER field_category_restrict;
+            "DROP TRIGGER entry_reference_keep_target; DROP TABLE entry_reference_value; DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
              DROP TABLE project_pin; DROP TABLE project_recent; DROP TABLE project_navigation_settings; DROP TRIGGER rich_document_owner_insert; DROP TRIGGER rich_document_owner_update; DROP TRIGGER rich_document_keep_entry; DROP TRIGGER rich_document_keep_chapter; DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
