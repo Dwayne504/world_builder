@@ -84,6 +84,36 @@ pub fn apply_alias(
     .map_err(Into::into)
 }
 #[tauri::command]
+pub fn read_entry_description(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: EntryId,
+) -> Result<crate::domain::entry_description::EntryDescriptionSnapshot, AppErrorDto> {
+    ProjectService::read_entry_description(&state, parse_project_id(&project_id)?, entry_id)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub fn save_entry_description(
+    state: State<'_, AppState>,
+    project_id: String,
+    entry_id: EntryId,
+    expected_revision: i64,
+    expected_document_revision: Option<i64>,
+    schema_version: i64,
+    content: serde_json::Value,
+) -> Result<crate::domain::entry_description::EntryDescriptionSnapshot, AppErrorDto> {
+    ProjectService::save_entry_description(
+        &state,
+        parse_project_id(&project_id)?,
+        entry_id,
+        expected_revision,
+        expected_document_revision,
+        schema_version,
+        content,
+    )
+    .map_err(Into::into)
+}
+#[tauri::command]
 pub fn read_story(
     state: State<'_, AppState>,
     project_id: String,

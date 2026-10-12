@@ -128,6 +128,32 @@ impl ProjectService {
             w.apply_alias(entry_id, expected, command)
         })
     }
+    pub fn read_entry_description(
+        state: &AppState,
+        project_id: ProjectId,
+        entry_id: EntryId,
+    ) -> Result<crate::domain::entry_description::EntryDescriptionSnapshot, AppError> {
+        Self::with_worker(state, project_id, |w| w.read_entry_description(entry_id))
+    }
+    pub fn save_entry_description(
+        state: &AppState,
+        project_id: ProjectId,
+        entry_id: EntryId,
+        expected: i64,
+        expected_document_revision: Option<i64>,
+        schema_version: i64,
+        content: serde_json::Value,
+    ) -> Result<crate::domain::entry_description::EntryDescriptionSnapshot, AppError> {
+        Self::with_worker(state, project_id, |w| {
+            w.save_entry_description(
+                entry_id,
+                expected,
+                expected_document_revision,
+                schema_version,
+                content,
+            )
+        })
+    }
     pub fn read_story(
         state: &AppState,
         project_id: ProjectId,
@@ -1020,7 +1046,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
+             DROP TRIGGER rich_document_owner_insert; DROP TRIGGER rich_document_owner_update; DROP TRIGGER rich_document_keep_entry; DROP TRIGGER rich_document_keep_chapter; DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
@@ -1124,7 +1150,7 @@ mod tests {
             "DROP TRIGGER field_category_restrict;
              DROP TRIGGER field_type_restrict;
              DROP TRIGGER field_entry_restrict;
-             DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
+             DROP TRIGGER rich_document_owner_insert; DROP TRIGGER rich_document_owner_update; DROP TRIGGER rich_document_keep_entry; DROP TRIGGER rich_document_keep_chapter; DROP TABLE occurrence_entry; DROP TABLE occurrence_chapter; DROP TABLE temporal_occurrence; DROP TRIGGER occurrence_event_preserve; DROP TABLE timeline_calendar; DELETE FROM capability_def WHERE id='event'; DROP TRIGGER search_source_updated; DROP TRIGGER search_source_created; DROP TABLE search_index; DROP TABLE derived_index_state; DROP TABLE entry_alias; DROP TABLE story_link_role; DROP TABLE story_link; DROP TABLE story_role; DROP TABLE rich_document; DROP TABLE story_unit;
              DROP TRIGGER entry_materialize_capabilities; DROP TABLE spatial_node; DROP TABLE entry_capability; DROP TABLE category_capability_default; DROP TABLE type_capability_default; DROP TABLE capability_def; DROP TABLE field_projection; DROP TRIGGER projection_value_insert; DROP TRIGGER projection_value_update; DROP TABLE entry_field_presentation;
              DROP TABLE relationship_participant;
              DROP TABLE relationship_instance;
