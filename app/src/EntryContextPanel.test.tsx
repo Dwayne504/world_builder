@@ -139,6 +139,10 @@ it("provides keyboard dismissal back to the opener and an explicit guarded editi
   view.rerender(<EntryContextPanel {...props} openDisabled={false} />);
   fireEvent.click(within(panel).getByRole("button", { name: "Open Entry for editing" }));
   expect(open).toHaveBeenCalledWith("one");
+  const handledEscape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+  handledEscape.preventDefault();
+  fireEvent(window, handledEscape);
+  expect(close).not.toHaveBeenCalled();
   const dialog = document.createElement("dialog");
   dialog.setAttribute("open", "");
   document.body.append(dialog);

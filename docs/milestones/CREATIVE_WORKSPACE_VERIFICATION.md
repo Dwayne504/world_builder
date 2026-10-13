@@ -25,7 +25,7 @@ Deferred: portraits/assets, relationship graph, a new home dashboard, passage li
 Local checks on Windows:
 
 - `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build`: passed.
-- `npm test -- --run --maxWorkers=4`: **455 tests passed** across 45 files, without React `act(...)` warnings.
+- `npm test -- --run --maxWorkers=4`: **455 tests passed** across 45 files, without React `act(...)` warnings. After the final handled-Escape correction, all 12 reference/menu tests passed again; lint, formatting and production build also passed again. CI runs the complete suite on the final head.
 - `cargo fmt --check`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo check`, using the app's `src-tauri` manifest: passed, **319 tests**. Three subprocess helpers are intentionally ignored standalone and exercised by their parent tests.
 - Git working-tree and staged whitespace checks: passed.
 - GitHub secret scanning and push protection were enabled, with no open alerts when inspected on 13 October. No local secret scanner or CodeQL runner/workflow is configured; no passing run of either is claimed.

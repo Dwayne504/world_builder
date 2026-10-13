@@ -246,7 +246,11 @@ export function EntryContextPanel({
   useEffect(() => {
     closeButton.current?.focus({ preventScroll: true });
     function keydown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !document.querySelector("dialog[open]")) {
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !document.querySelector("dialog[open]")
+      ) {
         event.preventDefault();
         close.current();
         if (opener?.isConnected) opener.focus({ preventScroll: true });
