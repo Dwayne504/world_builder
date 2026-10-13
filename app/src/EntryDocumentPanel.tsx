@@ -13,6 +13,7 @@ export function EntryDocumentPanel({
   label = "Entry description",
   noun = "description",
   alwaysOpen = false,
+  prominent = false,
   disabled = false,
   onController,
 }: {
@@ -20,6 +21,7 @@ export function EntryDocumentPanel({
   label?: string;
   noun?: string;
   alwaysOpen?: boolean;
+  prominent?: boolean;
   disabled?: boolean;
   onController: (controller: FieldsController) => void;
 }) {
@@ -44,7 +46,13 @@ export function EntryDocumentPanel({
   const recovery = description.recovery;
   const canRestore = !readOnly && !document?.readOnlyReason && !recovery?.readOnlyReason;
   return (
-    <section className="entry-description" aria-label={label}>
+    <section className={`entry-description ${prominent ? "entry-prose" : ""}`} aria-label={label}>
+      {prominent && (
+        <div className="entry-prose-heading">
+          <h3>Description</h3>
+          <span className="muted">Write freely. Facts and connections can follow.</span>
+        </div>
+      )}
       {!description.snapshot && !description.error && <p role="status">Loading {noun}…</p>}
       {description.error && (
         <div role="alert" className="writing-error">
@@ -119,6 +127,9 @@ export function EntryDocumentPanel({
             <RichTextEditor
               key={description.editorEpoch}
               label={label}
+              placeholder={
+                prominent ? "What makes this part of your world worth remembering?" : undefined
+              }
               locked={disabled || readOnly || description.reviewing}
               content={description.draft ?? document?.content ?? EMPTY_DESCRIPTION}
               onChange={description.change}

@@ -13,6 +13,7 @@ export function RichTextEditor({
   onBlur,
   position,
   onPosition,
+  placeholder,
 }: {
   locked?: boolean;
   content: JSONContent;
@@ -21,6 +22,7 @@ export function RichTextEditor({
   onBlur: () => void;
   position?: WritingPosition;
   onPosition: (position: WritingPosition) => void;
+  placeholder?: string;
 }) {
   const callbacks = useRef({ onChange, onBlur, onPosition });
   callbacks.current = { onChange, onBlur, onPosition };
@@ -35,6 +37,7 @@ export function RichTextEditor({
         "aria-label": label,
         "aria-multiline": "true",
         spellcheck: "true",
+        ...(placeholder ? { "data-placeholder": placeholder } : {}),
       },
     },
     onUpdate: ({ editor }) => callbacks.current.onChange(editor.getJSON()),

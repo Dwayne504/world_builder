@@ -7,6 +7,38 @@ fn invalid(message: impl ToString) -> PersistenceError {
     PersistenceError::Other(message.to_string())
 }
 
+/// Used only inside Entry creation's transaction: the identity and its writing
+/// either commit together or are both rolled back.
+pub(super) fn insert_idea(
+    tx: &rusqlite::Transaction<'_>,
+    entry_id: EntryId,
+    text: &str,
+) -> Result<(), PersistenceError> {
+    if text.trim().is_empty() {
+        return Err(invalid("Write a thought before capturing it"));
+    }
+    let paragraphs: Vec<Value> = text
+        .replace("\r\n", "\n")
+        .split('\n')
+        .map(|line| {
+            if line.is_empty() {
+                serde_json::json!({"type":"paragraph"})
+            } else {
+                serde_json::json!({"type":"paragraph","content":[{"type":"text","text":line}]})
+            }
+        })
+        .collect();
+    let content = serde_json::json!({"type":"doc","content":paragraphs});
+    let (plain, count) = document_text(1, &content).map_err(invalid)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute(
+        "INSERT INTO rich_document (id,owner_kind,owner_id,area,document_schema_version,canonical_json,plain_text,word_count,migration_state,created_at,updated_at,revision)
+         VALUES(?1,'entry',?2,'description',1,?3,?4,?5,'current',?6,?6,1)",
+        params![uuid::Uuid::now_v7().to_string(),entry_id.to_string(),content.to_string(),plain,count,now],
+    )?;
+    Ok(())
+}
+
 pub(super) fn read(
     conn: &Connection,
     entry_id: EntryId,

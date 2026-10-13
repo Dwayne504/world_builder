@@ -25,6 +25,7 @@ export function WorkspaceFrame({
   recordNavigation,
   navigationTools,
   navigationNotice,
+  contextPanel,
 }: {
   children: ReactNode;
   categories: Category[];
@@ -48,6 +49,7 @@ export function WorkspaceFrame({
   recordNavigation?: ReactNode;
   navigationTools?: ReactNode;
   navigationNotice?: ReactNode;
+  contextPanel?: ReactNode;
 }) {
   const [categoriesOpen, setCategoriesOpen] = useState(true);
   const [categoryQuery, setCategoryQuery] = useState("");
@@ -102,7 +104,9 @@ export function WorkspaceFrame({
         )}
         {navigationNotice}
       </nav>
-      <div className={`workspace-layout ${collapsed ? "sidebar-collapsed" : ""}`}>
+      <div
+        className={`workspace-layout ${collapsed ? "sidebar-collapsed" : ""} ${contextPanel ? "has-reference" : ""}`}
+      >
         <aside
           ref={sidebarRef}
           id="project-navigation"
@@ -235,6 +239,7 @@ export function WorkspaceFrame({
         <fieldset className="workspace-content navigation-guard" disabled={busy}>
           {children}
         </fieldset>
+        {contextPanel}
       </div>
       {navigationTools}
     </>

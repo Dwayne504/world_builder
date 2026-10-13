@@ -37,11 +37,8 @@ async function write(prose: HTMLElement, text: string) {
   });
 }
 
-it("keeps a description optional, and opening the writing area does not create content", async () => {
+it("offers writing immediately without persisting an untouched optional description", async () => {
   show();
-  const add = await screen.findByRole("button", { name: "Add description" });
-  expect(screen.queryByRole("textbox", { name: "Entry description" })).not.toBeInTheDocument();
-  fireEvent.click(add);
   expect(await screen.findByRole("textbox", { name: "Entry description" })).toBeVisible();
   await act(async () => {
     await controller.submit();
@@ -158,7 +155,7 @@ it("preserves damaged emergency drafts until explicitly reviewed and discarded",
     "original damaged data",
   );
   fireEvent.click(screen.getByRole("button", { name: "Keep saved description" }));
-  expect(await screen.findByRole("button", { name: "Add description" })).toBeVisible();
+  expect(await screen.findByRole("textbox", { name: "Entry description" })).toBeVisible();
   expect(saveEntryDescription).not.toHaveBeenCalled();
 });
 

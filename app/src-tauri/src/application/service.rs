@@ -727,6 +727,17 @@ impl ProjectService {
         })
     }
 
+    pub fn capture_idea(
+        state: &AppState,
+        project_id: ProjectId,
+        name: Option<String>,
+        text: String,
+    ) -> Result<Entry, AppError> {
+        Self::with_worker(state, project_id, |worker| {
+            worker.capture_idea(EntryId::new(), name, text)
+        })
+    }
+
     pub fn get_entry(
         state: &AppState,
         project_id: ProjectId,
@@ -1065,6 +1076,64 @@ mod tests {
 
         ProjectService::close_project(&state, created.project_id).unwrap();
         ProjectService::close_project(&state, restored.project_id).unwrap();
+    }
+
+    #[test]
+    fn captured_idea_survives_backup_restore_with_project_scoped_identity() {
+        let state = AppState::default();
+        let dir = tempdir().unwrap();
+        let project = ProjectService::create_project(&state, dir.path(), "Ideas").unwrap();
+        let entry = ProjectService::capture_idea(
+            &state,
+            project.project_id,
+            Some("A possibility".into()),
+            "The sea remembers every ship.".into(),
+        )
+        .unwrap();
+        let before = ProjectService::read_entry_description(&state, project.project_id, entry.id)
+            .unwrap()
+            .document
+            .unwrap();
+        let backup =
+            ProjectService::create_backup(&state, project.project_id, &dir.path().join("backups"))
+                .unwrap();
+        let copy = ProjectService::restore_backup_as_copy(
+            &state,
+            &backup,
+            &dir.path().join("copies"),
+            Some("Ideas copy"),
+        )
+        .unwrap();
+        assert_ne!(project.project_id, copy.project_id);
+        assert_eq!(
+            ProjectService::get_entry(&state, copy.project_id, entry.id)
+                .unwrap()
+                .id,
+            entry.id
+        );
+        assert_eq!(
+            ProjectService::read_entry_description(&state, copy.project_id, entry.id)
+                .unwrap()
+                .document
+                .unwrap()
+                .content,
+            before.content
+        );
+        assert!(ProjectService::capture_idea(
+            &state,
+            ProjectId::new(),
+            None,
+            "Wrong Project".into()
+        )
+        .is_err());
+        assert_eq!(
+            ProjectService::list_entries(&state, project.project_id)
+                .unwrap()
+                .len(),
+            1
+        );
+        ProjectService::close_project(&state, copy.project_id).unwrap();
+        ProjectService::close_project(&state, project.project_id).unwrap();
     }
 
     #[test]

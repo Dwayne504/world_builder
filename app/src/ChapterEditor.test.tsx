@@ -3,8 +3,19 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest";
 import { ChapterEditor } from "./ChapterEditor";
 import { ChapterLibrary } from "./ChapterLibrary";
-import { applyStory, listEntries, readStory, readChapter } from "./api";
+import {
+  applyStory,
+  listEntries,
+  readStory,
+  readChapter,
+  getEntry,
+  readEntryDescription,
+  readFields,
+  readRelationships,
+  readSpatial,
+} from "./api";
 import { chapterFixture, textDocument } from "./chapterTestFixtures";
+import { descriptionFixture } from "./entryDescriptionTestFixtures";
 import { storeChapterDraft } from "./chapterRecovery";
 import type { ChapterController } from "./storyTypes";
 vi.mock("./api", () => ({
@@ -16,6 +27,8 @@ vi.mock("./api", () => ({
   getEntry: vi.fn(),
   readRelationships: vi.fn(),
   readSpatial: vi.fn(),
+  readEntryDescription: vi.fn(),
+  listTypes: vi.fn(),
 }));
 let controller: ChapterController;
 beforeEach(() => {
@@ -52,6 +65,59 @@ it("opens manuscript first, keeps three documents separate, and hides context wi
   fireEvent.click(screen.getByRole("tab", { name: "Manuscript" }));
   expect(screen.getByRole("textbox", { name: "Manuscript" })).toBe(prose);
   expect(screen.getByText("2 words · manuscript")).toBeVisible();
+});
+it("reads a linked Entry beside writing without replacing or saving the manuscript", async () => {
+  const initial = chapterFixture();
+  initial.links = [
+    {
+      id: "link",
+      entryId: "library",
+      label: "Floating library",
+      workspaceState: "active",
+      roles: [],
+    },
+  ];
+  vi.mocked(getEntry).mockResolvedValue({
+    id: "library",
+    categoryId: "category",
+    typeId: null,
+    displayName: "Floating library",
+    authoredName: "Floating library",
+    workspaceState: "active",
+    revision: 1,
+    globalRevision: 3,
+  });
+  vi.mocked(readEntryDescription).mockResolvedValue(
+    descriptionFixture("The library sails at dawn."),
+  );
+  vi.mocked(readFields).mockResolvedValue({ globalRevision: 3, fields: [], definitions: [] });
+  vi.mocked(readRelationships).mockResolvedValue({
+    globalRevision: 3,
+    relationships: [],
+    definitions: [],
+    entries: [],
+  });
+  vi.mocked(readSpatial).mockResolvedValue({ globalRevision: 3, entries: [], defaults: [] });
+  const preview = vi.fn();
+  render(
+    <ChapterEditor
+      projectId="project"
+      initial={initial}
+      onController={vi.fn()}
+      onChanged={vi.fn()}
+      onBack={vi.fn()}
+      onEntry={vi.fn()}
+      onPreview={preview}
+      positions={{}}
+    />,
+  );
+  const prose = await screen.findByRole("textbox", { name: "Manuscript" });
+  fireEvent.click(screen.getByText("Floating library"));
+  expect(await screen.findByText("The library sails at dawn.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Keep beside writing" }));
+  expect(preview).toHaveBeenCalledWith("library");
+  expect(screen.getByRole("textbox", { name: "Manuscript" })).toBe(prose);
+  expect(applyStory).not.toHaveBeenCalled();
 });
 it("preserves unsupported original documents while leaving Notes editable", async () => {
   const initial = chapterFixture();

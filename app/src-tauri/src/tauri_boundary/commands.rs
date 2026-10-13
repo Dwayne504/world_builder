@@ -795,7 +795,21 @@ pub fn create_entry(
     category_id: Option<String>,
     type_id: Option<String>,
     authored_name: Option<String>,
+    initial_description: Option<String>,
 ) -> Result<EntryDto, AppErrorDto> {
+    if let Some(text) = initial_description {
+        if category_id.is_some() || type_id.is_some() {
+            return Err(invalid_input("Capture an idea without a Category or Type"));
+        }
+        return ProjectService::capture_idea(
+            &state,
+            parse_project_id(&project_id)?,
+            authored_name,
+            text,
+        )
+        .map(Into::into)
+        .map_err(Into::into);
+    }
     let category_id = category_id
         .map(|id| CategoryId::parse(&id))
         .transpose()

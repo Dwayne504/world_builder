@@ -17,6 +17,8 @@ export function EntryDescriptionPanel(props: {
   );
   return (
     <EntryDocumentPanel
+      alwaysOpen
+      prominent
       description={description}
       disabled={props.disabled}
       onController={props.onController}

@@ -223,6 +223,7 @@ enum Job {
         category_id: Option<CategoryId>,
         type_id: Option<TypeId>,
         authored_name: Option<String>,
+        idea: Option<String>,
         reply: Reply<Entry>,
     },
     GetEntry {
@@ -609,6 +610,7 @@ impl ProjectDbWorker {
                     category_id,
                     type_id,
                     authored_name,
+                    idea,
                     reply,
                 } => {
                     let _ = reply.send(create_entry(
@@ -617,6 +619,7 @@ impl ProjectDbWorker {
                         category_id,
                         type_id,
                         authored_name,
+                        idea,
                     ));
                 }
                 Job::GetEntry { id, reply } => {
@@ -973,6 +976,23 @@ impl ProjectDbWorker {
             category_id,
             type_id,
             authored_name: authored_name(name),
+            idea: None,
+            reply,
+        })
+    }
+
+    pub fn capture_idea(
+        &self,
+        id: EntryId,
+        name: Option<String>,
+        text: String,
+    ) -> Result<Entry, PersistenceError> {
+        self.call(|reply| Job::CreateEntry {
+            id,
+            category_id: None,
+            type_id: None,
+            authored_name: authored_name(name),
+            idea: Some(text),
             reply,
         })
     }
@@ -1405,6 +1425,7 @@ fn create_entry(
     category_id: Option<CategoryId>,
     type_id: Option<TypeId>,
     name: Option<String>,
+    idea: Option<String>,
 ) -> Result<Entry, PersistenceError> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let category_id = match category_id {
@@ -1439,6 +1460,9 @@ fn create_entry(
             now
         ],
     )?;
+    if let Some(text) = idea {
+        super::entry_description::insert_idea(&tx, id, &text)?;
+    }
     tx.commit()?;
     Ok(Entry {
         id,
@@ -1548,6 +1572,84 @@ mod tests {
         assert_eq!(meta.project_id, project_id);
         assert_eq!(meta.last_committed_revision, 0);
         assert_eq!(meta.working_name, "Tortuga");
+        worker.shutdown().unwrap();
+    }
+
+    #[test]
+    fn captured_idea_is_one_durable_uncategorized_entry_with_description() {
+        let dir = tempdir().unwrap();
+        let project_id = ProjectId::new();
+        let worker = spawn_fresh(dir.path(), project_id);
+        let id = EntryId::new();
+        let entry = worker
+            .capture_idea(
+                id,
+                None,
+                "A floating library\r\n\r\nNo shore in sight.".into(),
+            )
+            .unwrap();
+        assert!(entry.authored_name.is_none());
+        assert!(entry.type_id.is_none());
+        assert_eq!(entry.global_revision, 1);
+        assert_eq!(
+            entry.category_id,
+            worker
+                .list_categories()
+                .unwrap()
+                .iter()
+                .find(|c| c.is_uncategorized)
+                .unwrap()
+                .id
+        );
+        let description = worker.read_entry_description(id).unwrap().document.unwrap();
+        assert_eq!(description.revision, 1);
+        assert_eq!(
+            description.plain_text,
+            "A floating library\n\nNo shore in sight.\n"
+        );
+        assert!(description.read_only_reason.is_none());
+        worker.shutdown().unwrap();
+        let reopened =
+            ProjectDbWorker::spawn(dir.path().join("project.sqlite"), project_id, None).unwrap();
+        assert_eq!(reopened.list_entries().unwrap().len(), 1);
+        assert_eq!(
+            reopened
+                .read_entry_description(id)
+                .unwrap()
+                .document
+                .unwrap()
+                .content,
+            description.content
+        );
+        reopened.shutdown().unwrap();
+    }
+
+    #[test]
+    fn failed_idea_description_leaves_no_entry_identity_or_revision() {
+        let dir = tempdir().unwrap();
+        let worker = spawn_fresh(dir.path(), ProjectId::new());
+        assert!(worker
+            .capture_idea(EntryId::new(), Some("Draft".into()), " \n ".into())
+            .is_err());
+        let conn = Connection::open(dir.path().join("project.sqlite")).unwrap();
+        conn.execute_batch("CREATE TRIGGER fail_idea BEFORE INSERT ON rich_document BEGIN SELECT RAISE(ABORT,'test storage failure'); END;").unwrap();
+        assert!(worker
+            .capture_idea(EntryId::new(), None, "Preserve this thought".into())
+            .is_err());
+        assert!(worker.list_entries().unwrap().is_empty());
+        assert_eq!(worker.read_meta().unwrap().last_committed_revision, 0);
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM record_identity", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        conn.execute_batch("DROP TRIGGER fail_idea;").unwrap();
+        let retry = worker
+            .capture_idea(EntryId::new(), None, "Preserve this thought".into())
+            .unwrap();
+        assert_eq!(retry.global_revision, 1);
+        assert_eq!(worker.list_entries().unwrap().len(), 1);
         worker.shutdown().unwrap();
     }
 
