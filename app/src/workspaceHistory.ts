@@ -75,5 +75,6 @@ export interface NavigationIntent {
   location: WorkspaceLocation;
   index?: number;
   createInCategoryId?: string;
+  captureIdea?: boolean;
   fromFocusKey?: string | null;
 }

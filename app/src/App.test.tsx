@@ -890,6 +890,64 @@ describe("Project screen Saved contract", () => {
     expect(applyFields).not.toHaveBeenCalled();
   });
 
+  it("captures a thought without structure setup and opens it only after durable acknowledgement", async () => {
+    const entry = mockEditableEntry();
+    const captured = {
+      ...entry,
+      id: "idea",
+      typeId: null,
+      categoryId: "uncategorized",
+      authoredName: null,
+      displayName: "[Unnamed Entry]",
+    };
+    const pending = deferred<typeof captured>();
+    createEntryMock.mockReturnValue(pending.promise);
+    await openTheProjectScreen();
+    fireEvent.click(menuItem("Edit", "Entry", "Capture idea…"));
+    const dialog = screen.getByRole("dialog", { name: "Capture idea" });
+    expect(within(dialog).queryByLabelText("new-entry-category")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Capture idea" })).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText("Your idea"), {
+      target: { value: "A floating library\nNo shore in sight." },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Capture idea" }));
+    await waitFor(() =>
+      expect(createEntryMock).toHaveBeenCalledWith(
+        project.projectId,
+        undefined,
+        undefined,
+        undefined,
+        "A floating library\nNo shore in sight.",
+      ),
+    );
+    expect(screen.queryByLabelText("entry-name")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Capture idea" })).toBeDisabled();
+    await act(async () => pending.resolve(captured));
+    expect(await screen.findByLabelText("entry-name")).toHaveValue("");
+    expect(screen.queryByRole("dialog", { name: "Capture idea" })).not.toBeInTheDocument();
+  });
+
+  it("preserves a failed idea draft across dialog dismissal and native close", async () => {
+    enableTauriWindow();
+    mockEditableEntry();
+    createEntryMock.mockRejectedValue(new Error("Disk full"));
+    await openTheProjectScreen();
+    fireEvent.click(menuItem("Edit", "Entry", "Capture idea…"));
+    fireEvent.change(screen.getByLabelText("Your idea"), {
+      target: { value: "Keep this thought" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Capture idea" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Disk full");
+    expect(screen.getByLabelText("Your idea")).toHaveValue("Keep this thought");
+    fireEvent.click(screen.getByRole("button", { name: "Close Capture idea" }));
+    await act(async () => closeRequestedHandler?.({ preventDefault: vi.fn() }));
+    expect(closeProjectMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Before you leave" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close Before you leave" }));
+    fireEvent.click(menuItem("Edit", "Entry", "Add Entry…"));
+    expect(screen.getByLabelText("Your idea")).toHaveValue("Keep this thought");
+  });
+
   it("retains a retired Type filter for browsing but refuses it on new Entries while active children remain usable", async () => {
     mockEditableEntry();
     listTypesMock.mockImplementation(async (_project: string, category: string) =>
@@ -2132,6 +2190,36 @@ describe("Project screen Saved contract", () => {
     screen.getByRole("button", { name: "Survey Ship" }).focus();
     await act(async () =>
       fireEvent.click(await screen.findByRole("button", { name: "Survey Ship" })),
+    );
+    const reference = await screen.findByRole("complementary", { name: "Entry reference" });
+    expect(screen.getByLabelText("entry-name")).toHaveValue("Thron");
+    await waitFor(() =>
+      expect(
+        within(reference).getByRole("button", { name: "Open Entry for editing" }),
+      ).toBeEnabled(),
+    );
+    // The preview must not register a writer or replace the editor underneath.
+    const prose = screen.getByRole("textbox", { name: "Entry description" });
+    const saved = deferred<ReturnType<typeof descriptionFixture>>();
+    vi.mocked(saveEntryDescription).mockReturnValue(saved.promise);
+    await act(async () => {
+      prose.querySelector("p")!.textContent = "A thought kept beside the reference.";
+      fireEvent.input(prose, {
+        inputType: "insertText",
+        data: "A thought kept beside the reference.",
+      });
+    });
+    await act(async () =>
+      fireEvent.click(within(reference).getByRole("button", { name: "Open Entry for editing" })),
+    );
+    expect(screen.getByRole("textbox", { name: "Entry description" })).toBe(prose);
+    expect(prose).toHaveTextContent("A thought kept beside the reference.");
+    expect(screen.getByLabelText("entry-name")).toHaveValue("Thron");
+    await act(async () =>
+      saved.resolve({
+        ...descriptionFixture("A thought kept beside the reference."),
+        globalRevision: 2,
+      }),
     );
     expect(screen.getByLabelText("entry-name")).toHaveValue("Survey Ship");
     await act(async () => fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true }));

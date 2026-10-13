@@ -23,6 +23,62 @@
   white-space: pre-wrap;
 }
 
+.entry-prose {
+  padding: 0.5rem 0 1.5rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.entry-prose-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.entry-prose-heading h3 {
+  font-size: 1rem;
+  margin: 0;
+}
+.entry-prose-heading span {
+  font-size: 0.85rem;
+}
+.entry-prose .rich-writing {
+  max-width: 90ch;
+}
+.entry-prose .rich-writing .tiptap {
+  min-height: 12rem;
+  padding: 1.5rem clamp(1rem, 3vw, 2.5rem);
+  font-size: 1.05rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.entry-prose .writing-tools {
+  gap: 0.25rem;
+}
+.entry-prose .writing-tools button {
+  font-size: 0.8rem;
+  padding: 0.35rem 0.6rem;
+}
+.tiptap[data-placeholder]:has(> p:only-child > br:only-child)::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+.entry-structure {
+  border-top: 1px solid var(--line);
+  padding-top: 0.75rem;
+}
+.entry-structure > summary {
+  font-weight: 600;
+  width: fit-content;
+}
+.entry-structure:not([open]) {
+  padding-bottom: 0.75rem;
+}
+
 .rich-field-value {
   grid-column: 1 / -1;
   align-items: start;

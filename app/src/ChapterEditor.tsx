@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { getEntry, listEntries, readFields, readRelationships, readSpatial } from "./api";
+import { listEntries } from "./api";
+import { EntryContextContent } from "./EntryContextPanel";
 import { Dialog } from "./Dialog";
 import { RichTextEditor, type WritingPosition } from "./RichTextEditor";
 import { plainDocument, readChapterDraft, storeChapterDraft } from "./chapterRecovery";
@@ -12,8 +13,7 @@ import {
   type StoryLink,
   type StoryRole,
 } from "./storyTypes";
-import type { Category, Entry, EntryFields, EntryRelationships, SpatialSnapshot } from "./types";
-import { spatialPath } from "./spatialPresentation";
+import type { Category, Entry } from "./types";
 import { useChapter } from "./useChapter";
 import { useDesktopCommands } from "./desktopMenuContext";
 import { ChapterPagination } from "./ChapterPagination";
@@ -26,97 +26,37 @@ function EntryPreview({
   projectId,
   link,
   onOpen,
+  onPreview,
+  categories,
 }: {
   projectId: string;
   link: StoryLink;
   onOpen: (id: string) => void;
+  onPreview?: (id: string) => void;
+  categories: Category[];
 }) {
-  const [content, setContent] = useState<{
-    entry: Entry;
-    fields: EntryFields;
-    relationships: EntryRelationships;
-    spatial: SpatialSnapshot;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let current = true;
-    if (link.entryId)
-      void Promise.all([
-        getEntry(projectId, link.entryId),
-        readFields(projectId, link.entryId),
-        readRelationships(projectId, link.entryId),
-        readSpatial(projectId),
-      ])
-        .then(([entry, fields, relationships, spatial]) => {
-          if (current) setContent({ entry, fields, relationships, spatial });
-        })
-        .catch(() => {
-          if (current) setError("This preview could not be loaded. Your writing is still here.");
-        });
-    return () => {
-      current = false;
-    };
-  }, [projectId, link.entryId]);
-  const path = content && link.entryId ? spatialPath(content.spatial.entries, link.entryId) : [];
+  if (!link.entryId) return null;
   return (
     <div className="chapter-entry-preview">
-      {error && <p role="alert">{error}</p>}
-      {!content && !error && <p role="status">Loading preview…</p>}
-      {content && (
-        <>
-          {path.length > 1 && (
-            <p className="muted">
-              Spatial context · derived
-              <br />
-              {path.map((e) => e.label).join(" › ")}
-            </p>
-          )}
-          <dl>
-            {content.fields.fields
-              .filter((f) => f.value && !f.hidden)
-              .slice(0, 12)
-              .map((f) => (
-                <div key={f.definition.id}>
-                  <dt>{f.definition.name}</dt>
-                  <dd>
-                    {f.value?.kind === "choices"
-                      ? f.value.value
-                          .map(
-                            (id) =>
-                              f.definition.options.find((o) => o.id === id)?.label ??
-                              "Retired choice",
-                          )
-                          .join(", ")
-                      : String(f.value?.value ?? "")}
-                    {f.definition.unit ? ` ${f.definition.unit}` : ""}
-                  </dd>
-                </div>
-              ))}
-          </dl>
-          {content.relationships.relationships
-            .filter((r) => !r.ended && r.workspaceState === "active")
-            .slice(0, 5)
-            .map((r) => {
-              const source = r.source.id === link.entryId;
-              const definition = content.relationships.definitions.find(
-                (d) => d.id === r.definitionId,
-              );
-              return (
-                <p key={r.id}>
-                  {source ? definition?.forwardLabel : definition?.inverseLabel}{" "}
-                  <strong>{source ? r.target.label : r.source.label}</strong>
-                </p>
-              );
-            })}
-          <button className="quiet-button" onClick={() => onOpen(content.entry.id)}>
-            Open {content.entry.displayName}
+      <EntryContextContent
+        projectId={projectId}
+        entryId={link.entryId}
+        categories={categories}
+        onPreview={onPreview}
+      />
+      <div className="row">
+        {onPreview && (
+          <button className="quiet-button" onClick={() => onPreview(link.entryId!)}>
+            Keep beside writing
           </button>
-        </>
-      )}
+        )}
+        <button className="quiet-button" onClick={() => onOpen(link.entryId!)}>
+          Open {link.label}
+        </button>
+      </div>
     </div>
   );
 }
-
 export function ChapterEditor({
   locked = false,
   initialArea = "manuscript",
@@ -130,6 +70,7 @@ export function ChapterEditor({
   onEntry,
   positions,
   onFindRole,
+  onPreview,
 }: {
   locked?: boolean;
   initialArea?: DocumentArea;
@@ -142,6 +83,7 @@ export function ChapterEditor({
   onBack: () => void;
   onEntry: (id: string) => void;
   onFindRole?: (role: StoryRole) => void;
+  onPreview?: (id: string) => void;
   positions: Record<string, WritingPosition>;
 }) {
   const chapter = useChapter(projectId, initial, onChanged);
@@ -512,7 +454,13 @@ export function ChapterEditor({
                     </small>
                   </summary>
                   {contextOpen && expandedLinks.includes(link.id) && link.entryId && (
-                    <EntryPreview projectId={projectId} link={link} onOpen={onEntry} />
+                    <EntryPreview
+                      projectId={projectId}
+                      link={link}
+                      onOpen={onEntry}
+                      onPreview={onPreview}
+                      categories={categories}
+                    />
                   )}
                 </details>
                 <button

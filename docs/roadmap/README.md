@@ -11,7 +11,7 @@ Prepared on 7 October 2026 against `main` at `7da49ea`, the merge of PR #29 inco
 3. Check its [open decisions](DECISIONS.md). Proposed defaults are not approved behavior.
 4. Implement and verify that slice, open a PR, and update its status here. Follow the author's current merge authorization in the session instructions.
 
-The ready foundation slices have been consolidated in PRs #31–41 under the author's 12 October merge authorization. PR #38 is the final integration step. Review the [October delivery record](SESSION_2026_10.md), fetch current `main` after that PR lands, then perform W14a native Windows acceptance. Choose only the next necessary product decision from the register before starting a gated workload.
+The ready foundation slices were consolidated in PRs #31–41 under the author's 12 October merge authorization; PR #38 landed at `047ee7a`. Review the [October delivery record](SESSION_2026_10.md) and fetch current `main`. On 13 October the author prioritized making the workspace feel more creative: the [creative workspace follow-up](../milestones/CREATIVE_WORKSPACE_VERIFICATION.md) brings Entry writing forward, adds shared references beside writing, and captures ideas without structural setup. W14a native Windows acceptance remains outstanding. Choose only the next necessary product decision from the register before starting a gated workload.
 
 ## Recommended order
 
@@ -66,5 +66,6 @@ Use the [October delivery and integration record](SESSION_2026_10.md) for the PR
 - W09a: [pins and recents](../milestones/WORKSPACE_PINS_VERIFICATION.md). Tabs and automatic restart restoration remain separate.
 - W07a: [Explore foundation](../milestones/EXPLORE_FOUNDATION_VERIFICATION.md). Later operators, saved views and Tag/Status filters remain separate.
 - W10a: [Markdown export](../milestones/MANUSCRIPT_EXPORT_VERIFICATION.md), under approved D07. Word/EPUB and writing history remain separate.
+- Creative workspace follow-up: [scope, verification and exact files](../milestones/CREATIVE_WORKSPACE_VERIFICATION.md). Extends W03 and existing Chapter/navigation UI without changing the schema or opening deferred feature gates. Native interaction remains unverified.
 
 Next: W14a acceptance of the combined desktop app using disposable Projects. A completed foundation slice does not complete its entire workload.

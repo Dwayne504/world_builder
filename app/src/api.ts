@@ -263,12 +263,14 @@ export function createEntry(
   authoredName?: string,
   categoryId?: string,
   typeId?: string,
+  initialDescription?: string,
 ): Promise<Entry> {
   return call("create_entry", {
     projectId,
     authoredName: authoredName || null,
     categoryId: categoryId || null,
     typeId: typeId || null,
+    ...(initialDescription === undefined ? {} : { initialDescription }),
   });
 }
 

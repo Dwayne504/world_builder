@@ -65,8 +65,17 @@ export function AppHelp() {
           </dd>
           <dt>Quick creation</dt>
           <dd>
-            Use Add Entry, Add field, Add relationship, New Chapter, or Add occurrence beside your
-            work. You can create missing Categories and Types while adding an Entry.
+            Edit → Entry → Capture idea saves a thought as an uncategorized Entry. Write first;
+            organize it later. Use Add Entry, Add field, Add relationship, New Chapter, or Add
+            occurrence beside your work. You can create missing Categories and Types while adding an
+            Entry.
+          </dd>
+          <dt>Writing and references</dt>
+          <dd>
+            Write directly in an Entry’s description and fold Facts &amp; connections away when you
+            want to concentrate. Connected Entries open beside your current page. In a Chapter’s
+            linked Entry preview, choose Keep beside writing. Escape closes the reference; Open
+            Entry for editing switches pages after protecting current drafts.
           </dd>
           <dt>Saving</dt>
           <dd>
